@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>书匠 · AI 长篇小说创作台</title>
+<link rel="stylesheet" href="/style.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234a7dff'/><path d='M9 8h9a4 4 0 0 1 4 4v12H13a4 4 0 0 0-4 4z' fill='none' stroke='white' stroke-width='2' stroke-linejoin='round'/></svg>" />
+</head>
+<body data-theme="dark">
+
+<!-- ================= 图标库（线性图标，stroke 1.6，24 网格） ================= -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H19v3H6.5A2.5 2.5 0 0 1 4 20.5Z"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M15.2 4.3 19.7 8.8 8.5 20H4v-4.5z"/><path d="M13.4 6.1 17.9 10.6"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3.5 12.5 8.5 4.7 8.5-4.7"/><path d="m3.5 16.8 8.5 4.7 8.5-4.7"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6h.09A1.7 1.7 0 0 0 10 3.05V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.92z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m8 8 4-4 4 4"/><path d="M12 4v12"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m8 12 4 4 4-4"/><path d="M12 16V4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
+  <symbol id="i-chev-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
+  <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5 13.9 9l5.6 1.9-5.6 1.9L12 18.4l-1.9-5.6L4.5 11 10.1 9z"/><path d="M18.5 4v3M17 5.5h3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 5 5L19.5 7"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5.5A1.5 1.5 0 0 0 13.5 4H6a2 2 0 0 0-2 2v7.5A1.5 1.5 0 0 0 5.5 15"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-indent" viewBox="0 0 24 24"><path d="M4 6h16M9 12h11M9 18h11"/><path d="m4 10 3 2-3 2z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-13.7-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 13.7 4.9L20 16"/><path d="M20 20v-4h-4"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v6c0 4.2 2.9 7.7 7 9 4.1-1.3 7-4.8 7-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-stamp" viewBox="0 0 24 24"><path d="M9 3h6v4.5a3 3 0 0 0 1.2 2.4A3.5 3.5 0 0 1 17.5 13h-11A3.5 3.5 0 0 1 7.8 9.9 3 3 0 0 0 9 7.5z"/><path d="M5 17h14v4H5z"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.2a2 2 0 0 1 1.5.7l1 1.3h7.3A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M10.3 4.3 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 16.5v.5"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h13"/><path d="m13 6 6 6-6 6"/></symbol>
+  <symbol id="i-book-open" viewBox="0 0 24 24"><path d="M12 6.5C10.5 5 8.3 4.3 4.5 4.3v13.4c3.8 0 6 .7 7.5 2.3 1.5-1.6 3.7-2.3 7.5-2.3V4.3c-3.8 0-6 .7-7.5 2.2Z"/><path d="M12 6.5V20"/></symbol>
+</svg>
+
+<div class="app">
+
+  <!-- ================= 左侧导航 ================= -->
+  <aside class="rail">
+    <button class="rail-logo" id="brandHome" title="书匠 · 回到书架">
+      <svg class="ico"><use href="#i-book-open" /></svg>
+    </button>
+    <nav class="rail-nav" id="topnav">
+      <button class="tab" data-view="shelf"><svg class="ico"><use href="#i-book" /></svg><span>书架</span></button>
+      <button class="tab" data-view="studio"><svg class="ico"><use href="#i-pen" /></svg><span>工作台</span></button>
+      <button class="tab" data-view="bible"><svg class="ico"><use href="#i-layers" /></svg><span>设定库</span></button>
+      <button class="tab rail-bottom" data-view="settings"><svg class="ico"><use href="#i-settings" /></svg><span>设置</span></button>
+    </nav>
+  </aside>
+
+  <div class="shell">
+    <!-- ================= 顶栏 ================= -->
+    <header class="topbar">
+      <button class="cmdk-btn" id="cmdkBtn" title="命令面板">
+        <svg class="ico"><use href="#i-search" /></svg>
+        <span>搜索命令、作品、章节…</span>
+        <kbd>Ctrl</kbd><kbd>K</kbd>
+      </button>
+      <div class="topbar-mid" id="topbarMid"></div>
+      <div class="topbar-right">
+        <span class="save-pill" id="savePill">已保存</span>
+        <button class="icon-btn" id="themeBtn" title="切换明暗主题"></button>
+      </div>
+    </header>
+
+    <main id="main">
+
+      <!-- ==================== 书架 ==================== -->
+      <section class="view" id="view-shelf">
+        <div class="page-head">
+          <div>
+            <h1>我的书架</h1>
+            <p class="page-sub" id="shelfSub">所有作品都保存在本机，不上传云端</p>
+          </div>
+          <div class="page-actions">
+            <div class="field-inline">
+              <svg class="ico"><use href="#i-search" /></svg>
+              <input id="shelfSearch" placeholder="搜索书名 / 类型" />
+            </div>
+            <button class="btn btn-primary" id="newNovelBtn"><svg class="ico"><use href="#i-plus" /></svg>新建作品</button>
+          </div>
+        </div>
+        <div class="shelf-grid" id="shelfGrid"></div>
+        <div class="empty-state" id="shelfEmpty" hidden>
+          <svg class="empty-ico"><use href="#i-book-open" /></svg>
+          <h3>书架还空着</h3>
+          <p>新建一部作品，先写一句话故事，再让 AI 帮你把大纲铺开。</p>
+          <button class="btn btn-primary" id="emptyNewBtn"><svg class="ico"><use href="#i-plus" /></svg>新建作品</button>
+        </div>
+      </section>
+
+      <!-- ==================== 工作台 ==================== -->
+      <section class="view" id="view-studio">
+        <div class="studio">
+
+          <!-- 章节栏 -->
+          <aside class="pane-chapters">
+            <div class="pane-head">
+              <span class="pane-title">章节</span>
+              <div class="pane-tools">
+                <button class="icon-btn sm" id="addChapterBtn" title="新建章节"><svg class="ico"><use href="#i-plus" /></svg></button>
+                <button class="icon-btn sm" id="importBtn" title="导入已有文稿"><svg class="ico"><use href="#i-upload" /></svg></button>
+              </div>
+            </div>
+            <div class="chapter-meta" id="chapterMeta"></div>
+            <ul class="chapter-list" id="chapterList"></ul>
+          </aside>
+
+          <!-- 编辑区 -->
+          <section class="pane-editor">
+            <div class="editor-head">
+              <input id="chTitle" class="ch-title" placeholder="章节标题" />
+              <div class="pane-tools">
+                <span class="chip" id="chWords">0 字</span>
+                <button class="icon-btn sm" id="formatBtn" title="一键排版：段落首行缩进两格"><svg class="ico"><use href="#i-indent" /></svg></button>
+                <button class="icon-btn sm" id="previewBtn" title="预览本章"><svg class="ico"><use href="#i-eye" /></svg></button>
+              </div>
+            </div>
+            <div class="editor-wrap">
+              <textarea id="chContent" class="editor" spellcheck="false" placeholder="在这里写正文，或者用右侧助手生成……&#10;&#10;选中任意段落后会弹出快捷菜单：润色 / 扩写 / 精简 / 改写。"></textarea>
+              <div class="sel-toolbar" id="selToolbar" hidden>
+                <button data-op="polish">润色</button>
+                <button data-op="expand">扩写</button>
+                <button data-op="shorten">精简</button>
+                <button data-op="rewrite">改写</button>
+                <button data-op="custom">按指令…</button>
+              </div>
+              <div class="editor-empty" id="editorEmpty" hidden>
+                <svg class="empty-ico"><use href="#i-pen" /></svg>
+                <h3 id="editorEmptyTitle"></h3>
+                <p id="editorEmptyText"></p>
+                <button class="btn btn-primary" id="editorEmptyBtn" hidden><svg class="ico"><use href="#i-plus" /></svg>新建第一章</button>
+              </div>
+            </div>
+            <div class="editor-foot">
+              <span id="footInfo"></span>
+              <span class="keyhints">
+                <span><kbd>Ctrl</kbd><kbd>S</kbd> 保存</span>
+                <span><kbd>Ctrl</kbd><kbd>↵</kbd> 续写</span>
+                <span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>↵</kbd> 生成本章</span>
+              </span>
+            </div>
+          </section>
+
+          <!-- 助手栏 -->
+          <aside class="pane-assist">
+            <div class="segmented" id="assistTabs">
+              <button data-tab="write" class="on">写作</button>
+              <button data-tab="check">检查</button>
+              <button data-tab="context">资料</button>
+            </div>
+
+            <div class="assist-body">
+              <!-- 写作 -->
+              <div class="assist-pane on" data-pane="write">
+                <div class="card">
+                  <label class="field-label">本章要求<span class="field-hint">留空则按章纲推进</span></label>
+                  <textarea id="genReq" class="textarea" rows="3" placeholder="例：主角第一次进宗门大比，遇上宿敌，只暴露一半实力，结尾被长老注意到。"></textarea>
+                  <div class="field-row">
+                    <label class="field-label">目标字数<input id="genWords" class="input" type="number" value="3000" min="300" step="100" /></label>
+                    <label class="field-label">模型<input id="genModel" class="input" placeholder="默认" /></label>
+                  </div>
+                  <div class="btn-row">
+                    <button class="btn btn-primary btn-block" id="genChapterBtn"><svg class="ico"><use href="#i-spark" /></svg>生成本章</button>
+                  </div>
+                  <div class="btn-row">
+                    <button class="btn" id="contBtn"><svg class="ico"><use href="#i-pen" /></svg>续写</button>
+                    <button class="btn btn-danger-ghost" id="stopBtn" hidden><svg class="ico"><use href="#i-stop" /></svg>停止</button>
+                  </div>
+                  <div class="btn-row wrap">
+                    <button class="btn btn-sm btn-text" data-quick="memory"><svg class="ico"><use href="#i-refresh" /></svg>存章节记忆</button>
+                    <button class="btn btn-sm btn-text" data-quick="summarize">生成概要</button>
+                    <button class="btn btn-sm btn-text" data-quick="titles">起名</button>
+                  </div>
+                </div>
+
+                <div class="section-head">
+                  <span>输出</span>
+                  <span class="dim-text" id="outInfo"></span>
+                </div>
+                <div class="output" id="outBox"></div>
+                <div class="btn-row wrap" id="outActions" hidden>
+                  <button class="btn btn-sm btn-primary" id="applyAppend">追加到正文</button>
+                  <button class="btn btn-sm" id="applyReplace">替换正文</button>
+                  <button class="btn btn-sm" id="applyInsert">插入光标处</button>
+                  <button class="btn btn-sm btn-text" id="copyOut"><svg class="ico"><use href="#i-copy" /></svg>复制</button>
+                  <button class="btn btn-sm btn-text" id="clearOut">清空</button>
+                </div>
+              </div>
+
+              <!-- 检查 -->
+              <div class="assist-pane" data-pane="check">
+                <div class="card">
+                  <label class="field-label">检查范围</label>
+                  <select id="checkScope" class="select">
+                    <option value="current">当前章</option>
+                    <option value="last3">最近 3 章</option>
+                    <option value="last5">最近 5 章</option>
+                    <option value="all">全书（自动截断）</option>
+                    <option value="bible">只查设定库自相矛盾</option>
+                  </select>
+                  <div class="btn-row">
+                    <button class="btn btn-primary" id="consistencyBtn"><svg class="ico"><use href="#i-shield" /></svg>一致性检查</button>
+                    <button class="btn" id="reviewBtn"><svg class="ico"><use href="#i-stamp" /></svg>责编评审</button>
+                  </div>
+                  <div class="btn-row">
+                    <button class="btn btn-danger-ghost btn-block" id="stopBtn2" hidden><svg class="ico"><use href="#i-stop" /></svg>停止</button>
+                  </div>
+                </div>
+                <div class="section-head"><span>结果</span></div>
+                <div class="output output-plain" id="checkBox"></div>
+              </div>
+
+              <!-- 资料 -->
+              <div class="assist-pane" data-pane="context">
+                <div class="tip">
+                  <svg class="ico"><use href="#i-info" /></svg>
+                  <span>每次生成都会按相关度自动挑选设定与前情喂给模型。这里能看到实际发出去的内容，也可以改完再发。</span>
+                </div>
+                <div class="btn-row">
+                  <button class="btn" id="previewCtxBtn"><svg class="ico"><use href="#i-eye" /></svg>查看本次上下文</button>
+                  <button class="btn btn-primary" id="sendEditedBtn" hidden><svg class="ico"><use href="#i-spark" /></svg>按此内容生成</button>
+                </div>
+                <div class="ctx-stats" id="ctxStats"></div>
+                <pre class="ctx-preview" id="ctxPreview"></pre>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ==================== 设定库 ==================== -->
+      <section class="view" id="view-bible">
+        <div class="page-head page-head-tabs">
+          <div class="segmented lg" id="bibleTabs">
+            <button data-bible="outline" class="on">大纲</button>
+            <button data-bible="characters">人物</button>
+            <button data-bible="world">世界观</button>
+            <button data-bible="timeline">时间线</button>
+            <button data-bible="style">文风与规则</button>
+          </div>
+        </div>
+        <div class="page-body" id="bibleBody"></div>
+      </section>
+
+      <!-- ==================== 设置 ==================== -->
+      <section class="view" id="view-settings">
+        <div class="page-head">
+          <div>
+            <h1>设置</h1>
+            <p class="page-sub">接口、模型与写作偏好</p>
+          </div>
+        </div>
+        <div class="page-body narrow">
+
+          <div class="card">
+            <div class="card-head">
+              <h2>模型服务</h2>
+              <span class="tag tag-info">OpenAI 兼容</span>
+            </div>
+            <p class="desc">填任意兼容 OpenAI 接口的服务：DeepSeek、通义、Kimi、智谱、Ollama 本地、各种中转站都可以。密钥只保存在本机 <code>data/config.json</code>。</p>
+            <div id="providerList"></div>
+            <div class="btn-row"><button class="btn" id="addProviderBtn"><svg class="ico"><use href="#i-plus" /></svg>添加服务商</button></div>
+            <div class="preset-row" id="presetRow"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>生成参数</h2></div>
+            <div class="field-grid">
+              <label class="field-label">默认模型<select id="cfgModel" class="select"></select></label>
+              <label class="field-label">单次最大输出 tokens<input id="cfgMaxTokens" class="input" type="number" min="256" step="256" /></label>
+              <label class="field-label">上下文预算（字符）<input id="cfgBudget" class="input" type="number" min="4000" step="1000" /></label>
+              <label class="field-label">温度 <span class="dim-text" id="tempVal">0.85</span><input id="cfgTemp" type="range" min="0" max="1.5" step="0.05" /></label>
+            </div>
+            <details class="details">
+              <summary>分角色指定模型（可选）</summary>
+              <div class="field-grid three">
+                <label class="field-label">写作 / 润色<input id="roleWrite" class="input" placeholder="留空 = 默认" /></label>
+                <label class="field-label">记忆 / 一致性<input id="roleSummary" class="input" placeholder="留空 = 默认" /></label>
+                <label class="field-label">责编评审<input id="roleReview" class="input" placeholder="留空 = 默认" /></label>
+              </div>
+            </details>
+            <div class="btn-row">
+              <button class="btn btn-primary" id="saveCfgBtn">保存设置</button>
+              <span class="dim-text" id="cfgMsg"></span>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>拆书 · 提取文风</h2></div>
+            <p class="desc">粘贴一段你喜欢的文字，让模型提炼出可直接用于写作的文风规则，再一键写进当前作品的文风档案。</p>
+            <textarea id="styleSample" class="textarea" rows="6" placeholder="粘贴样本文本（几千字效果最好）……"></textarea>
+            <div class="btn-row">
+              <button class="btn" id="analyzeStyleBtn"><svg class="ico"><use href="#i-spark" /></svg>提取文风</button>
+              <button class="btn btn-primary" id="applyStyleBtn" hidden>写入当前作品</button>
+            </div>
+            <div class="output output-plain" id="styleBox"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>数据</h2></div>
+            <p class="desc">所有作品存放在项目内的 <code>data/novels/</code>，一部作品一个 JSON 文件，复制走就是备份。</p>
+            <div class="btn-row">
+              <button class="btn" id="openDataBtn"><svg class="ico"><use href="#i-folder" /></svg>查看数据位置</button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- ================= 命令面板 ================= -->
+<div class="cmdk-mask" id="cmdkMask" hidden>
+  <div class="cmdk" role="dialog" aria-label="命令面板">
+    <div class="cmdk-top">
+      <svg class="ico"><use href="#i-search" /></svg>
+      <input id="cmdkInput" placeholder="输入命令、作品名或章节名…" autocomplete="off" />
+      <kbd>Esc</kbd>
+    </div>
+    <ul class="cmdk-list" id="cmdkList"></ul>
+    <div class="cmdk-foot">
+      <span><kbd>↑</kbd><kbd>↓</kbd> 选择</span>
+      <span><kbd>↵</kbd> 执行</span>
+      <span><kbd>Esc</kbd> 关闭</span>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 弹窗 / 提示 / 对比面板 ================= -->
+<div class="modal-mask" id="modalMask" hidden>
+  <div class="modal" id="modal"></div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<div class="diff-panel" id="diffPanel" hidden>
+  <div class="diff-head">
+    <span class="diff-title" id="diffTitle">改写结果</span>
+    <button class="icon-btn sm" id="diffClose"><svg class="ico"><use href="#i-x" /></svg></button>
+  </div>
+  <div class="diff-body">
+    <div class="diff-col"><div class="diff-lbl">原文</div><div class="diff-text" id="diffOld"></div></div>
+    <div class="diff-col"><div class="diff-lbl">新文</div><div class="diff-text" id="diffNew"></div></div>
+  </div>
+  <div class="diff-foot">
+    <button class="btn btn-primary" id="diffAccept"><svg class="ico"><use href="#i-check" /></svg>接受替换</button>
+    <button class="btn" id="diffRetry"><svg class="ico"><use href="#i-refresh" /></svg>再生成一次</button>
+    <button class="btn btn-text" id="diffReject">丢弃</button>
+  </div>
+</div>
+
+<script src="/app.js" type="module"></script>
+</body>
+</html>

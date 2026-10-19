@@ -1,0 +1,625 @@
+// 书匠 · AI 长篇小说创作台 —— 零依赖本地服务器
+// 只监听 127.0.0.1，不对外暴露；所有数据落在项目内 data/ 目录。
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { exec } from 'node:child_process';
+import {
+  ROOT, DATA_DIR, ensureDirs, loadConfig, saveConfig, maskKey,
+  listNovels, createNovel, getNovel, saveNovel, deleteNovel, newId, countWords,
+} from './store.js';
+import { buildTask, TASKS } from './prompts.js';
+import { buildContext, collectScopeText, packSummaryLines } from './context.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const WEB_DIR = path.join(ROOT, 'web');
+const PORT = Number(process.env.SHU_PORT || 8848);
+const HOST = '127.0.0.1';
+
+/* ------------------------------------------------------------------ */
+/* 基础工具                                                            */
+/* ------------------------------------------------------------------ */
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.md': 'text/markdown; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+};
+
+function sendJson(res, code, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(code, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(body),
+    'Cache-Control': 'no-store',
+  });
+  res.end(body);
+}
+
+function sendText(res, code, text, type = 'text/plain; charset=utf-8') {
+  res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+  res.end(text);
+}
+
+function readBody(req, limit = 40 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) {
+        reject(new Error('请求体过大'));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      if (!raw) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        reject(new Error('JSON 解析失败'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* 模型服务商                                                          */
+/* ------------------------------------------------------------------ */
+
+function normalizeBaseUrl(url) {
+  let u = String(url || '').trim().replace(/\/+$/, '');
+  if (!u) return '';
+  if (!/^https?:\/\//i.test(u)) u = `https://${u}`;
+  return u;
+}
+
+function completionsUrl(baseUrl) {
+  const u = normalizeBaseUrl(baseUrl);
+  if (/\/chat\/completions$/.test(u)) return u;
+  return `${u}/chat/completions`;
+}
+
+function resolveProvider(cfg, providerId) {
+  const list = cfg.providers || [];
+  const p = list.find((x) => x.id === providerId) || list.find((x) => x.id === cfg.activeProviderId) || list[0];
+  if (!p) throw new Error('还没有配置模型服务商，请先到「设置」里填写 Base URL 与 API Key。');
+  if (!p.apiKey) throw new Error(`服务商「${p.name || p.baseUrl}」还没有填写 API Key。`);
+  return p;
+}
+
+const ROLE_OF_TASK = {
+  outline: 'write', characters: 'write', worldview: 'write', chapter: 'write',
+  continue: 'write', polish: 'write', expand: 'write', shorten: 'write',
+  rewrite: 'write', custom: 'write', titles: 'write', style: 'write',
+  memory: 'summary', consistency: 'summary', review: 'review',
+};
+
+function resolveModel(cfg, provider, task) {
+  const role = ROLE_OF_TASK[task] || 'write';
+  return (cfg.roleModels && cfg.roleModels[role]) || cfg.model || (provider.models || [])[0] || '';
+}
+
+/* ------------------------------------------------------------------ */
+/* 任务上下文准备                                                      */
+/* ------------------------------------------------------------------ */
+
+function prepareTask(cfg, body) {
+  const { task, novelId, chapterId, payload = {} } = body;
+  if (!task) throw new Error('缺少 task');
+  if (!TASKS[task]) throw new Error(`未知任务：${task}`);
+
+  let novel = null;
+  let pack = [];
+  let stats = {};
+  let prevTail = '';
+
+  if (novelId) {
+    novel = getNovel(novelId);
+    if (!novel) throw new Error('找不到这部作品');
+    if (task !== 'style' && task !== 'custom') {
+      const built = buildContext(novel, { chapterId, extraQuery: payload.extraQuery, budget: novel.meta?.contextBudget });
+      pack = built.pack;
+      stats = built.stats;
+      prevTail = built.prevTail;
+    }
+  }
+
+  const chapter = novel && chapterId ? (novel.chapters || []).find((c) => c.id === chapterId) : null;
+
+  // 需要正文范围的任务（一致性检查 / 责编评审）
+  let scopeText = payload.scopeText || '';
+  if ((task === 'consistency' || task === 'review') && novel && !scopeText) {
+    scopeText = collectScopeText(novel, {
+      chapterIds: payload.chapterIds,
+      from: payload.from,
+      to: payload.to,
+      maxChars: payload.maxChars || 35000,
+    });
+  }
+
+  const ctx = {
+    novel,
+    chapter,
+    pack,
+    prevTail,
+    payload: { ...payload, scopeText, prevTail },
+  };
+  const built = buildTask(task, ctx);
+  return { built, novel, stats, pack, chapter };
+}
+
+/* ------------------------------------------------------------------ */
+/* 调用上游大模型                                                      */
+/* ------------------------------------------------------------------ */
+
+async function callUpstream({ cfg, provider, model, messages, temperature, maxTokens, stream, signal }) {
+  const url = completionsUrl(provider.baseUrl);
+  const modelName = model || provider.models?.[0] || '';
+  if (!modelName) throw new Error('还没有选择模型');
+  const body = {
+    model: modelName,
+    messages,
+    temperature: Number.isFinite(temperature) ? temperature : 0.85,
+    max_tokens: Number.isFinite(maxTokens) ? maxTokens : 4096,
+    stream: !!stream,
+  };
+  if (provider.extraBody && typeof provider.extraBody === 'object') Object.assign(body, provider.extraBody);
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${provider.apiKey}`,
+      ...(provider.headers || {}),
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  return { resp, modelName, url };
+}
+
+async function upstreamErrorText(resp) {
+  try {
+    const txt = await resp.text();
+    try {
+      const j = JSON.parse(txt);
+      return j?.error?.message || j?.message || txt.slice(0, 600);
+    } catch {
+      return txt.slice(0, 600);
+    }
+  } catch {
+    return `HTTP ${resp.status}`;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 路由                                                                */
+/* ------------------------------------------------------------------ */
+
+async function handleApi(req, res, url) {
+  const { pathname } = url;
+  const method = req.method.toUpperCase();
+  const seg = pathname.split('/').filter(Boolean); // ['api', 'novels', ':id', ...]
+
+  /* --- 配置 --- */
+  if (seg[1] === 'config' && seg.length === 2) {
+    if (method === 'GET') {
+      const cfg = loadConfig();
+      return sendJson(res, 200, {
+        ...cfg,
+        providers: (cfg.providers || []).map((p) => ({ ...p, apiKey: '', apiKeyMasked: maskKey(p.apiKey), apiKeySet: !!p.apiKey })),
+      });
+    }
+    if (method === 'POST') {
+      const incoming = await readBody(req);
+      const cfg = loadConfig();
+      const oldById = new Map((cfg.providers || []).map((p) => [p.id, p]));
+      // 只有显式传了 providers 才动服务商列表。
+      // 否则局部更新（例如切主题只发 { ui: { theme } }）会把 Base URL 与 API Key 一起清空。
+      const providers = Array.isArray(incoming.providers)
+        ? incoming.providers.map((p) => {
+            const prev = oldById.get(p.id);
+            let apiKey = p.apiKey;
+            if (apiKey === undefined || apiKey === null || apiKey === '') apiKey = prev?.apiKey || '';
+            if (apiKey === '__CLEAR__') apiKey = '';
+            return { ...prev, ...p, id: p.id || newId('p'), apiKey };
+          })
+        : (cfg.providers || []);
+      const next = {
+        ...cfg,
+        ...incoming,
+        providers,
+        roleModels: { ...(cfg.roleModels || {}), ...(incoming.roleModels || {}) },
+        ui: { ...(cfg.ui || {}), ...(incoming.ui || {}) },
+      };
+      delete next.apiKeyMasked;
+      delete next.apiKeySet;
+      saveConfig(next);
+      return sendJson(res, 200, { ok: true });
+    }
+  }
+
+  // 测试连通性 / 拉取模型列表
+  if (seg[1] === 'config' && seg[2] === 'models' && method === 'POST') {
+    const body = await readBody(req);
+    const cfg = loadConfig();
+    let provider = { ...(cfg.providers || []).find((p) => p.id === body.providerId) };
+    if (body.baseUrl) provider.baseUrl = body.baseUrl;
+    if (body.apiKey) provider.apiKey = body.apiKey;
+    if (!provider.apiKey) {
+      const prev = (cfg.providers || []).find((p) => p.id === body.providerId);
+      provider.apiKey = prev?.apiKey || '';
+    }
+    if (!provider.baseUrl) return sendJson(res, 400, { ok: false, error: '请先填写 Base URL' });
+    if (!provider.apiKey) return sendJson(res, 400, { ok: false, error: '请先填写 API Key' });
+    try {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 20000);
+      const r = await fetch(`${normalizeBaseUrl(provider.baseUrl)}/models`, {
+        headers: { Authorization: `Bearer ${provider.apiKey}` },
+        signal: ac.signal,
+      });
+      clearTimeout(t);
+      if (!r.ok) return sendJson(res, 200, { ok: false, error: await upstreamErrorText(r) });
+      const j = await r.json();
+      const ids = (j.data || j.models || []).map((m) => m.id || m.name).filter(Boolean).sort();
+      return sendJson(res, 200, { ok: true, models: ids });
+    } catch (err) {
+      return sendJson(res, 200, { ok: false, error: `连接失败：${err.message}` });
+    }
+  }
+
+  /* --- 作品列表 --- */
+  if (seg[1] === 'novels' && seg.length === 2) {
+    if (method === 'GET') return sendJson(res, 200, { novels: listNovels() });
+    if (method === 'POST') {
+      const body = await readBody(req);
+      const n = createNovel(body);
+      return sendJson(res, 200, { novel: n });
+    }
+  }
+
+  /* --- 单部作品 --- */
+  if (seg[1] === 'novels' && seg[2]) {
+    const id = seg[2];
+
+    if (method === 'GET' && seg.length === 3) {
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      return sendJson(res, 200, { novel: n });
+    }
+    if (method === 'DELETE' && seg.length === 3) {
+      deleteNovel(id);
+      return sendJson(res, 200, { ok: true });
+    }
+    if (method === 'PUT' && seg.length === 3) {
+      const body = await readBody(req);
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      const merged = {
+        ...n,
+        ...body,
+        id: n.id,
+        createdAt: n.createdAt,
+        meta: { ...n.meta, ...(body.meta || {}) },
+        bible: { ...n.bible, ...(body.bible || {}) },
+        outline: { ...n.outline, ...(body.outline || {}) },
+        chapters: body.chapters || n.chapters,
+      };
+      return sendJson(res, 200, { novel: saveNovel(merged) });
+    }
+
+    // 章节集合
+    if (seg[3] === 'chapters') {
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+
+      if (method === 'POST' && seg.length === 4) {
+        const body = await readBody(req);
+        const ch = {
+          id: newId('c'),
+          title: body.title || `第 ${n.chapters.length + 1} 章`,
+          summary: body.summary || '',
+          content: body.content || '',
+          status: 'draft',
+          outline: body.outline || null,
+          memory: null,
+          createdAt: Date.now(),
+        };
+        if (typeof body.at === 'number' && body.at >= 0 && body.at <= n.chapters.length) n.chapters.splice(body.at, 0, ch);
+        else n.chapters.push(ch);
+        saveNovel(n);
+        return sendJson(res, 200, { chapter: ch, novel: n });
+      }
+
+      if (method === 'PUT' && seg.length === 5) {
+        const cid = seg[4];
+        const body = await readBody(req);
+        const i = n.chapters.findIndex((c) => c.id === cid);
+        if (i < 0) return sendJson(res, 404, { error: '章节不存在' });
+        n.chapters[i] = { ...n.chapters[i], ...body, id: cid, createdAt: n.chapters[i].createdAt };
+        saveNovel(n);
+        return sendJson(res, 200, { chapter: n.chapters[i] });
+      }
+
+      // 与 PUT 等价：供 navigator.sendBeacon（只支持 POST）在页面关闭前兜底保存
+      if (method === 'POST' && seg.length === 5) {
+        const cid = seg[4];
+        const body = await readBody(req);
+        const i = n.chapters.findIndex((c) => c.id === cid);
+        if (i < 0) return sendJson(res, 404, { error: '章节不存在' });
+        n.chapters[i] = { ...n.chapters[i], ...body, id: cid, createdAt: n.chapters[i].createdAt };
+        saveNovel(n);
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (method === 'DELETE' && seg.length === 5) {
+        const cid = seg[4];
+        n.chapters = n.chapters.filter((c) => c.id !== cid);
+        saveNovel(n);
+        return sendJson(res, 200, { novel: n });
+      }
+
+      if (method === 'POST' && seg[4] === 'reorder') {
+        const body = await readBody(req);
+        const order = body.order || [];
+        const map = new Map(n.chapters.map((c) => [c.id, c]));
+        const next = order.map((cid) => map.get(cid)).filter(Boolean);
+        n.chapters.forEach((c) => {
+          if (!order.includes(c.id)) next.push(c);
+        });
+        n.chapters = next;
+        saveNovel(n);
+        return sendJson(res, 200, { novel: n });
+      }
+    }
+
+    // 导出
+    if (seg[3] === 'export' && method === 'GET') {
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      const format = url.searchParams.get('format') === 'md' ? 'md' : 'txt';
+      const cid = url.searchParams.get('chapterId');
+      const list = cid ? n.chapters.filter((c) => c.id === cid) : n.chapters;
+      const text = format === 'md' ? exportMarkdown(n, list) : exportTxt(n, list);
+      const name = `${safeName(n.title)}${cid && list[0] ? `_第${list[0].no}章` : ''}.${format}`;
+      res.writeHead(200, {
+        'Content-Type': format === 'md' ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8',
+        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+        'Cache-Control': 'no-store',
+      });
+      return res.end('\uFEFF' + text);
+    }
+
+    // 导入已有文稿：按“第X章”自动切分
+    if (seg[3] === 'import' && method === 'POST') {
+      const body = await readBody(req);
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      const parts = splitChapters(body.text || '');
+      const created = parts.map((p) => ({
+        id: newId('c'),
+        title: p.title,
+        summary: '',
+        content: p.content,
+        status: 'draft',
+        memory: null,
+        createdAt: Date.now(),
+      }));
+      n.chapters.push(...created);
+      saveNovel(n);
+      return sendJson(res, 200, { imported: created.length, novel: n });
+    }
+  }
+
+  /* --- 上下文预览 --- */
+  if (seg[1] === 'context' && method === 'POST') {
+    const body = await readBody(req);
+    const { built, stats, pack } = prepareTask(loadConfig(), body);
+    return sendJson(res, 200, {
+      messages: built.messages,
+      expect: built.expect,
+      temperature: built.temperature,
+      maxTokens: built.maxTokens,
+      stats: { ...stats, lines: packSummaryLines(pack), packChars: (pack || []).join('').length },
+    });
+  }
+
+  /* --- 流式生成 --- */
+  if (seg[1] === 'ai' && seg[2] === 'stream' && method === 'POST') {
+    const body = await readBody(req);
+    const cfg = loadConfig();
+    let messages = body.messages;
+    let temperature = body.temperature;
+    let maxTokens = body.maxTokens;
+    let meta = {};
+
+    if (!messages) {
+      const prepared = prepareTask(cfg, body);
+      messages = prepared.built.messages;
+      temperature = prepared.built.temperature;
+      maxTokens = prepared.built.maxTokens;
+      meta = { stats: prepared.stats, lines: packSummaryLines(prepared.pack) };
+    }
+
+    const provider = resolveProvider(cfg, body.providerId);
+    const model = body.model || resolveModel(cfg, provider, body.task || 'chapter');
+    temperature = body.temperature ?? cfg.temperature ?? temperature;
+    maxTokens = body.maxTokens ?? cfg.maxTokens ?? maxTokens;
+
+    const ac = new AbortController();
+    req.on('close', () => ac.abort());
+    let upstream;
+    try {
+      upstream = await callUpstream({ cfg, provider, model, messages, temperature, maxTokens, stream: true, signal: ac.signal });
+    } catch (err) {
+      return sendJson(res, 502, { error: `无法连接模型服务：${err.message}` });
+    }
+    if (!upstream.resp.ok) {
+      const detail = await upstreamErrorText(upstream.resp);
+      return sendJson(res, upstream.resp.status, { error: `模型返回错误（HTTP ${upstream.resp.status}）：${detail}` });
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write(`data: ${JSON.stringify({ shu_meta: { model, provider: provider.name || provider.baseUrl, ...meta } })}\n\n`);
+
+    try {
+      const decoder = new TextDecoder('utf-8');
+      for await (const chunk of upstream.resp.body) {
+        if (res.writableEnded) break;
+        res.write(decoder.decode(chunk, { stream: true }));
+      }
+    } catch (err) {
+      if (!res.writableEnded) res.write(`data: ${JSON.stringify({ shu_error: `生成中断：${err.message}` })}\n\n`);
+    }
+    if (!res.writableEnded) {
+      res.write('data: [DONE]\n\n');
+      res.end();
+    }
+    return;
+  }
+
+  return sendJson(res, 404, { error: '接口不存在' });
+}
+
+/* ------------------------------------------------------------------ */
+/* 导出 / 导入助手                                                     */
+/* ------------------------------------------------------------------ */
+
+function safeName(s) {
+  return String(s || 'novel').replace(/[\\/:*?"<>|\r\n]+/g, '_').slice(0, 60);
+}
+
+function exportTxt(n, chapters) {
+  const head = [`《${n.title}》`, n.author ? `作者：${n.author}` : '', n.genre ? `类型：${n.genre}` : '', n.meta?.logline ? `简介：${n.meta.logline}` : '']
+    .filter(Boolean)
+    .join('\n');
+  const body = chapters.map((c) => `\n\n第${c.no}章 ${c.title}\n\n${(c.content || '').trim()}`).join('\n');
+  return `${head}\n${'-'.repeat(30)}${body}\n`;
+}
+
+function exportMarkdown(n, chapters) {
+  const lines = [`# ${n.title}`];
+  if (n.author) lines.push(`作者：${n.author}`);
+  if (n.genre) lines.push(`类型：${n.genre}`);
+  if (n.meta?.logline) lines.push(`\n> ${n.meta.logline}`);
+  if (n.meta?.synopsis) lines.push(`\n## 作品简介\n\n${n.meta.synopsis}`);
+  lines.push('\n---\n');
+  chapters.forEach((c) => {
+    lines.push(`## 第${c.no}章 ${c.title}\n`);
+    lines.push((c.content || '').trim().split(/\n+/).map((p) => `　　${p}`).join('\n\n'));
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+
+const CHAPTER_RE = /^[ \t　]*第\s*([0-9零一二三四五六七八九十百千两]+)\s*[章节回][ \t　]*([^\n\r]{0,40})$/m;
+
+function splitChapters(text) {
+  const src = String(text || '').replace(/\r\n?/g, '\n').trim();
+  if (!src) return [];
+  const lines = src.split('\n');
+  const marks = [];
+  lines.forEach((line, i) => {
+    if (CHAPTER_RE.test(line.trim())) marks.push({ i, title: line.trim() });
+  });
+  if (!marks.length) {
+    return [{ title: '导入内容', content: src }];
+  }
+  const out = [];
+  const head = lines.slice(0, marks[0].i).join('\n').trim();
+  if (head) out.push({ title: '前言', content: head });
+  marks.forEach((mk, k) => {
+    const end = k + 1 < marks.length ? marks[k + 1].i : lines.length;
+    const body = lines.slice(mk.i + 1, end).join('\n').trim();
+    // 去掉「第X章」标记本身，并顺手吃掉紧跟的分隔符（空格、冒号、顿号、点、破折号等）
+    const title = mk.title.replace(/^第\s*[0-9零一二三四五六七八九十百千两]+\s*[章节回][\s:：、.，,·\-—]*/, '').trim();
+    out.push({ title: title || mk.title, content: body });
+  });
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* 静态文件                                                            */
+/* ------------------------------------------------------------------ */
+
+function serveStatic(req, res, url) {
+  let rel = decodeURIComponent(url.pathname);
+  if (rel === '/' || rel === '') rel = '/index.html';
+  const file = path.join(WEB_DIR, path.normalize(rel).replace(/^([/\\])+/, ''));
+  if (!file.startsWith(WEB_DIR)) return sendText(res, 403, 'Forbidden');
+  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+    // SPA 兜底
+    const idx = path.join(WEB_DIR, 'index.html');
+    if (fs.existsSync(idx)) return sendText(res, 200, fs.readFileSync(idx, 'utf8'), MIME['.html']);
+    return sendText(res, 404, 'Not Found');
+  }
+  const ext = path.extname(file).toLowerCase();
+  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+  res.end(fs.readFileSync(file));
+}
+
+/* ------------------------------------------------------------------ */
+/* 启动                                                                */
+/* ------------------------------------------------------------------ */
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${HOST}:${PORT}`);
+  try {
+    if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
+    return serveStatic(req, res, url);
+  } catch (err) {
+    console.error('[error]', err);
+    if (!res.headersSent) return sendJson(res, 500, { error: err.message || '服务器内部错误' });
+    try { res.end(); } catch {}
+  }
+});
+
+function listen(port, attempt = 0) {
+  server.once('error', (err) => {
+    if (err.code === 'EADDRINUSE' && attempt < 20) {
+      console.log(`端口 ${port} 被占用，尝试 ${port + 1} …`);
+      listen(port + 1, attempt + 1);
+    } else {
+      console.error('启动失败：', err.message);
+      process.exit(1);
+    }
+  });
+  server.listen(port, HOST, () => {
+    ensureDirs();
+    const addr = `http://${HOST}:${port}`;
+    console.log('');
+    console.log('  ╭──────────────────────────────────────────────╮');
+    console.log('  │   书匠 · AI 长篇小说创作台  已启动           │');
+    console.log('  ╰──────────────────────────────────────────────╯');
+    console.log(`   访问地址： ${addr}`);
+    console.log(`   数据目录： ${DATA_DIR}`);
+    console.log('   关闭窗口或按 Ctrl+C 即可停止');
+    console.log('');
+    if (process.env.SHU_NO_OPEN !== '1') {
+      exec(`start "" "${addr}"`, { shell: 'cmd.exe' }, () => {});
+    }
+  });
+}
+
+ensureDirs();
+listen(PORT);

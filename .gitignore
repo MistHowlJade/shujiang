@@ -1,0 +1,8 @@
+# 用户数据（小说正文、API Key）不进版本库
+data/
+# 项目内便携运行时
+tools/
+# 临时文件
+*.tmp
+*.log
+node_modules/
