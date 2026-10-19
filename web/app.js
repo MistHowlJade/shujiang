@@ -361,6 +361,7 @@ function renderStudio() {
     $('#chapterMeta').textContent = '';
     $('#footInfo').textContent = '';
     setEmpty(true, '还没有打开作品', '回「书架」选一部旧作，或者新建一部开始写。', false);
+    histSync();
     renderTopbarActions();
     return;
   }
@@ -408,8 +409,11 @@ function renderStudio() {
   const ch = currentChapter();
   setEmpty(!ch, '这部作品还没有章节', '新建第一章，再让右侧助手按章纲生成正文。', true);
   $('#chTitle').value = ch?.title || '';
-  $('#chContent').value = ch?.content || '';
-  $('#chWords').textContent = `${countWords(ch?.content)} 字`;
+  const taEl = $('#chContent');
+  const nextContent = ch?.content || '';
+  if (taEl.value !== nextContent) taEl.value = nextContent;   // 值没变就别赋值，免得光标被弹到末尾
+  $('#chWords').textContent = `${countWords(nextContent)} 字`;
+  histSync();
   $('#genWords').value = n.meta.targetWordsPerChapter || 3000;
   $('#genModel').placeholder = S.config?.model || '默认';
   updateFoot();
@@ -490,7 +494,149 @@ $('#chTitle').addEventListener('input', () => {
   markDirty();
 });
 
-$('#chContent').addEventListener('input', () => {
+/* ============================================================
+ * 5.5 撤销 / 重做
+ * ------------------------------------------------------------
+ * 稿纸是原生 textarea，而「给 .value 赋值」会把浏览器自带的撤销栈清空 ——
+ * 也就是说 AI 只要往正文里写过一次，Ctrl+Z 就彻底失灵了。
+ * 所以这里自己维护一份：每章一条历史，连续打字合成一步，
+ * AI 写入 / 粘贴 / 一键排版各自单独成一步（撤一下就回到操作前）。
+ * ============================================================ */
+const HIST = {
+  map: new Map(),      // 章节 id → { undo: [], redo: [] }
+  chapterId: null,     // 当前历史属于哪一章
+  cur: null,           // 当前编辑器状态 { v: 内容, s/e: 选区 }
+  last: 0,             // 上次记录时间，用于合并连续输入
+  composing: false,    // 中文输入法组字中
+};
+const HIST_MAX = 120;         // 每章最多留多少步
+const HIST_MERGE_MS = 900;    // 这个间隔内的连续输入算一步
+const HIST_JUMP = 50;         // 一次变化超过这么多字，判定为程序写入 / 粘贴，单独成一步
+
+function histState(id) {
+  let st = HIST.map.get(id);
+  if (!st) { st = { undo: [], redo: [] }; HIST.map.set(id, st); }
+  return st;
+}
+
+function editorSnap() {
+  const ta = $('#chContent');
+  return { v: ta.value, s: ta.selectionStart ?? 0, e: ta.selectionEnd ?? 0 };
+}
+
+function updateUndoButtons() {
+  const ch = currentChapter();
+  const st = ch ? histState(ch.id) : { undo: [], redo: [] };
+  const u = $('#undoBtn');
+  const r = $('#redoBtn');
+  if (u) u.disabled = !st.undo.length;
+  if (r) r.disabled = !st.redo.length;
+}
+
+/** 编辑器内容被外部改动（切章、查找替换、重新渲染）后同步基准 */
+function histSync() {
+  const ch = currentChapter();
+  if (!ch) { HIST.chapterId = null; HIST.cur = null; updateUndoButtons(); return; }
+  const v = $('#chContent').value;
+  if (HIST.chapterId === ch.id) {
+    if (HIST.cur && HIST.cur.v === v) { updateUndoButtons(); return; }
+    // 同一章内容却被外部改了（比如全书替换）：历史已对不上，清掉更安全
+    const st = histState(ch.id);
+    st.undo.length = 0; st.redo.length = 0;
+  }
+  HIST.chapterId = ch.id;
+  HIST.cur = { v, s: 0, e: 0 };
+  HIST.last = 0;
+  updateUndoButtons();
+}
+
+/** 内容变化时调用：决定要不要留下一个撤销点 */
+function histEdit() {
+  const ch = currentChapter();
+  if (!ch) return;
+  const cur = editorSnap();
+  if (HIST.chapterId !== ch.id || !HIST.cur) {   // 刚切过来，先立基准
+    HIST.chapterId = ch.id;
+    HIST.cur = cur;
+    HIST.last = Date.now();
+    return;
+  }
+  const base = HIST.cur;
+  if (base.v === cur.v) { HIST.cur = cur; return; }   // 只是挪了光标
+  const now = Date.now();
+  const st = histState(ch.id);
+  const jump = Math.abs(cur.v.length - base.v.length) > HIST_JUMP;
+  const merge = !jump && st.undo.length && now - HIST.last < HIST_MERGE_MS;
+  if (!merge) {
+    st.undo.push(base);
+    if (st.undo.length > HIST_MAX) st.undo.shift();
+  }
+  st.redo.length = 0;          // 有了新改动，原来的重做链就断了
+  HIST.cur = cur;
+  HIST.last = now;
+  updateUndoButtons();
+}
+
+/** 光标 / 选区变化时记一笔，撤销后能回到原来的位置 */
+function histCaret() {
+  if (!HIST.cur) return;
+  const ta = $('#chContent');
+  HIST.cur.s = ta.selectionStart ?? 0;
+  HIST.cur.e = ta.selectionEnd ?? 0;
+}
+
+function applySnap(snap) {
+  const ta = $('#chContent');
+  ta.value = snap.v;
+  const len = snap.v.length;
+  const s = Math.max(0, Math.min(snap.s ?? len, len));
+  const e = Math.max(s, Math.min(snap.e ?? s, len));
+  HIST.cur = { v: snap.v, s, e };
+  HIST.last = 0;
+  ta.focus();
+  try { ta.setSelectionRange(s, e); } catch { /* 忽略 */ }
+  editorChanged();             // 同步字数、脏标记、自动保存
+}
+
+function doUndo() {
+  const ch = currentChapter();
+  if (!ch) return;
+  const st = histState(ch.id);
+  if (!st.undo.length) return toast('没有可撤销的操作了');
+  st.redo.push(editorSnap());
+  if (st.redo.length > HIST_MAX) st.redo.shift();
+  applySnap(st.undo.pop());
+  const after = histState(ch.id);
+  toast(after.undo.length ? `已撤销 · 还能再撤 ${after.undo.length} 步` : '已撤销');
+}
+
+function doRedo() {
+  const ch = currentChapter();
+  if (!ch) return;
+  const st = histState(ch.id);
+  if (!st.redo.length) return toast('没有可重做的操作了');
+  st.undo.push(editorSnap());
+  if (st.undo.length > HIST_MAX) st.undo.shift();
+  applySnap(st.redo.pop());
+  toast('已重做');
+}
+
+$('#undoBtn').addEventListener('click', () => { doUndo(); $('#chContent').focus(); });
+$('#redoBtn').addEventListener('click', () => { doRedo(); $('#chContent').focus(); });
+
+$('#chContent').addEventListener('input', (e) => {
+  // 中文输入法组字过程中不要记点，等 compositionend 一次性记
+  if (!HIST.composing && !e.isComposing) histEdit();
+  editorChanged();
+});
+$('#chContent').addEventListener('compositionstart', () => { HIST.composing = true; });
+$('#chContent').addEventListener('compositionend', () => {
+  HIST.composing = false;
+  histEdit();
+  editorChanged();
+});
+
+function editorChanged() {
   const ch = currentChapter();
   if (!ch) return;
   ch.content = $('#chContent').value;
@@ -500,10 +646,16 @@ $('#chContent').addEventListener('input', () => {
   if (li) li.querySelector('.ci-words').textContent = w;
   markDirty();
   hideSelToolbar();
-});
+  updateUndoButtons();
+}
 
 $('#chContent').addEventListener('keydown', (e) => {
   const ta = e.target;
+  if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+    const k = e.key.toLowerCase();
+    if (k === 'z') { e.preventDefault(); if (e.shiftKey) doRedo(); else doUndo(); return; }
+    if (k === 'y') { e.preventDefault(); doRedo(); return; }
+  }
   if (e.key === 'Tab') {
     e.preventDefault();
     ta.setRangeText('　　', ta.selectionStart, ta.selectionEnd, 'end');
@@ -583,7 +735,7 @@ $('#formatBtn').addEventListener('click', () => {
   while (out.length && out[out.length - 1] === '') out.pop();
   ta.value = out.join('\n');
   ta.dispatchEvent(new Event('input'));
-  toast('已统一段落格式', 'ok');
+  toast('已统一段落格式 · 按 Ctrl+Z 可撤销', 'ok');
 });
 
 $('#previewBtn').addEventListener('click', () => {
@@ -600,11 +752,13 @@ const selToolbar = $('#selToolbar');
 function hideSelToolbar() { selToolbar.hidden = true; }
 $('#chContent').addEventListener('mouseup', () => {
   const ta = $('#chContent');
+  histCaret();
   if (ta.selectionEnd - ta.selectionStart >= 2) selToolbar.hidden = false;
 });
 $('#chContent').addEventListener('blur', () => { flushSave(); setTimeout(hideSelToolbar, 250); });
 $('#chContent').addEventListener('keyup', (e) => {
   if (e.key === 'Escape') hideSelToolbar();
+  histCaret();
 });
 
 $$('#selToolbar button').forEach((b) => b.addEventListener('mousedown', (e) => {
@@ -766,15 +920,15 @@ function insertIntoContent(text, mode) {
   }
   ta.dispatchEvent(new Event('input'));
 }
-$('#applyAppend').addEventListener('click', () => { if (S.out) { insertIntoContent(S.out, 'append'); toast('已追加到正文', 'ok'); } });
+$('#applyAppend').addEventListener('click', () => { if (S.out) { insertIntoContent(S.out, 'append'); toast('已追加到正文 · 按 Ctrl+Z 可撤销', 'ok'); } });
 $('#applyReplace').addEventListener('click', async () => {
   if (!S.out) return;
   if (!confirm('用输出内容替换本章正文？原有内容会被覆盖。')) return;
   await snapshotNow('AI 替换前');   // 覆盖前留一份，替换错了能从版本历史里捞回来
   insertIntoContent(S.out, 'replace');
-  toast('已替换，原稿可在「版本历史」找回', 'ok');
+  toast('已替换 · Ctrl+Z 可撤销，原稿也在「版本历史」里', 'ok');
 });
-$('#applyInsert').addEventListener('click', () => { if (S.out) { insertIntoContent(S.out, 'insert'); toast('已插入光标处', 'ok'); } });
+$('#applyInsert').addEventListener('click', () => { if (S.out) { insertIntoContent(S.out, 'insert'); toast('已插入光标处 · 按 Ctrl+Z 可撤销', 'ok'); } });
 
 $$('[data-quick]').forEach((btn) => btn.addEventListener('click', async () => {
   const ch = currentChapter();
@@ -854,7 +1008,7 @@ function showDiff(oldText, newText, op, range) {
       ta.setSelectionRange(range.start, range.start + newText.length);
       ta.dispatchEvent(new Event('input'));
     }
-    toast('已替换', 'ok');
+    toast('已替换 · 按 Ctrl+Z 可撤销', 'ok');
     panel.hidden = true;
   };
   $('#diffRetry').onclick = async () => {
@@ -1875,6 +2029,14 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 's') {
     e.preventDefault();
     if (S.dirty) { flushSave(); toast('已保存', 'ok'); }
+  } else if ((e.key === 'z' || e.key === 'Z' || e.key === 'y' || e.key === 'Y') && $('#modalMask')?.hidden) {
+    // Ctrl+Z 在别处（比如右侧助手区）也能撤销正文，只要没在输入框里、也没开着弹窗
+    const tag = (e.target?.tagName || '').toLowerCase();
+    const typing = tag === 'input' || tag === 'textarea' || e.target?.isContentEditable;
+    if (!typing && S.view === 'studio' && S.novel && S.chapterId) {
+      e.preventDefault();
+      if (e.key.toLowerCase() === 'y' || e.shiftKey) doRedo(); else doUndo();
+    }
   } else if (S.view === 'studio' && S.novel && e.key === 'Enter' && e.shiftKey) {
     e.preventDefault(); generateChapter();
   } else if (S.view === 'studio' && S.novel && e.key === 'Enter') {
@@ -1902,6 +2064,8 @@ function cmdkSource() {
     op('责编评审', 'stamp', () => { setView('studio'); showAssistTab('check'); $('#reviewBtn').click(); });
     op('导出作品', 'download', () => exportBook(), 'Ctrl+Shift+E');
     op('版本历史', 'clock', () => { setView('studio'); openHistory(); });
+    op('撤销', 'undo', () => { setView('studio'); doUndo(); }, 'Ctrl+Z');
+    op('重做', 'redo', () => { setView('studio'); doRedo(); }, 'Ctrl+Shift+Z');
     op('全书查找 / 替换', 'search', () => { setView('studio'); openFind(); }, 'Ctrl+F');
   }
   op('立即保存', 'check', () => { if (S.dirty) { flushSave(); toast('已保存', 'ok'); } else toast('已经是最新'); }, 'Ctrl+S');

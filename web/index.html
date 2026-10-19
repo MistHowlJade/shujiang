@@ -42,6 +42,8 @@
   <symbol id="i-book-open" viewBox="0 0 24 24"><path d="M12 6.5C10.5 5 8.3 4.3 4.5 4.3v13.4c3.8 0 6 .7 7.5 2.3 1.5-1.6 3.7-2.3 7.5-2.3V4.3c-3.8 0-6 .7-7.5 2.2Z"/><path d="M12 6.5V20"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.2V12l3.2 1.9"/></symbol>
   <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 3.8V9h-5.2"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 7H5V3"/><path d="M5.2 7.3A8 8 0 1 1 6.5 17"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 7h4V3"/><path d="M18.8 7.3A8 8 0 1 0 17.5 17"/></symbol>
 </svg>
 
 <div class="app">
@@ -125,6 +127,8 @@
               <input id="chTitle" class="ch-title" placeholder="章节标题" />
               <div class="pane-tools">
                 <span class="chip" id="chWords">0 字</span>
+                <button class="icon-btn sm" id="undoBtn" title="撤销（Ctrl+Z）" disabled><svg class="ico"><use href="#i-undo" /></svg></button>
+                <button class="icon-btn sm" id="redoBtn" title="重做（Ctrl+Shift+Z）" disabled><svg class="ico"><use href="#i-redo" /></svg></button>
                 <button class="icon-btn sm" id="formatBtn" title="一键排版：段落首行缩进两格"><svg class="ico"><use href="#i-indent" /></svg></button>
                 <button class="icon-btn sm" id="previewBtn" title="预览本章"><svg class="ico"><use href="#i-eye" /></svg></button>
               </div>
