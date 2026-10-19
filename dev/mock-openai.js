@@ -237,6 +237,16 @@ const split = (s, n = CHUNK) => {
   return out;
 };
 
+// 用来模拟真实世界里「OpenAI 兼容」的各种偏差：模型名里带关键词即可切换
+const VARIANTS = ['normal', 'json', 'array', 'reason', 'crlf', 'split', 'keepalive', 'text', 'empty', 'html', 'page', 'quota', 'stall', 'dead'];
+function variantOf(model) {
+  const m = String(model || '').toLowerCase();
+  for (const v of VARIANTS) {
+    if (v !== 'normal' && m.includes(`mock-${v}`)) return v;
+  }
+  return 'normal';
+}
+
 function conversation(req) {
   return (req.messages || []).map((m) => m.content || '').join('\n');
 }
@@ -312,7 +322,10 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.endsWith('/models')) {
     const body = JSON.stringify({
       object: 'list',
-      data: [{ id: 'mock-writer' }, { id: 'mock-reasoner' }, { id: 'mock-error' }],
+      data: [
+        { id: 'mock-writer' }, { id: 'mock-reasoner' }, { id: 'mock-error' },
+        ...VARIANTS.filter((v) => v !== 'normal').map((v) => ({ id: `mock-${v}` })),
+      ],
     });
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(body);
@@ -340,11 +353,47 @@ const server = http.createServer(async (req, res) => {
 
   const conv = conversation(payload);
   const { content } = buildReply(conv);
-  const reasoning = /reasoner/i.test(model)
+  const kind = variantOf(model);
+  const reasoning = /reasoner|reason/i.test(model) && kind !== 'reason'
     ? '用户在写网文，需要一段有悬念的开场。\n先确定视角：第三人称限知，贴主角。\n开头用一个动作切入，别写景。\n钩子放在对白里——"剑出得了鞘吗"。\n'
     : '';
+  const thinkText = kind === 'reason'
+    ? '用户在写网文，需要一段有悬念的开场。\n先确定视角：第三人称限知，贴主角。\n钩子放在对白里。\n'
+    : '';
 
-  if (payload.stream === false) {
+  // 变体：网关返回 HTML 错误页（不是 JSON，也不是 SSE）
+  if (kind === 'html') {
+    res.writeHead(502, { ...cors, 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end('<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx/1.24.0</center></body></html>');
+  }
+
+  // 变体：网关很「礼貌」地回了 200，但内容是网页 —— 最难发现的一种坑
+  if (kind === 'page') {
+    res.writeHead(200, { ...cors, 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end('<!DOCTYPE html><html><head><title>网站正在维护中</title></head><body><h1>503</h1><p>服务暂时不可用，请稍后再试。</p></body></html>');
+  }
+
+  // 变体：200 + JSON 错误体（额度用尽之类）
+  if (kind === 'quota') {
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ error: { message: '您当前的账户额度已用尽，请充值后再试。', type: 'insufficient_quota' } }));
+  }
+
+  // 变体：连响应头都不发，纯粹的连接黑洞（用 SHU_UPSTREAM_IDLE 缩短超时来验证兜底）
+  if (kind === 'dead') {
+    res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream; charset=utf-8' });
+    return; // 不 flush、不写、不结束
+  }
+
+  // 变体：响应头正常发回，但之后一直不吐数据
+  if (kind === 'stall') {
+    res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache' });
+    res.flushHeaders();
+    return;
+  }
+
+  // 变体：无视 stream:true，直接回一个完整 JSON
+  if (payload.stream === false || kind === 'json') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({
       id: 'chatcmpl-mock', object: 'chat.completion', created: Math.floor(Date.now() / 1000), model,
@@ -360,14 +409,46 @@ const server = http.createServer(async (req, res) => {
     Connection: 'keep-alive',
   });
   const base = { id: 'chatcmpl-mock', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model };
-  const emit = (delta) => sse(res, { ...base, choices: [{ index: 0, delta }] });
+
+  // 按变体决定每一帧怎么发
+  const nl = kind === 'crlf' ? '\r\n' : '\n';
+  const frameStr = (delta, finish) => `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta, ...(finish ? { finish_reason: finish } : {}) }] })}${nl}${nl}`;
+  const rawStr = (text) => `data: ${text}${nl}${nl}`;
+  const asDelta = (field, text) => {
+    if (kind === 'array') return { [field]: [{ type: 'text', text }] };
+    if (kind === 'reason' && field === 'reasoning_content') return { reasoning: text };
+    return { [field]: text };
+  };
+  // split：把整帧切成 3 个字符一段发出去，逼出「事件被 TCP 包切开」的情况
+  const send = async (str) => {
+    if (kind === 'split') {
+      for (const c of split(str, 3)) { res.write(c); await sleep(3); }
+      return;
+    }
+    res.write(str);
+  };
 
   try {
-    if (reasoning) for (const p of split(reasoning)) { emit({ reasoning_content: p }); await sleep(DELAY); }
-    for (const p of split(content)) { emit({ content: p }); await sleep(DELAY); }
-    emit({});
-    sse(res, { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
-    res.write('data: [DONE]\n\n');
+    if (kind === 'keepalive') { res.write(': ping\n\n'); await sleep(DELAY); res.write('event: chunk\n'); }
+    if (kind === 'empty') {
+      await send(rawStr(JSON.stringify({ ...base, choices: [] })));  // 只有 usage / 空 choices
+      await sleep(DELAY);
+      res.write(`data: [DONE]${nl}${nl}`);
+      return res.end();
+    }
+    const thinkAll = reasoning || thinkText;
+    if (thinkAll) {
+      for (const p of split(thinkAll)) {
+        await send(kind === 'text' ? rawStr(p) : frameStr(asDelta('reasoning_content', p)));
+        await sleep(DELAY);
+      }
+    }
+    for (const p of split(content)) {
+      await send(kind === 'text' ? rawStr(p) : frameStr(asDelta('content', p)));
+      await sleep(DELAY);
+    }
+    if (kind !== 'empty') await send(frameStr({}, 'stop'));
+    res.write(`data: [DONE]${nl}${nl}`);
   } catch { /* 客户端断开 */ }
   res.end();
 });
@@ -376,7 +457,21 @@ server.listen(PORT, HOST, () => {
   console.log('');
   console.log('  假模型服务已启动（仅供离线调试，不会真的调用任何模型）');
   console.log(`  地址： http://${HOST}:${PORT}/v1`);
-  console.log(`  可用模型： mock-writer / mock-reasoner（带思考过程）/ mock-error（模拟报错）`);
+  console.log('  可用模型： mock-writer / mock-reasoner（带思考过程）/ mock-error（模拟报错）');
+  console.log('  兼容性模拟（模型名里带关键词即可切换）：');
+  console.log('    mock-json       无视 stream:true，直接回完整 JSON');
+  console.log('    mock-array      delta.content 是 [{type,text}] 数组');
+  console.log('    mock-reason     思考过程字段叫 reasoning 而不是 reasoning_content');
+  console.log('    mock-crlf       SSE 用 CRLF 换行');
+  console.log('    mock-split      每帧切成 3 字符发，模拟 TCP 分包');
+  console.log('    mock-keepalive  事件前先发 : ping 注释与 event: 行');
+  console.log('    mock-text       data: 后面是纯文本，不是 JSON');
+  console.log('    mock-empty      只回空 choices，无正文');
+  console.log('    mock-html       网关返回 HTTP 502 + HTML');
+  console.log('    mock-page       网关返回 HTTP 200 + 网页正文');
+  console.log('    mock-quota      HTTP 200 + JSON 错误体（如额度用尽）');
+  console.log('    mock-stall      响应头正常，但一直不吐数据（测空闲超时）');
+  console.log('    mock-dead       连响应头都不发（测连接超时）');
   console.log(`  速度： 每 ${DELAY}ms 吐 ${CHUNK} 字（调 MOCK_DELAY / MOCK_CHUNK 可改）`);
   console.log('');
 });

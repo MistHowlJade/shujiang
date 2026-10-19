@@ -195,16 +195,177 @@ async function callUpstream({ cfg, provider, model, messages, temperature, maxTo
 
 async function upstreamErrorText(resp) {
   try {
-    const txt = await resp.text();
-    try {
-      const j = JSON.parse(txt);
-      return j?.error?.message || j?.message || txt.slice(0, 600);
-    } catch {
-      return txt.slice(0, 600);
-    }
+    const txt = (await resp.text()).trim();
+    const j = tryJson(txt);
+    if (j) return j.error?.message || j.message || txt.slice(0, 600);
+    // 网关给的多半是 HTML 错误页，抽个标题出来就够，别把整页 HTML 糊到界面上
+    const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(txt);
+    const plain = (title ? title[1] : txt.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+    if (plain) return plain.slice(0, 300);
+    return /^</.test(txt) ? '网关返回了一个网页（不是模型响应）' : txt.slice(0, 300);
   } catch {
     return `HTTP ${resp.status}`;
   }
+}
+
+/** 上游一个字正文都没给时，尽量说清楚到底发生了什么 */
+function describeEmptyBody(sniff) {
+  const t = (sniff || '').trim();
+  const fallback = '模型这次没有返回任何内容。可能是模型名不对、额度用尽，或该模型的接口格式不兼容。';
+  if (!t) return fallback;
+  const j = tryJson(t);
+  if (j) {
+    if (j.error) return `上游返回错误：${j.error.message || j.error.code || JSON.stringify(j.error).slice(0, 160)}`;
+    if (j.message) return `上游返回：${String(j.message).slice(0, 160)}`;
+    return fallback;
+  }
+  if (/^</.test(t)) {
+    const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(t);
+    const plain = (title ? title[1] : t.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, 120);
+    return `上游返回的是网页而不是模型的回复（通常是网关、代理或反向代理配置有问题）：${plain || '无标题'}`;
+  }
+  return fallback;
+}
+
+/* ------------------------------------------------------------------ */
+/* 上游响应 → 统一 SSE 事件                                            */
+/* ------------------------------------------------------------------ */
+// 各家「OpenAI 兼容」的偏差都收在这里：
+//   1. 无视 stream:true，直接回一个完整 JSON
+//   2. delta.content 不是字符串，而是 [{type:'text',text:'…'}] 这样的数组
+//   3. 思考过程字段叫 reasoning / reasoning_text，而不是 reasoning_content
+//   4. SSE 用 CRLF、发 `: ping` 注释行、事件被切在 TCP 包中间
+//   5. 流里夹着 {"error":{…}} 或 choices: []
+//   6. 服务商卡住不回（靠空闲超时兜底）
+
+const IDLE_MS = Number(process.env.SHU_UPSTREAM_IDLE || 180000);
+
+function sseWrite(res, obj) {
+  if (!res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`);
+}
+
+/** content 可能是字符串、数组或对象，统一成字符串 */
+function collectText(v) {
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v)) {
+    return v.map((p) => (typeof p === 'string' ? p : (p && (p.text || p.content)) || '')).join('');
+  }
+  if (v && typeof v === 'object' && typeof v.text === 'string') return v.text;
+  return '';
+}
+
+/** 从任意一个上游 JSON 里抠出增量（兼容 delta / message / text 三种形状） */
+function deltaFromChunk(j) {
+  const choice = (j && j.choices && j.choices[0]) || {};
+  const d = choice.delta || choice.message || {};
+  const out = {};
+  const content = collectText(d.content) || collectText(choice.text);
+  if (content) out.content = content;
+  const think = collectText(d.reasoning_content) || collectText(d.reasoning) || collectText(d.reasoning_text);
+  if (think) out.reasoning_content = think;
+  return out;
+}
+
+async function relayCompletion({ res, upstream, abort }) {
+  const ct = (upstream.resp.headers.get('content-type') || '').toLowerCase();
+  let emitted = 0;
+  let idle = null;
+  let timedOut = false;
+  let fatal = null;
+  let sniffed = '';
+
+  const arm = () => {
+    clearTimeout(idle);
+    if (IDLE_MS > 0) idle = setTimeout(() => { timedOut = true; abort(); }, IDLE_MS);
+  };
+  const emit = (delta) => {
+    if (!delta || (!delta.content && !delta.reasoning_content)) return;
+    emitted += 1;
+    sseWrite(res, { choices: [{ index: 0, delta }] });
+  };
+  const handleLine = (raw) => {
+    const line = raw.replace(/\r$/, '');
+    const t = line.trim();
+    if (!t || t.startsWith(':')) return true;          // 空行 / keep-alive 注释
+    if (!t.startsWith('data:')) return true;           // event: / id: 之类，忽略
+    const payload = t.slice(5).trim();
+    if (!payload) return true;
+    if (payload === '[DONE]') return false;
+    let j;
+    try {
+      j = JSON.parse(payload);
+    } catch {
+      emit({ content: payload });                      // 上游吐的是纯文本，直接当正文
+      return true;
+    }
+    if (j.error) {
+      fatal = j.error.message || j.error.code || '模型返回错误';
+      return false;
+    }
+    if (j.message && !j.choices) { fatal = String(j.message); return false; }
+    emit(deltaFromChunk(j));
+    return true;
+  };
+
+  try {
+    if (ct.includes('application/json')) {
+      // 供应商无视 stream:true，直接返回完整回复
+      const txt = await upstream.resp.text();
+      const j = tryJson(txt);
+      if (j) emit(deltaFromChunk(j));
+      if (!emitted) sniffed = txt.slice(0, 2048);
+    } else {
+      const dec = new TextDecoder('utf-8');
+      let buf = '';
+      let sniff = '';          // 只在「一个字都没解析出来」时用来判断上游到底回了什么
+      let running = true;
+      arm();
+      const consume = (text) => {
+        let i;
+        while (running && (i = text.indexOf('\n')) >= 0) {
+          running = handleLine(text.slice(0, i));
+          text = text.slice(i + 1);
+        }
+        return text;
+      };
+      for await (const chunk of upstream.resp.body) {
+        arm();
+        const s = dec.decode(chunk, { stream: true });
+        if (!emitted && sniff.length < 2048) sniff += s;
+        buf = consume(buf + s);
+        if (!running) break;
+      }
+      if (running) {
+        // 收尾：最后一行可能没有换行；也可能整段就是一个不带 SSE 包装的 JSON
+        const rest = buf.trim();
+        if (rest) {
+          if (!emitted && sniff.length < 2048) sniff += rest;
+          handleLine(rest);
+          if (!emitted) {
+            const j = tryJson(rest);
+            if (j) emit(deltaFromChunk(j));
+          }
+        }
+      }
+      sniffed = sniff;
+    }
+  } catch (err) {
+    if (timedOut) {
+      sseWrite(res, { shu_error: `模型超过 ${Math.round(IDLE_MS / 1000)} 秒没有返回任何数据，已断开。请检查服务商地址、模型名与网络。` });
+    } else if (!res.writableEnded) {
+      sseWrite(res, { shu_error: `生成中断：${err.message}` });
+    }
+    clearTimeout(idle);
+    return;
+  }
+  clearTimeout(idle);
+
+  if (fatal) sseWrite(res, { shu_error: fatal });
+  else if (!emitted) sseWrite(res, { shu_error: describeEmptyBody(sniffed) });
+}
+
+function tryJson(text) {
+  try { return JSON.parse(text); } catch { return null; }
 }
 
 /* ------------------------------------------------------------------ */
@@ -519,11 +680,26 @@ async function handleApi(req, res, url) {
     maxTokens = body.maxTokens ?? cfg.maxTokens ?? maxTokens;
 
     const ac = new AbortController();
-    req.on('close', () => ac.abort());
+    // 等响应头阶段也要有兜底：有些服务商/网关接了连接却什么都不回
+    let timedOut = false;
+    let idle = null;
+    const arm = () => {
+      clearTimeout(idle);
+      if (IDLE_MS > 0) idle = setTimeout(() => { timedOut = true; ac.abort(); }, IDLE_MS);
+    };
+    req.on('close', () => { clearTimeout(idle); ac.abort(); });
     let upstream;
     try {
+      arm();
       upstream = await callUpstream({ cfg, provider, model, messages, temperature, maxTokens, stream: true, signal: ac.signal });
+      clearTimeout(idle);
     } catch (err) {
+      clearTimeout(idle);
+      if (timedOut) {
+        return sendJson(res, 504, {
+          error: `模型服务超过 ${Math.round(IDLE_MS / 1000)} 秒没有响应。请检查服务商地址是否正确、网络是否通畅，或换一个模型再试。`,
+        });
+      }
       return sendJson(res, 502, { error: `无法连接模型服务：${err.message}` });
     }
     if (!upstream.resp.ok) {
@@ -539,15 +715,7 @@ async function handleApi(req, res, url) {
     });
     res.write(`data: ${JSON.stringify({ shu_meta: { model, provider: provider.name || provider.baseUrl, ...meta } })}\n\n`);
 
-    try {
-      const decoder = new TextDecoder('utf-8');
-      for await (const chunk of upstream.resp.body) {
-        if (res.writableEnded) break;
-        res.write(decoder.decode(chunk, { stream: true }));
-      }
-    } catch (err) {
-      if (!res.writableEnded) res.write(`data: ${JSON.stringify({ shu_error: `生成中断：${err.message}` })}\n\n`);
-    }
+    await relayCompletion({ res, upstream, abort: () => ac.abort() });
     if (!res.writableEnded) {
       res.write('data: [DONE]\n\n');
       res.end();

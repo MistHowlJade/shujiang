@@ -24,6 +24,7 @@ tools\node\node.exe server\server.js
 | --- | --- |
 | `SHU_PORT` | 指定端口，默认 8848，被占用时自动 +1 |
 | `SHU_NO_OPEN=1` | 启动后不自动打开浏览器 |
+| `SHU_UPSTREAM_IDLE` | 等模型的超时毫秒数，默认 180000（3 分钟没动静就断开并提示） |
 
 > 如果 `tools\node\node.exe` 不存在，也可以用本机已安装的 Node 18+ 运行 `node server/server.js`。
 
@@ -32,6 +33,21 @@ tools\node\node.exe server\server.js
 进「设置」页 → 点一个预设（DeepSeek / 通义 / Kimi / 智谱 / 豆包 / OpenAI / Ollama 本地）→ 填 **API Key** → 「测试连接」拉取模型列表 → 「保存设置」。
 
 任何兼容 OpenAI 接口的服务都能用，包括中转站和本地 Ollama。密钥只写入 `data/config.json`，不会随作品导出。
+
+### 兼容性：各家「OpenAI 兼容」其实都不太一样
+
+中转站、自建网关、本地推理服务的实现多少有出入，服务端已经把常见的偏差都抹平了，遇到下列情况都不会变成一片空白：
+
+| 情况 | 处理 |
+| --- | --- |
+| 无视 `stream: true`，直接回一个完整 JSON | 自动识别并当一次输出收下 |
+| `delta.content` 是 `[{type:'text',text:'…'}]` 数组 | 自动拼接 |
+| 思考过程字段叫 `reasoning` / `reasoning_text` | 一样显示在「思考中」折叠区 |
+| SSE 用 CRLF 换行、带 `: ping` 注释行、事件被 TCP 包切开 | 正常解析 |
+| 流里夹着 `{"error":{…}}`、空 `choices`、`usage` 帧 | 错误照实转达，空帧忽略 |
+| `data:` 后面直接是纯文本（不是 JSON） | 按正文收下 |
+| 服务商接受请求后一直不回 | 超过 `SHU_UPSTREAM_IDLE` 断开并提示，不会无限转圈 |
+| 网关回了 200 但内容是网页 / JSON 错误体 | 抽出一句人话提示，不会把 HTML 写进你的稿子 |
 
 ### 离线调试：不花钱跑通全流程
 
@@ -52,6 +68,8 @@ tools\node\node.exe dev\mock-openai.js
 - `mock-writer`：正常跑通生成、续写、润色、一致性检查、记忆存档、大纲、人物、世界观、审稿、起名、文风
 - `mock-reasoner`：先流式输出思考过程再出正文，用来看「思考中」折叠区
 - `mock-error`：上游返回 401，用来验证错误提示是否说人话
+
+另外有一组专门用来复现「别家接口不规范」的模型，改模型名就能切：`mock-json`（不回流式只回整段 JSON）、`mock-array`（content 是数组）、`mock-reason`（思考字段叫 reasoning）、`mock-crlf`、`mock-split`（事件被切开）、`mock-keepalive`、`mock-text`、`mock-empty`、`mock-page`（200 但内容是网页）、`mock-quota`（200 + 额度错误）、`mock-stall`（只发响应头然后装死）、`mock-dead`（连响应头都不发）。启动假模型时终端会把这些列出来。
 
 速度可调：`MOCK_DELAY`（每片间隔毫秒，默认 24）、`MOCK_CHUNK`（每片字数，默认 14）。
 

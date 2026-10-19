@@ -132,11 +132,21 @@ async function streamAI(body, { onDelta, onReasoning, onMeta, signal } = {}) {
       if (j.shu_error) throw new Error(j.shu_error);
       if (j.error) throw new Error(j.error.message || j.error.code || '模型返回错误');
       const d = j.choices?.[0]?.delta || {};
-      if (d.reasoning_content) onReasoning?.(d.reasoning_content);
-      if (d.content) { full += d.content; onDelta?.(d.content); }
+      const think = d.reasoning_content ?? d.reasoning;
+      if (think) onReasoning?.(textOf(think));
+      const text = textOf(d.content);
+      if (text) { full += text; onDelta?.(text); }
     }
   }
   return full;
+}
+
+/** 上游 content 可能是字符串，也可能是 [{type:'text',text:'…'}] */
+function textOf(v) {
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v)) return v.map((p) => (typeof p === 'string' ? p : (p && (p.text || p.content)) || '')).join('');
+  if (v && typeof v === 'object' && typeof v.text === 'string') return v.text;
+  return '';
 }
 
 function parseJsonLoose(text) {
@@ -642,6 +652,8 @@ function renderOut() {
   $('#outActions').hidden = !S.out;
   if (S.out) {
     $('#outInfo').textContent = `${S.outModel ? `${S.outModel} · ` : ''}${countWords(S.out)} 字${S.controller ? ' · 生成中…' : ''}`;
+  } else if (!S.controller) {
+    $('#outInfo').textContent = '';   // 失败或空回复后别停在「生成中…」
   }
 }
 
