@@ -429,6 +429,39 @@ async function handleApi(req, res, url) {
       return res.end('\uFEFF' + text);
     }
 
+    // 全书查找：命中章节 + 上下文片段
+    if (seg[3] === 'search' && seg.length === 4 && method === 'GET') {
+      const q = (url.searchParams.get('q') || '').trim();
+      if (!q) return sendJson(res, 200, { q: '', total: 0, chapters: 0, truncated: false, results: [] });
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      const limit = Math.min(200, Math.max(10, Number(url.searchParams.get('limit')) || 80));
+      return sendJson(res, 200, searchNovel(n, q, limit));
+    }
+
+    // 全书替换：先留一份快照，再逐章替换（支持标题）
+    if (seg[3] === 'replace' && seg.length === 4 && method === 'POST') {
+      const body = await readBody(req);
+      const find = String(body.find || '');
+      if (!find) return sendJson(res, 400, { error: '要替换的文字不能为空' });
+      const to = String(body.replace ?? '');
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      const re = new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), body.caseSensitive ? 'g' : 'gi');
+      let count = 0;
+      let chaptersTouched = 0;
+      const swap = () => { count += 1; return to; };
+      createSnapshot(n, { kind: 'before-replace', label: `替换「${find.slice(0, 12)}」前`, force: true });
+      for (const ch of n.chapters || []) {
+        const before = `${ch.content || ''}\u0000${ch.title || ''}`;
+        ch.content = String(ch.content || '').replace(re, swap);
+        if (body.inTitle) ch.title = String(ch.title || '').replace(re, swap);
+        if (`${ch.content}\u0000${ch.title}` !== before) chaptersTouched += 1;
+      }
+      if (count) saveNovel(n);
+      return sendJson(res, 200, { count, chapters: chaptersTouched });
+    }
+
     // 导入已有文稿：按“第X章”自动切分
     if (seg[3] === 'import' && method === 'POST') {
       const body = await readBody(req);
@@ -554,6 +587,63 @@ function exportMarkdown(n, chapters) {
     lines.push('');
   });
   return lines.join('\n');
+}
+
+/* ------------------------------------------------------------------ */
+/* 全书查找                                                            */
+/* ------------------------------------------------------------------ */
+
+const HITS_PER_CHAPTER = 20;
+
+function hitSnippet(text, start, end, pad = 26) {
+  const from = Math.max(0, start - pad);
+  const to = Math.min(text.length, end + pad);
+  return {
+    start,
+    before: (from > 0 ? '…' : '') + text.slice(from, start),
+    match: text.slice(start, end),
+    after: text.slice(end, to) + (to < text.length ? '…' : ''),
+  };
+}
+
+function searchNovel(novel, q, limit) {
+  const needle = q.toLowerCase();
+  const results = [];
+  let total = 0;
+  let matchedChapters = 0;
+  for (const ch of novel.chapters || []) {
+    const text = String(ch.content || '');
+    const hay = text.toLowerCase();
+    if (!hay.includes(needle)) continue;
+    matchedChapters += 1;
+    let from = 0;
+    const found = [];
+    while (found.length < HITS_PER_CHAPTER) {
+      const at = hay.indexOf(needle, from);
+      if (at < 0) break;
+      found.push({ start: at, end: at + needle.length });
+      from = at + needle.length; // 不重复计入重叠命中
+    }
+    // 先把命中总数统计完整（只受每章上限约束），再决定要不要裁掉展示
+    let all = found.length;
+    let scan = from;
+    while (all < 999) {
+      const at = hay.indexOf(needle, scan);
+      if (at < 0) break;
+      all += 1;
+      scan = at + needle.length;
+    }
+    total += all;
+    if (results.length >= limit) continue;
+    results.push({
+      chapterId: ch.id,
+      no: ch.no,
+      title: ch.title || '未命名',
+      count: all,
+      hits: found.map((h) => hitSnippet(text, h.start, h.end)),
+    });
+  }
+  return { q, total, chapters: matchedChapters, truncated: results.length < matchedChapters, results };
 }
 
 const CHAPTER_RE = /^[ \t　]*第\s*([0-9零一二三四五六七八九十百千两]+)\s*[章节回][ \t　]*([^\n\r]{0,40})$/m;

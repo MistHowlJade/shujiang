@@ -1753,6 +1753,110 @@ async function openHistory() {
 }
 $('#historyBtn').addEventListener('click', () => openHistory());
 
+/* ============================================================
+ * 10.6 全书查找 / 替换
+ * ============================================================ */
+function jumpToHit(chapterId, start, len) {
+  closeModal();
+  setView('studio');
+  selectChapter(chapterId);
+  // 等编辑器把这一章渲染出来，再定位选区（原生选区就是最好的高亮）
+  setTimeout(() => {
+    const ta = $('#chContent');
+    if (!ta) return;
+    ta.focus();
+    ta.setSelectionRange(start, Math.min(start + len, ta.value.length));
+  }, 60);
+}
+
+async function openFind() {
+  if (!S.novel) return toast('先打开作品', 'err');
+  await saveChapterNow().catch(() => {});
+  const novelId = S.novel.id;
+  const ta = $('#chContent');
+  const picked = ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd).trim() : '';
+  const preset = picked && picked.length <= 40 && !picked.includes('\n') ? picked : '';
+  showModal(`<h3>全书查找 · 《${esc(S.novel.title)}》</h3>
+    <div class="find-bar">
+      <input class="input" id="findQ" placeholder="查找任意文字，回车开始" autocomplete="off" />
+      <button class="btn btn-primary" id="findGo">${ico('search')}查找</button>
+    </div>
+    <div class="find-bar">
+      <input class="input" id="findR" placeholder="替换为…（留空表示删掉）" autocomplete="off" />
+      <label class="find-check" title="章节标题也一起替换"><input type="checkbox" id="findTitle" />含标题</label>
+      <button class="btn btn-danger-ghost" id="findAll">全部替换</button>
+    </div>
+    <div class="find-sum" id="findSum"></div>
+    <div class="find-list" id="findList"><div class="find-empty">输入关键词回车查找；命中处可直接点进去定位。</div></div>
+    <div class="modal-foot"><button class="btn btn-text" id="findClose">关闭</button></div>`,
+  (box) => {
+    const qEl = box.querySelector('#findQ');
+    const rEl = box.querySelector('#findR');
+    const listEl = box.querySelector('#findList');
+    const sumEl = box.querySelector('#findSum');
+    box.querySelector('#findClose').onclick = closeModal;
+    if (preset) qEl.value = preset;
+    qEl.focus();
+    qEl.select();
+
+    const render = (j) => {
+      if (!j.total) {
+        sumEl.textContent = '';
+        listEl.innerHTML = `<div class="find-empty">全书没有找到「${esc(j.q)}」。</div>`;
+        return;
+      }
+      sumEl.innerHTML = `全书共 <b>${j.total}</b> 处，分布在 <b>${j.chapters}</b> 章${j.truncated ? '（下方只列出前几章）' : ''}`;
+      listEl.innerHTML = j.results.map((r) => `
+        <div class="find-row">
+          <div class="find-head"><b>第 ${r.no} 章 · ${esc(r.title)}</b><span>${r.count} 处</span></div>
+          ${r.hits.map((h) => `<div class="find-hit" data-cid="${esc(r.chapterId)}" data-start="${h.start}" data-len="${h.match.length}">${esc(h.before)}<mark>${esc(h.match)}</mark>${esc(h.after)}</div>`).join('')}
+        </div>`).join('');
+      listEl.querySelectorAll('.find-hit').forEach((el) => {
+        el.onclick = () => jumpToHit(el.dataset.cid, Number(el.dataset.start), Number(el.dataset.len));
+      });
+    };
+
+    const run = async () => {
+      const q = qEl.value.trim();
+      if (!q) return;
+      sumEl.textContent = '查找中…';
+      try {
+        render(await api.get(`/api/novels/${novelId}/search?q=${encodeURIComponent(q)}`));
+      } catch (err) {
+        sumEl.textContent = '';
+        listEl.innerHTML = `<div class="find-empty">查找失败：${esc(err.message)}</div>`;
+      }
+    };
+
+    box.querySelector('#findGo').onclick = run;
+    qEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } });
+    rEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); box.querySelector('#findAll').click(); } });
+
+    box.querySelector('#findAll').onclick = async () => {
+      const q = qEl.value.trim();
+      if (!q) return toast('先填写要替换的文字', 'err');
+      const inTitle = box.querySelector('#findTitle').checked;
+      const to = rEl.value;
+      if (!confirm(`把全书中的「${q}」全部替换为「${to || '（空）'}」？\n${inTitle ? '章节标题也会一起替换。\n' : ''}替换前会自动备份，可在版本历史里撤回。`)) return;
+      const btn = box.querySelector('#findAll');
+      btn.disabled = true;
+      try {
+        const r = await api.send(`/api/novels/${novelId}/replace`, { find: q, replace: to, inTitle });
+        closeModal();
+        await loadNovels();
+        await openNovel(novelId);
+        toast(r.count ? `已替换 ${r.count} 处，涉及 ${r.chapters} 章（旧稿在版本历史里）` : '没有需要替换的内容', r.count ? 'ok' : '');
+      } catch (err) {
+        btn.disabled = false;
+        toast(`替换失败：${err.message}`, 'err');
+      }
+    };
+
+    if (preset) run();
+  });
+}
+$('#findBtn').addEventListener('click', () => openFind());
+
 /* ---------------- 快捷键 ---------------- */
 document.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
@@ -1765,6 +1869,8 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault(); continueWriting();
   } else if (e.key === 'E' && e.shiftKey) {
     e.preventDefault(); exportBook();
+  } else if (e.key === 'f' && !e.shiftKey && S.novel) {
+    e.preventDefault(); openFind();
   }
 });
 
@@ -1784,6 +1890,7 @@ function cmdkSource() {
     op('责编评审', 'stamp', () => { setView('studio'); showAssistTab('check'); $('#reviewBtn').click(); });
     op('导出作品', 'download', () => exportBook(), 'Ctrl+Shift+E');
     op('版本历史', 'clock', () => { setView('studio'); openHistory(); });
+    op('全书查找 / 替换', 'search', () => { setView('studio'); openFind(); }, 'Ctrl+F');
   }
   op('立即保存', 'check', () => { if (S.dirty) { flushSave(); toast('已保存', 'ok'); } else toast('已经是最新'); }, 'Ctrl+S');
   op('切换明暗主题', 'moon', () => $('#themeBtn').click());
