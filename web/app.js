@@ -90,7 +90,13 @@ const api = {
       opt.headers = { 'Content-Type': 'application/json' };
       opt.body = JSON.stringify(body);
     }
-    const r = await fetch(url, opt);
+    let r;
+    try {
+      r = await fetch(url, opt);
+    } catch {
+      // 连不上本地服务（进程没了 / 端口被占）：给一句人话，别把 Failed to fetch 甩给用户
+      throw new Error('连不上本地服务（请确认 启动.bat 的窗口还开着）');
+    }
     const j = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
     return j;
@@ -101,12 +107,18 @@ const api = {
 
 /** 流式生成：逐块回调，返回完整文本 */
 async function streamAI(body, { onDelta, onReasoning, onMeta, signal } = {}) {
-  const res = await fetch('/api/ai/stream', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal,
-  });
+  let res;
+  try {
+    res = await fetch('/api/ai/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    throw new Error('连不上本地服务（请确认 启动.bat 的窗口还开着）');
+  }
   if (!res.ok || !res.body) {
     const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     throw new Error(j.error || `HTTP ${res.status}`);
@@ -171,6 +183,9 @@ const S = {
   chapterId: null,
   config: null,
   dirty: false,
+  unsaved: new Set(),   // 还没写进磁盘的章节 id —— 按章追踪，切章后也不会忘
+  savingId: null,
+  saveErr: null,
   controller: null,
   out: '',
   reasoning: '',
@@ -183,6 +198,25 @@ function setSave(flag, text) {
   const pill = $('#savePill');
   pill.className = `save-pill ${flag || ''}`;
   pill.textContent = text || (flag === 'dirty' ? '未保存' : flag === 'saving' ? '保存中…' : '已保存');
+}
+
+/** 保存状态只有一个来源：S.unsaved（哪些章还没落盘）+ S.saveErr。界面从这里推导出来 */
+function refreshSavePill() {
+  const pill = $('#savePill');
+  const n = S.unsaved.size;
+  if (n) {
+    if (S.saveErr) setSave('dirty', n > 1 ? `保存失败 · ${n} 章待存` : '保存失败 · 重试中');
+    else if (S.savingId) setSave('saving');
+    else setSave('dirty', n > 1 ? `${n} 章待保存` : '未保存');
+  } else {
+    setSave('');
+  }
+  if (pill) {
+    pill.title = n
+      ? (S.saveErr ? `最近一次保存失败：${S.saveErr}\n点击立即重试` : '点击立即保存')
+      : '正文已写入 data/ 目录';
+    pill.style.cursor = n ? 'pointer' : '';
+  }
 }
 
 /* ============================================================
@@ -271,7 +305,10 @@ function renderShelf() {
       e.stopPropagation();
       if (!confirm(`删除《${n.title}》？该作品的正文与设定会一并从磁盘删除，无法恢复。`)) return;
       await api.del(`/api/novels/${n.id}`);
-      if (S.novel?.id === n.id) { S.novel = null; S.chapterId = null; }
+      if (S.novel?.id === n.id) {
+        S.novel = null; S.chapterId = null;
+        S.unsaved.clear(); S.dirty = false; refreshSavePill();   // 作品都删了，别再去补存
+      }
       await loadNovels(); renderShelf(); toast('已删除');
     });
     grid.appendChild(div);
@@ -320,6 +357,18 @@ $('#newNovelBtn').addEventListener('click', openNewNovelModal);
 $('#emptyNewBtn').addEventListener('click', openNewNovelModal);
 
 async function openNovel(id) {
+  // 换作品前先把当前作品的改动落盘 —— 一旦换过去，旧作品的内存内容就被替换了，
+  // 没落盘的部分谁也救不回来。落不下去时明确问一句，别默默丢。
+  if (S.novel && S.novel.id !== id && S.unsaved.size) {
+    const ok = await flushSave();
+    if (!ok) {
+      const go = confirm(`《${S.novel.title}》还有 ${S.unsaved.size} 章没能保存（${S.saveErr || '未知原因'}）。\n继续打开别的作品会丢掉这些改动。仍要继续吗？`);
+      if (!go) return;
+      S.unsaved.clear();
+      S.dirty = false;
+      refreshSavePill();
+    }
+  }
   const { novel } = await api.get(`/api/novels/${id}`);
   S.novel = novel;
   S.chapterId = novel.chapters[0]?.id || null;
@@ -397,6 +446,9 @@ function renderStudio() {
           if (!confirm(`删除第 ${i + 1} 章「${c.title}」？`)) return;
           const { novel } = await api.del(`/api/novels/${n.id}/chapters/${c.id}`);
           S.novel = novel;
+          S.unsaved.delete(c.id);            // 这一章都不要了，别再补存
+          S.dirty = S.unsaved.size > 0;
+          refreshSavePill();
           if (S.chapterId === c.id) S.chapterId = novel.chapters[Math.min(i, novel.chapters.length - 1)]?.id || null;
           renderStudio();
           loadNovels();
@@ -428,62 +480,141 @@ function chapterSavePayload(ch) {
   };
 }
 
-const saveChapterDebounced = debounce(async () => {
-  try {
-    await saveChapterNow();
-  } catch (err) {
-    setSave('dirty', '保存失败');
-    toast(`保存失败：${err.message}`, 'err');
-  }
-}, 600);
+const saveChapterDebounced = debounce(() => { flushSave(); }, 600);
 
-/** 立刻把当前章写回服务端；返回是否真的写了。调用方可 await，用于「写盘后再做别的」的场景。 */
-async function saveChapterNow() {
-  const ch = currentChapter();
-  if (!ch || !S.novel || !S.dirty) return false;
-  const cid = ch.id;
-  const payload = chapterSavePayload(ch);
+/* ------------------------------------------------------------
+ * 落盘：任何一章的改动都要有归属，失败就自动重试，绝不静默丢掉
+ * ------------------------------------------------------------
+ * S.unsaved 记录「哪些章还没写进磁盘」。切章时若保存失败，这一章会留在集合里，
+ * 之后的自动重试会把它一起补上 —— 只用一个全局 dirty 标记的话，在新章保存成功时
+ * 就把旧章的未保存状态一起抹掉了，那份改动直到关页面都没人管。
+ */
+const SAVE_RETRY_MIN = 3000;
+const SAVE_RETRY_MAX = 15000;
+let saveRetryTimer = null;
+let saveRetryDelay = SAVE_RETRY_MIN;
+
+function scheduleSaveRetry() {
+  if (saveRetryTimer || !S.unsaved.size) return;
+  saveRetryTimer = setTimeout(async () => {
+    saveRetryTimer = null;
+    await flushSave().catch(() => {});
+    if (S.unsaved.size) {
+      saveRetryDelay = Math.min(saveRetryDelay * 2, SAVE_RETRY_MAX);
+      scheduleSaveRetry();
+    }
+  }, saveRetryDelay);
+}
+
+/** 立刻把某一章写回服务端；不在待存集合里就直接跳过。调用方可 await。 */
+async function saveChapterNow(id = S.chapterId) {
+  if (!S.unsaved.has(id)) return false;
+  const ch = S.novel?.chapters.find((c) => c.id === id);
+  if (!ch) {
+    // 这一章已经不在了（被删 / 被整本替换），别让它卡在待存集合里无限重试
+    S.unsaved.delete(id);
+    S.dirty = S.unsaved.size > 0;
+    refreshSavePill();
+    return false;
+  }
+  const isCurrent = id === S.chapterId;
   saveChapterDebounced.cancel();
-  setSave('saving');
-  await api.put(`/api/novels/${S.novel.id}/chapters/${cid}`, payload);
-  // 期间可能已切到别的章节，只认原来那一章的状态
-  if (S.chapterId === cid) { S.dirty = false; setSave(''); }
+  if (isCurrent) { S.savingId = id; refreshSavePill(); }
+  try {
+    await api.put(`/api/novels/${S.novel.id}/chapters/${id}`, chapterSavePayload(ch));
+  } catch (err) {
+    // 期间可能已经有另一次保存把这一章写成功了（并发/重试重叠），那就别记这次失败
+    if (!S.unsaved.has(id)) return false;
+    const firstFailure = !S.saveErr;
+    S.savingId = null;
+    S.saveErr = err.message || '未知错误';
+    refreshSavePill();
+    scheduleSaveRetry();
+    // 只在「第一次失败」时弹提示，免得自动重试把屏幕刷满
+    if (firstFailure) toast(`保存失败：${S.saveErr} · 会自动重试，别关页面`, 'err');
+    throw err;
+  }
+  S.saveErr = null;
+  saveRetryDelay = SAVE_RETRY_MIN;
+  S.unsaved.delete(id);
+  S.dirty = S.unsaved.size > 0;
+  if (isCurrent) S.savingId = null;
+  refreshSavePill();
   renderTopbarActions();
   loadNovels();
   return true;
 }
 
+/** 把待存集合里的每一章都写回服务端，返回是否已全部落盘 */
+async function saveAllPending() {
+  for (const id of [...S.unsaved]) {
+    try {
+      await saveChapterNow(id);
+    } catch {
+      // 失败的那一章仍留在 S.unsaved 里，交给重试
+    }
+  }
+  if (S.unsaved.size) scheduleSaveRetry();
+  else saveRetryDelay = SAVE_RETRY_MIN;
+  return S.unsaved.size === 0;
+}
+
 // 兜底保存：失焦、切章、切标签页、关闭页面时立刻落盘。
 // beacon=true 只用于页面即将卸载的场景（sendBeacon 是唯一能活过卸载的方式），
-// 但它有 64KB 上限且失败时返回 false —— 所以其余场景一律走普通 PUT，避免长章节静默丢失。
+// 但它有 64KB 上限且失败时返回 false —— 失败时保留待存状态，让关闭拦截与重试接着管。
 function flushSave({ beacon = false } = {}) {
-  const ch = currentChapter();
-  if (!ch || !S.novel || !S.dirty) return;
-  if (!beacon) {
-    return saveChapterNow().catch((err) => {
-      setSave('dirty', '保存失败');
-      toast(`保存失败：${err.message}`, 'err');
-    });
-  }
-  const url = `/api/novels/${S.novel.id}/chapters/${ch.id}`;
-  const payload = chapterSavePayload(ch);
+  if (!S.unsaved.size) return Promise.resolve(true);
+  if (!beacon) return saveAllPending();
+  // 关页面：待存的每一章都投一个 beacon（beacon 是唯一能活过卸载的请求）
   saveChapterDebounced.cancel();
-  S.dirty = false;
-  setSave('');
-  let ok = false;
-  try {
-    ok = navigator.sendBeacon(url, new Blob([JSON.stringify(payload)], { type: 'application/json' }));
-  } catch { ok = false; }
-  if (!ok) api.put(url, payload).catch(() => {});
+  let allOk = true;
+  for (const id of [...S.unsaved]) {
+    const ch = S.novel?.chapters.find((c) => c.id === id);
+    if (!ch) { S.unsaved.delete(id); continue; }
+    const url = `/api/novels/${S.novel.id}/chapters/${id}`;
+    const payload = chapterSavePayload(ch);
+    let ok = false;
+    try {
+      ok = navigator.sendBeacon(url, new Blob([JSON.stringify(payload)], { type: 'application/json' }));
+    } catch { ok = false; }
+    if (ok) S.unsaved.delete(id);
+    else {
+      allOk = false;
+      api.put(url, payload).catch(() => {});   // 尽力而为，但不清待存状态
+    }
+  }
+  S.dirty = S.unsaved.size > 0;
+  refreshSavePill();
+  return Promise.resolve(allOk);
 }
-window.addEventListener('beforeunload', () => flushSave({ beacon: true }));
-document.addEventListener('visibilitychange', () => { if (document.hidden) flushSave({ beacon: true }); });
+
+window.addEventListener('beforeunload', (e) => {
+  if (!S.unsaved.size && !S.saveErr) return;
+  flushSave({ beacon: true });
+  // 还没落盘、或上一次保存本来就失败（服务多半还没起来）→ 拦一下
+  if (S.unsaved.size || S.saveErr) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+// 切标签页只是「离开视线」，页面还活着 —— 走普通 PUT，失败时仍由重试接着管
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushSave().catch(() => {}); });
 
 function markDirty() {
-  S.dirty = true;
-  setSave('dirty');
+  const ch = currentChapter();
+  if (ch) S.unsaved.add(ch.id);
+  S.dirty = S.unsaved.size > 0;
+  S.saveErr = null;
+  refreshSavePill();
   saveChapterDebounced();
 }
+
+// 状态胶囊本身也是「保存」按钮：失败时点一下就重试
+function manualSave() {
+  if (!S.unsaved.size) return toast('没有需要保存的改动');
+  flushSave().then((ok) => toast(ok ? '已保存' : '保存失败，会自动重试', ok ? 'ok' : 'err'));
+}
+$('#savePill').addEventListener('click', manualSave);
 
 $('#chTitle').addEventListener('input', () => {
   const ch = currentChapter();
@@ -1127,12 +1258,11 @@ const saveNovelPart = debounce(async (part, msg) => {
   setSave('saving');
   try {
     await api.put(`/api/novels/${S.novel.id}`, part);
-    setSave('');
+    refreshSavePill();          // 别把「还有章节没落盘」误报成已保存
     if (msg) toast(msg, 'ok');
     loadNovels();
   } catch (err) { setSave('dirty', '保存失败'); toast(err.message, 'err'); }
 }, 700);
-
 const SKIP_KEYS = new Set(['kwText', 'relText', 'notes']);
 
 function field(label, key, obj, opts = {}) {
@@ -2028,7 +2158,7 @@ document.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   if (e.key === 's') {
     e.preventDefault();
-    if (S.dirty) { flushSave(); toast('已保存', 'ok'); }
+    manualSave();
   } else if ((e.key === 'z' || e.key === 'Z' || e.key === 'y' || e.key === 'Y') && $('#modalMask')?.hidden) {
     // Ctrl+Z 在别处（比如右侧助手区）也能撤销正文，只要没在输入框里、也没开着弹窗
     const tag = (e.target?.tagName || '').toLowerCase();
@@ -2068,7 +2198,7 @@ function cmdkSource() {
     op('重做', 'redo', () => { setView('studio'); doRedo(); }, 'Ctrl+Shift+Z');
     op('全书查找 / 替换', 'search', () => { setView('studio'); openFind(); }, 'Ctrl+F');
   }
-  op('立即保存', 'check', () => { if (S.dirty) { flushSave(); toast('已保存', 'ok'); } else toast('已经是最新'); }, 'Ctrl+S');
+  op('立即保存', 'check', manualSave, 'Ctrl+S');
   op('切换明暗主题', 'moon', () => $('#themeBtn').click());
 
   const go = (label, icon, v) => out.push({ g: '前往', label, icon, run: () => setView(v) });
