@@ -12,6 +12,7 @@ import {
 } from './store.js';
 import { buildTask, TASKS } from './prompts.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
+import { addWords, setGoal, statsSummary } from './stats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.join(ROOT, 'web');
@@ -372,6 +373,22 @@ function tryJson(text) {
 /* 路由                                                                */
 /* ------------------------------------------------------------------ */
 
+// 章节写盘：合并字段并顺手记录「今天写了多少字」。
+// 导入旧稿、恢复快照、全书替换都不经过这里，所以它们不会污染日更统计。
+// body.counted 是前端交上来的账本（"这次真的敲进去多少字"）——只看正文长度的话，
+// 撤销后重做会把同一段字记两遍，所以由前端记账、这里照单收下；
+// 没带账本（旧客户端 / 别的调用方）时退回「内容变多了就记」的老口径。
+const COUNTED_MAX = 200000;   // 单次保存的记账上限，挡住异常调用把统计冲爆
+function writeChapter(n, index, cid, body) {
+  const { counted, ...fields } = body || {};   // counted 只用于统计，不能混进章节数据
+  const before = countWords(n.chapters[index].content);
+  n.chapters[index] = { ...n.chapters[index], ...fields, id: cid, createdAt: n.chapters[index].createdAt };
+  const grown = countWords(n.chapters[index].content) - before;
+  const hint = Math.floor(Number(counted));
+  const delta = Number.isFinite(hint) && hint >= 0 ? Math.min(hint, COUNTED_MAX) : Math.max(0, grown);
+  if (delta > 0) addWords(n.id, delta);
+}
+
 async function handleApi(req, res, url) {
   const { pathname } = url;
   const method = req.method.toUpperCase();
@@ -415,6 +432,18 @@ async function handleApi(req, res, url) {
       delete next.apiKeySet;
       saveConfig(next);
       return sendJson(res, 200, { ok: true });
+    }
+  }
+
+  /* --- 今日码字量 / 日更目标 --- */
+  if (seg[1] === 'stats' && seg.length === 2) {
+    if (method === 'GET') {
+      return sendJson(res, 200, statsSummary({ days: url.searchParams.get('days') || 14 }));
+    }
+    if (method === 'POST') {
+      const body = await readBody(req);
+      if (body.goal !== undefined) setGoal(body.goal);
+      return sendJson(res, 200, statsSummary({ days: body.days || 14 }));
     }
   }
 
@@ -545,7 +574,7 @@ async function handleApi(req, res, url) {
         const body = await readBody(req);
         const i = n.chapters.findIndex((c) => c.id === cid);
         if (i < 0) return sendJson(res, 404, { error: '章节不存在' });
-        n.chapters[i] = { ...n.chapters[i], ...body, id: cid, createdAt: n.chapters[i].createdAt };
+        writeChapter(n, i, cid, body);
         saveNovel(n);
         return sendJson(res, 200, { chapter: n.chapters[i] });
       }
@@ -556,7 +585,7 @@ async function handleApi(req, res, url) {
         const body = await readBody(req);
         const i = n.chapters.findIndex((c) => c.id === cid);
         if (i < 0) return sendJson(res, 404, { error: '章节不存在' });
-        n.chapters[i] = { ...n.chapters[i], ...body, id: cid, createdAt: n.chapters[i].createdAt };
+        writeChapter(n, i, cid, body);
         saveNovel(n);
         return sendJson(res, 200, { ok: true });
       }

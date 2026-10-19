@@ -183,6 +183,8 @@ const S = {
   chapterId: null,
   config: null,
   dirty: false,
+  stats: null,
+  statsAt: 0,
   unsaved: new Set(),   // 还没写进磁盘的章节 id —— 按章追踪，切章后也不会忘
   savingId: null,
   saveErr: null,
@@ -228,7 +230,7 @@ function setView(v) {
   $$('#topnav .tab').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
   if (v === 'studio') renderStudio();
   if (v === 'bible') renderBible();
-  if (v === 'shelf') renderShelf();
+  if (v === 'shelf') { renderShelf(); loadStats(); }
   if (v === 'settings') renderSettings();
 }
 $$('#topnav .tab').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
@@ -294,7 +296,7 @@ function renderShelf() {
       <div class="bk-genre">${esc(n.genre || '未分类')}${(n.tags || []).length ? ' · ' + esc(n.tags.join(' ')) : ''}</div>
       <div class="bk-desc">${esc(n.logline || '还没有写简介')}</div>
       <div class="bk-line">
-        <span>${n.chapterCount} 章 · ${fmtWords(n.words)} 字</span>
+        <span>${n.chapterCount} 章 · ${fmtWords(n.words)} 字${todayOf(n.id) ? ` · <em class="bk-today">今日 ${fmtWords(todayOf(n.id))} 字</em>` : ''}</span>
         <span>${esc(fmtDate(n.updatedAt).slice(5, 10))}</span>
       </div>`;
     div.addEventListener('click', (e) => {
@@ -378,6 +380,114 @@ async function openNovel(id) {
 }
 
 /* ============================================================
+ * 今日码字量 / 日更目标（书架与工作台共用）
+ * ============================================================
+ * 数字由服务端在章节写盘时算（只算正文变多的部分），前端负责显示与设置目标。
+ * 刷新有 5 秒节流：每打一句就发一次请求没必要，但也不能让数字看起来是死的。
+ */
+let statsKeyShown = '';
+
+/** 这部作品今天写了多少字（没写过就是 0） */
+function todayOf(novelId) {
+  return Number(S.stats?.byNovelToday?.[novelId]) || 0;
+}
+
+async function loadStats({ force = false } = {}) {
+  if (!force && S.stats && Date.now() - S.statsAt < 5000) return S.stats;
+  try {
+    S.stats = await api.get('/api/stats?days=14');
+    S.statsAt = Date.now();
+  } catch {
+    return S.stats;                 // 统计读不到不影响写作，静默跳过
+  }
+  renderStats();
+  return S.stats;
+}
+
+function statChipHTML() {
+  const st = S.stats;
+  if (!st) return '';
+  const goal = st.goal || 0;
+  const pct = goal ? Math.min(100, Math.round((st.todayWords / goal) * 100)) : 0;
+  const done = goal > 0 && st.todayWords >= goal;
+  const tip = `今日 ${fmtWords(st.todayWords)} 字${goal ? ` / 目标 ${fmtWords(goal)} 字` : ''} · 点击查看写作统计`;
+  return `<button class="stat-chip${done ? ' done' : ''}" title="${tip}">
+    <svg class="ico"><use href="#i-pen" /></svg>
+    <span class="sc-num">今日 ${fmtWords(st.todayWords)} 字</span>
+    ${goal ? `<span class="sc-track"><i style="width:${pct}%"></i></span>` : ''}
+  </button>`;
+}
+
+function renderStats() {
+  const html = statChipHTML();
+  for (const sel of ['#shelfStats', '#footStats']) {
+    const el = $(sel);
+    if (!el) continue;
+    el.innerHTML = html;
+    el.firstElementChild?.addEventListener('click', openStatsModal);
+  }
+  // 书架卡片上的「今日」要跟着变，但只在真的变了才重建列表
+  const key = JSON.stringify(S.stats?.byNovelToday || {});
+  if (S.view === 'shelf' && key !== statsKeyShown) {
+    statsKeyShown = key;
+    renderShelf();
+  }
+}
+
+async function openStatsModal() {
+  const st = (await loadStats({ force: true })) || S.stats;
+  if (!st) return toast('统计还读不出来', 'err');
+  const goal = st.goal || 0;
+  const pct = goal ? Math.min(100, Math.round((st.todayWords / goal) * 100)) : 0;
+  const left = Math.max(0, goal - st.todayWords);
+  const max = Math.max(1, ...st.days.map((d) => d.words));
+  const bars = st.days.map((d) => {
+    const h = d.words ? Math.max(4, Math.round((d.words / max) * 100)) : 1.5;
+    const cls = `stat-col${d.date === st.today ? ' today' : ''}${d.words ? '' : ' zero'}`;
+    return `<div class="${cls}" title="${d.date}　${fmtWords(d.words)} 字"><span class="sc-fill"><i style="height:${h}%"></i></span><span class="sc-day">${d.date.slice(8)}</span></div>`;
+  }).join('');
+  showModal(`
+    <h3>写作统计</h3>
+    <p class="modal-sub">只算你真的写进正文的字。删字、撤销重做还原、导入旧稿、恢复快照、全书替换都不算今天的产出。</p>
+    <div class="stat-hero">
+      <div class="sh-line">
+        <b>${fmtWords(st.todayWords)}</b><span class="sh-unit">字</span>
+        ${goal
+          ? `<span class="sh-rest${left ? '' : ' ok'}">${left ? `距目标还差 ${fmtWords(left)} 字` : '今日目标已达成'}</span>`
+          : '<span class="sh-rest">今天还没设目标</span>'}
+      </div>
+      ${goal ? `<div class="stat-track big"><i style="width:${pct}%"></i></div>
+        <div class="sh-goal">${pct}% · 目标 ${fmtWords(goal)} 字/天</div>` : ''}
+    </div>
+    <div class="stat-cap">最近 14 天</div>
+    <div class="stat-chart">${bars}</div>
+    <div class="stat-foot">最近 7 天 ${fmtWords(st.week)} 字　·　连续 ${st.streak} 天　·　累计 ${fmtWords(st.total)} 字</div>
+    <div class="modal-foot">
+      <label class="goal-field">日更目标
+        <input id="goalInput" type="number" min="0" max="500000" step="500" value="${goal}" /> 字/天
+      </label>
+      <button class="btn" id="goalZero">不设目标</button>
+      <button class="btn btn-primary" id="goalSave">保存</button>
+    </div>
+  `, (box) => {
+    const saveGoal = async (value) => {
+      try {
+        const fresh = await api.send('/api/stats', { goal: value });
+        S.stats = fresh;
+        S.statsAt = Date.now();
+        renderStats();
+        closeModal();
+        toast(value ? `日更目标已设为 ${fmtWords(value)} 字` : '已取消日更目标', 'ok');
+      } catch (err) { toast(err.message, 'err'); }
+    };
+    const input = box.querySelector('#goalInput');
+    box.querySelector('#goalSave').addEventListener('click', () => saveGoal(Math.max(0, Math.floor(Number(input.value) || 0))));
+    box.querySelector('#goalZero').addEventListener('click', () => saveGoal(0));
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') box.querySelector('#goalSave').click(); });
+  });
+}
+
+/* ============================================================
  * 5. 工作台
  * ============================================================ */
 const currentChapter = () => S.novel?.chapters.find((c) => c.id === S.chapterId) || null;
@@ -447,6 +557,8 @@ function renderStudio() {
           const { novel } = await api.del(`/api/novels/${n.id}/chapters/${c.id}`);
           S.novel = novel;
           S.unsaved.delete(c.id);            // 这一章都不要了，别再补存
+          pendingCounted.delete(c.id);
+          countedWords.delete(c.id);
           S.dirty = S.unsaved.size > 0;
           refreshSavePill();
           if (S.chapterId === c.id) S.chapterId = novel.chapters[Math.min(i, novel.chapters.length - 1)]?.id || null;
@@ -463,7 +575,7 @@ function renderStudio() {
   $('#chTitle').value = ch?.title || '';
   const taEl = $('#chContent');
   const nextContent = ch?.content || '';
-  if (taEl.value !== nextContent) taEl.value = nextContent;   // 值没变就别赋值，免得光标被弹到末尾
+  if (taEl.value !== nextContent) { taEl.value = nextContent; resetCounted(ch); }   // 值没变就别赋值，免得光标被弹到末尾
   $('#chWords').textContent = `${countWords(nextContent)} 字`;
   histSync();
   $('#genWords').value = n.meta.targetWordsPerChapter || 3000;
@@ -477,6 +589,7 @@ function chapterSavePayload(ch) {
   return {
     title: ch.title, content: ch.content, summary: ch.summary,
     memory: ch.memory, status: ch.status, outline: ch.outline, outlineId: ch.outlineId,
+    counted: peekCounted(ch.id),        // 这次该给今日码字量记多少（见「码字量计数」）
   };
 }
 
@@ -520,8 +633,9 @@ async function saveChapterNow(id = S.chapterId) {
   const isCurrent = id === S.chapterId;
   saveChapterDebounced.cancel();
   if (isCurrent) { S.savingId = id; refreshSavePill(); }
+  const payload = chapterSavePayload(ch);
   try {
-    await api.put(`/api/novels/${S.novel.id}/chapters/${id}`, chapterSavePayload(ch));
+    await api.put(`/api/novels/${S.novel.id}/chapters/${id}`, payload);
   } catch (err) {
     // 期间可能已经有另一次保存把这一章写成功了（并发/重试重叠），那就别记这次失败
     if (!S.unsaved.has(id)) return false;
@@ -537,11 +651,13 @@ async function saveChapterNow(id = S.chapterId) {
   S.saveErr = null;
   saveRetryDelay = SAVE_RETRY_MIN;
   S.unsaved.delete(id);
+  commitCounted(id, payload.counted);   // 服务端收下了这次的字数，销账
   S.dirty = S.unsaved.size > 0;
   if (isCurrent) S.savingId = null;
   refreshSavePill();
   renderTopbarActions();
   loadNovels();
+  loadStats();          // 节流 5 秒：今日码字量跟着正文涨
   return true;
 }
 
@@ -577,10 +693,12 @@ function flushSave({ beacon = false } = {}) {
     try {
       ok = navigator.sendBeacon(url, new Blob([JSON.stringify(payload)], { type: 'application/json' }));
     } catch { ok = false; }
-    if (ok) S.unsaved.delete(id);
+    if (ok) { S.unsaved.delete(id); commitCounted(id, payload.counted); }
     else {
       allOk = false;
-      api.put(url, payload).catch(() => {});   // 尽力而为，但不清待存状态
+      // 尽力而为，但不清待存状态（页面可能下一秒就没了）；
+      // 若这次 PUT 其实成功了，也要把码字量的账销掉，免得留在页面里重复上报
+      api.put(url, payload).then(() => commitCounted(id, payload.counted)).catch(() => {});
     }
   }
   S.dirty = S.unsaved.size > 0;
@@ -640,6 +758,42 @@ const HIST = {
   last: 0,             // 上次记录时间，用于合并连续输入
   composing: false,    // 中文输入法组字中
 };
+
+/* ------------------------------------------------------------
+ * 码字量计数：只算「真的敲进去 / 插进去」的字
+ * ------------------------------------------------------------
+ * 服务端只能看到「正文变多了」，分不清那是你写的、还是撤销 / 重做还原回来的。
+ * 所以由前端记账：内容一变就比对字数，涨了才计；撤销重做还原的那次不计。
+ * 每次保存把账本交给服务端（counted 字段），保存成功了才销账。
+ * 这样「写 200 字 → 撤销 → 重做」只记 200 字，而不是 400 字。
+ */
+const countedWords = new Map();   // 章节 id → 上次记账时的字数
+const pendingCounted = new Map(); // 章节 id → 还没报给服务端的字数
+
+/** 内容变化后记账；counted=false 用于撤销 / 重做这类「还原」 */
+function countEditorChange(ch, { counted = true } = {}) {
+  if (!ch) return;
+  const w = countWords($('#chContent').value);
+  const prev = countedWords.has(ch.id) ? countedWords.get(ch.id) : w;
+  countedWords.set(ch.id, w);
+  if (counted && w > prev) pendingCounted.set(ch.id, (pendingCounted.get(ch.id) || 0) + (w - prev));
+}
+
+/** 这次保存该报多少字 */
+function peekCounted(id) { return pendingCounted.get(id) || 0; }
+
+/** 保存成功后销账：只扣掉确实报出去的那部分，期间新敲的继续留着 */
+function commitCounted(id, sent) {
+  const left = (pendingCounted.get(id) || 0) - (Number(sent) || 0);
+  if (left > 0) pendingCounted.set(id, left);
+  else pendingCounted.delete(id);
+}
+
+/** 切章 / 外部改动（替换、恢复快照）后重新立基准，别把别人的变化记成你写的 */
+function resetCounted(ch) {
+  if (ch) countedWords.set(ch.id, countWords($('#chContent').value));
+}
+
 const HIST_MAX = 120;         // 每章最多留多少步
 const HIST_MERGE_MS = 900;    // 这个间隔内的连续输入算一步
 const HIST_JUMP = 50;         // 一次变化超过这么多字，判定为程序写入 / 粘贴，单独成一步
@@ -724,6 +878,7 @@ function applySnap(snap) {
   const e = Math.max(s, Math.min(snap.e ?? s, len));
   HIST.cur = { v: snap.v, s, e };
   HIST.last = 0;
+  resetCounted(currentChapter());   // 撤销 / 重做是还原，不记码字量
   ta.focus();
   try { ta.setSelectionRange(s, e); } catch { /* 忽略 */ }
   editorChanged();             // 同步字数、脏标记、自动保存
@@ -758,12 +913,14 @@ $('#redoBtn').addEventListener('click', () => { doRedo(); $('#chContent').focus(
 $('#chContent').addEventListener('input', (e) => {
   // 中文输入法组字过程中不要记点，等 compositionend 一次性记
   if (!HIST.composing && !e.isComposing) histEdit();
+  countEditorChange(currentChapter());
   editorChanged();
 });
 $('#chContent').addEventListener('compositionstart', () => { HIST.composing = true; });
 $('#chContent').addEventListener('compositionend', () => {
   HIST.composing = false;
   histEdit();
+  countEditorChange(currentChapter());
   editorChanged();
 });
 
@@ -2200,6 +2357,7 @@ function cmdkSource() {
   }
   op('立即保存', 'check', manualSave, 'Ctrl+S');
   op('切换明暗主题', 'moon', () => $('#themeBtn').click());
+  op('写作统计 / 日更目标', 'stamp', () => openStatsModal());
 
   const go = (label, icon, v) => out.push({ g: '前往', label, icon, run: () => setView(v) });
   go('书架', 'book', 'shelf');
@@ -2314,6 +2472,7 @@ async function boot() {
   renderThemeIcon();
   try { await loadNovels(); } catch { S.novels = []; }
   setView('shelf');
+  loadStats();
   if (!S.config?.providers?.length) {
     setTimeout(() => toast('第一次使用：请到「设置」填好 Base URL 与 API Key'), 500);
   }

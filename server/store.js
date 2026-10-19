@@ -28,7 +28,9 @@ export function ensureDirs() {
 
 export function readJson(file, fallback) {
   try {
-    const raw = fs.readFileSync(file, 'utf8');
+    let raw = fs.readFileSync(file, 'utf8');
+    // 记事本等编辑器存 UTF-8 会带 BOM，JSON.parse 会直接报错 —— 手改过的文件也得能读
+    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
     if (!raw.trim()) return structuredClone(fallback);
     return JSON.parse(raw);
   } catch (err) {
