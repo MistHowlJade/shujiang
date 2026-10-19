@@ -148,6 +148,8 @@ export function getNovel(id) {
   n.outline.volumes ||= [];
   n.chapters ||= [];
   n.meta = { ...blankNovel().meta, ...(n.meta || {}) };
+  // 记下磁盘上的字数，saveNovel 用它判断这次落盘是不是「骤降」
+  lastWrittenWords.set(n.id, (n.chapters || []).reduce((s, c) => s + (c.words || countWords(c.content || '')), 0));
   return n;
 }
 
@@ -158,7 +160,18 @@ export function saveNovel(novel) {
     no: i + 1,
     words: countWords(c.content || ''),
   }));
+  // 覆盖前把旧版本留一份。
+  // 常规快照有 10 分钟节流；字数骤降（手滑删掉大段正文）时不等节流，立刻补一份。
+  const words = novel.chapters.reduce((s, c) => s + c.words, 0);
+  const prev = lastWrittenWords.get(novel.id);
+  const shrunk = typeof prev === 'number' && prev - words >= SHRINK_CHARS;
+  try {
+    createSnapshot(novel, shrunk
+      ? { kind: 'before-shrink', label: '大幅删减前', force: true }
+      : { kind: 'auto' });
+  } catch (err) { console.warn('[store] 快照失败', err.message); }
   writeJson(novelFile(novel.id), novel);
+  lastWrittenWords.set(novel.id, words);
   return novel;
 }
 
@@ -172,11 +185,101 @@ export function createNovel(payload) {
 
 export function deleteNovel(id) {
   const f = novelFile(id);
-  if (fs.existsSync(f)) {
-    fs.rmSync(f);
-    return true;
+  if (!fs.existsSync(f)) return false;
+  // 删除前留一份，误删可手工从 data/backups/<id>/ 里找回
+  try {
+    const n = readJson(f, null);
+    if (n && n.id) createSnapshot(n, { kind: 'before-delete', label: '删除前', force: true });
+  } catch (err) { console.warn('[store] 删除前备份失败', err.message); }
+  fs.rmSync(f);
+  return true;
+}
+
+/* ---------------- 版本历史（快照） ---------------- */
+
+export const BACKUPS_DIR = path.join(DATA_DIR, 'backups');
+
+const SNAP_INTERVAL = 10 * 60 * 1000; // 自动快照最短间隔：10 分钟
+const SNAP_KEEP_RECENT = 20;          // 无条件保留最近 20 条
+const SNAP_KEEP_MAX = 60;             // 上限 60 条，更早的按天抽样保留
+const SHRINK_CHARS = 800;             // 单次落盘字数骤降超过这个数，判定为「删了大段」
+
+// 各作品最近一次落盘的总字数，用于识别骤降（随进程生命周期，重启后第一次保存会自动重建）
+const lastWrittenWords = new Map();
+
+function snapDir(id) {
+  return path.join(BACKUPS_DIR, id);
+}
+function snapFile(id, ts) {
+  return path.join(snapDir(id), `${ts}.json`);
+}
+function snapIndexFile(id) {
+  return path.join(snapDir(id), 'index.json');
+}
+
+export function listSnapshots(id) {
+  const idx = readJson(snapIndexFile(id), []);
+  if (!Array.isArray(idx)) return [];
+  return idx
+    .filter((s) => s && typeof s.ts === 'number' && fs.existsSync(snapFile(id, s.ts)))
+    .sort((a, b) => b.ts - a.ts);
+}
+
+/** 把磁盘上的当前作品存成一份快照。kind: auto / manual / before-delete / before-restore / before-shrink */
+export function createSnapshot(novel, { kind = 'auto', label = '', force = false } = {}) {
+  if (!novel || !novel.id) return null;
+  const file = novelFile(novel.id);
+  if (!fs.existsSync(file)) return null; // 还没落过盘，没有可备份的内容
+  const idx = listSnapshots(novel.id);
+  const last = idx[0];
+  if (!force && last && Date.now() - last.ts < SNAP_INTERVAL) return null; // 常规快照的十分钟节流
+
+  // 元数据必须来自即将复制的文件本身：saveNovel 是在写入之前调用它的，
+  // 此刻磁盘上是上一个版本，用内存里的 novel 会记成新状态，列表就会张冠李戴。
+  const data = readJson(file, null);
+  if (!data || !data.id) return null;
+  const size = fs.statSync(file).size;
+  const chapters = (data.chapters || []).length;
+  const words = (data.chapters || []).reduce((s, c) => s + (c.words || countWords(c.content || '')), 0);
+
+  // 同一份内容短期内不重复备份：反复「写一段又删掉」时不会把历史刷爆
+  if (last && last.size === size && last.words === words && last.chapters === chapters
+      && Date.now() - last.ts < 5 * 60 * 1000) return null;
+
+  let ts = Date.now();
+  while (fs.existsSync(snapFile(novel.id, ts))) ts += 1;
+  fs.mkdirSync(snapDir(novel.id), { recursive: true });
+  fs.copyFileSync(file, snapFile(novel.id, ts));
+
+  const entry = { ts, kind, label, title: data.title || '', chapters, words, size };
+  pruneSnapshots(novel.id, [entry, ...idx]);
+  return entry;
+}
+
+/** 最近 20 条全留，更早的每天留一条，总数不超上限 */
+function pruneSnapshots(id, newestFirst) {
+  const DAY = 24 * 60 * 60 * 1000;
+  const keep = [];
+  let prev = Infinity;
+  for (const s of newestFirst) {
+    if (keep.length < SNAP_KEEP_RECENT) { keep.push(s); prev = s.ts; continue; }
+    if (keep.length >= SNAP_KEEP_MAX) break;
+    if (prev - s.ts >= DAY) { keep.push(s); prev = s.ts; }
   }
-  return false;
+  const keepSet = new Set(keep.map((s) => s.ts));
+  for (const s of newestFirst) {
+    if (keepSet.has(s.ts)) continue;
+    try { fs.rmSync(snapFile(id, s.ts)); } catch { /* 文件已不在，忽略 */ }
+  }
+  fs.mkdirSync(snapDir(id), { recursive: true });
+  writeJson(snapIndexFile(id), keep);
+  return keep;
+}
+
+export function readSnapshot(id, ts) {
+  if (!ts) return null;
+  const n = readJson(snapFile(id, ts), null);
+  return n && n.id ? n : null;
 }
 
 /* ---------------- 工具 ---------------- */

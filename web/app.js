@@ -30,6 +30,14 @@ function fmtDate(ts) {
   const p = (x) => String(x).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+function fmtAgo(ts) {
+  const d = Math.max(0, Date.now() - ts);
+  if (d < 60e3) return '刚刚';
+  if (d < 3600e3) return `${Math.floor(d / 60e3)} 分钟前`;
+  if (d < 864e5) return `${Math.floor(d / 3600e3)} 小时前`;
+  const days = Math.floor(d / 864e5);
+  return days < 30 ? `${days} 天前` : `${Math.floor(days / 30)} 个月前`;
+}
 const uid = (p = 'x') => `${p}_${Math.random().toString(36).slice(2, 10)}`;
 
 /** 极简 Markdown 渲染（标题 / 加粗 / 列表 / 行内代码），全部转义后拼装，安全 */
@@ -398,24 +406,38 @@ function renderStudio() {
   renderTopbarActions();
 }
 
+// 章节落盘的字段集合：自动保存 / 兜底保存 / 立即保存共用
+function chapterSavePayload(ch) {
+  return {
+    title: ch.title, content: ch.content, summary: ch.summary,
+    memory: ch.memory, status: ch.status, outline: ch.outline, outlineId: ch.outlineId,
+  };
+}
+
 const saveChapterDebounced = debounce(async () => {
-  const ch = currentChapter();
-  if (!ch || !S.novel) return;
-  setSave('saving');
   try {
-    await api.put(`/api/novels/${S.novel.id}/chapters/${ch.id}`, {
-      title: ch.title, content: ch.content, summary: ch.summary,
-      memory: ch.memory, status: ch.status, outline: ch.outline, outlineId: ch.outlineId,
-    });
-    setSave('');
-    S.dirty = false;
-    renderTopbarActions();
-    loadNovels();
+    await saveChapterNow();
   } catch (err) {
     setSave('dirty', '保存失败');
     toast(`保存失败：${err.message}`, 'err');
   }
 }, 600);
+
+/** 立刻把当前章写回服务端；返回是否真的写了。调用方可 await，用于「写盘后再做别的」的场景。 */
+async function saveChapterNow() {
+  const ch = currentChapter();
+  if (!ch || !S.novel || !S.dirty) return false;
+  const cid = ch.id;
+  const payload = chapterSavePayload(ch);
+  saveChapterDebounced.cancel();
+  setSave('saving');
+  await api.put(`/api/novels/${S.novel.id}/chapters/${cid}`, payload);
+  // 期间可能已切到别的章节，只认原来那一章的状态
+  if (S.chapterId === cid) { S.dirty = false; setSave(''); }
+  renderTopbarActions();
+  loadNovels();
+  return true;
+}
 
 // 兜底保存：失焦、切章、切标签页、关闭页面时立刻落盘。
 // beacon=true 只用于页面即将卸载的场景（sendBeacon 是唯一能活过卸载的方式），
@@ -423,26 +445,22 @@ const saveChapterDebounced = debounce(async () => {
 function flushSave({ beacon = false } = {}) {
   const ch = currentChapter();
   if (!ch || !S.novel || !S.dirty) return;
-  const payload = {
-    title: ch.title, content: ch.content, summary: ch.summary,
-    memory: ch.memory, status: ch.status, outline: ch.outline, outlineId: ch.outlineId,
-  };
+  if (!beacon) {
+    return saveChapterNow().catch((err) => {
+      setSave('dirty', '保存失败');
+      toast(`保存失败：${err.message}`, 'err');
+    });
+  }
   const url = `/api/novels/${S.novel.id}/chapters/${ch.id}`;
+  const payload = chapterSavePayload(ch);
   saveChapterDebounced.cancel();
   S.dirty = false;
   setSave('');
-  if (beacon) {
-    let ok = false;
-    try {
-      ok = navigator.sendBeacon(url, new Blob([JSON.stringify(payload)], { type: 'application/json' }));
-    } catch { ok = false; }
-    if (ok) return;
-  }
-  api.put(url, payload).catch((err) => {
-    S.dirty = true;
-    setSave('dirty', '保存失败');
-    toast(`保存失败：${err.message}`, 'err');
-  });
+  let ok = false;
+  try {
+    ok = navigator.sendBeacon(url, new Blob([JSON.stringify(payload)], { type: 'application/json' }));
+  } catch { ok = false; }
+  if (!ok) api.put(url, payload).catch(() => {});
 }
 window.addEventListener('beforeunload', () => flushSave({ beacon: true }));
 document.addEventListener('visibilitychange', () => { if (document.hidden) flushSave({ beacon: true }); });
@@ -737,9 +755,12 @@ function insertIntoContent(text, mode) {
   ta.dispatchEvent(new Event('input'));
 }
 $('#applyAppend').addEventListener('click', () => { if (S.out) { insertIntoContent(S.out, 'append'); toast('已追加到正文', 'ok'); } });
-$('#applyReplace').addEventListener('click', () => {
+$('#applyReplace').addEventListener('click', async () => {
   if (!S.out) return;
-  if (confirm('用输出内容替换本章正文？原有内容会被覆盖。')) { insertIntoContent(S.out, 'replace'); toast('已替换', 'ok'); }
+  if (!confirm('用输出内容替换本章正文？原有内容会被覆盖。')) return;
+  await snapshotNow('AI 替换前');   // 覆盖前留一份，替换错了能从版本历史里捞回来
+  insertIntoContent(S.out, 'replace');
+  toast('已替换，原稿可在「版本历史」找回', 'ok');
 });
 $('#applyInsert').addEventListener('click', () => { if (S.out) { insertIntoContent(S.out, 'insert'); toast('已插入光标处', 'ok'); } });
 
@@ -1630,6 +1651,108 @@ function exportBook() {
     });
 }
 
+/* ============================================================
+ * 10.5 版本历史（快照 / 恢复）
+ * ============================================================ */
+const SNAP_KIND = {
+  auto: '自动',
+  manual: '手动',
+  'before-delete': '删除前',
+  'before-restore': '恢复前',
+  'before-replace': '替换前',
+  'before-shrink': '大幅删减前',
+};
+
+async function snapshotNow(label) {
+  if (!S.novel) return null;
+  await saveChapterNow().catch(() => {});
+  try {
+    const j = await api.send(`/api/novels/${S.novel.id}/snapshots`, { label: label || '' });
+    return j.snapshot;
+  } catch {
+    return null; // 快照只是保险，失败不该挡住正在做的事
+  }
+}
+
+async function openHistory() {
+  if (!S.novel) return toast('先打开作品', 'err');
+  await saveChapterNow().catch(() => {});
+  const novelId = S.novel.id;
+  showModal(`<h3>版本历史 · 《${esc(S.novel.title)}》</h3>
+    <p class="modal-sub">写作时每 10 分钟自动存一份；AI 替换正文、删除章节前也会自动备份。恢复前会先把当前版本存一份，所以恢复本身也能撤回。</p>
+    <div class="hist-bar">
+      <button class="btn btn-primary btn-sm" id="histNow">${ico('clock')}立即备份当前版本</button>
+      <span class="hist-count" id="histCount"></span>
+    </div>
+    <div class="hist-list" id="histList"><div class="hist-empty">读取中…</div></div>
+    <div class="modal-foot"><button class="btn btn-text" id="histClose">关闭</button></div>`,
+  (box) => {
+    const listEl = box.querySelector('#histList');
+    const countEl = box.querySelector('#histCount');
+    box.querySelector('#histClose').onclick = closeModal;
+
+    const render = (list) => {
+      countEl.textContent = list.length ? `已保存 ${list.length} 个版本` : '';
+      if (!list.length) {
+        listEl.innerHTML = `<div class="hist-empty">还没有版本记录。<br>继续写作会自动留下快照，也可以点上面的「立即备份」。</div>`;
+        return;
+      }
+      listEl.innerHTML = list.map((s) => `
+        <div class="hist-row">
+          <div class="hist-info">
+            <div class="hist-when">
+              <b>${esc(fmtAgo(s.ts))}</b>
+              <span class="hist-kind k-${esc(s.kind)}">${esc(SNAP_KIND[s.kind] || '快照')}</span>
+            </div>
+            <div class="hist-meta">${s.label ? `${esc(s.label)} · ` : ''}${esc(fmtDate(s.ts))} · ${s.chapters} 章 · ${fmtWords(s.words)} 字 · ${Math.max(1, Math.round(s.size / 1024))} KB</div>
+          </div>
+          <button class="btn btn-sm hist-restore" data-ts="${s.ts}">${ico('rotate')}恢复</button>
+        </div>`).join('');
+      listEl.querySelectorAll('.hist-restore').forEach((btn) => {
+        btn.onclick = async () => {
+          const ts = Number(btn.dataset.ts);
+          if (!confirm(`恢复到 ${fmtDate(ts)} 的版本？\n当前内容会先自动备份一份，可以再撤回。`)) return;
+          btn.disabled = true;
+          try {
+            await api.send(`/api/novels/${novelId}/restore`, { ts });
+            closeModal();
+            await loadNovels();
+            await openNovel(novelId);
+            toast(`已恢复到 ${fmtDate(ts)} 的版本`, 'ok');
+          } catch (err) {
+            btn.disabled = false;
+            toast(`恢复失败：${err.message}`, 'err');
+          }
+        };
+      });
+    };
+
+    const load = async () => {
+      try {
+        const j = await api.get(`/api/novels/${novelId}/snapshots`);
+        render(j.snapshots || []);
+      } catch (err) {
+        listEl.innerHTML = `<div class="hist-empty">读取失败：${esc(err.message)}</div>`;
+      }
+    };
+
+    box.querySelector('#histNow').onclick = async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        const snap = await snapshotNow('手动备份');
+        if (snap) { toast('已备份当前版本', 'ok'); await load(); }
+        else toast('备份失败', 'err');
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    load();
+  });
+}
+$('#historyBtn').addEventListener('click', () => openHistory());
+
 /* ---------------- 快捷键 ---------------- */
 document.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
@@ -1660,6 +1783,7 @@ function cmdkSource() {
     op('一致性检查', 'shield', () => { setView('studio'); showAssistTab('check'); $('#consistencyBtn').click(); });
     op('责编评审', 'stamp', () => { setView('studio'); showAssistTab('check'); $('#reviewBtn').click(); });
     op('导出作品', 'download', () => exportBook(), 'Ctrl+Shift+E');
+    op('版本历史', 'clock', () => { setView('studio'); openHistory(); });
   }
   op('立即保存', 'check', () => { if (S.dirty) { flushSave(); toast('已保存', 'ok'); } else toast('已经是最新'); }, 'Ctrl+S');
   op('切换明暗主题', 'moon', () => $('#themeBtn').click());

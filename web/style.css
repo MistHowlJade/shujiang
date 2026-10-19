@@ -760,6 +760,40 @@ kbd {
 .modal .field-label:first-of-type { margin-top: 0; }
 .modal textarea { min-height: 170px; font-family: var(--font-write); font-size: 13.5px; line-height: 1.85; }
 
+/* ---------------- 版本历史 ---------------- */
+.modal-sub { margin: -6px 0 16px; color: var(--text-3); font-size: 12px; line-height: 1.75; }
+.hist-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.hist-count { color: var(--text-3); font-size: 11.5px; }
+.hist-list {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 46vh; overflow: auto; margin: 0 -4px; padding: 2px 4px;
+}
+.hist-empty { padding: 28px 12px; text-align: center; color: var(--text-3); font-size: 12.5px; line-height: 1.9; }
+.hist-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 11px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
+  transition: border-color .15s var(--ease);
+}
+.hist-row:hover { border-color: var(--border-2); }
+.hist-info { flex: 1; min-width: 0; }
+.hist-when { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-1); }
+.hist-when b { font-weight: 600; }
+.hist-kind {
+  flex: none; padding: 1px 6px; font-size: 10px; line-height: 1.6;
+  color: var(--text-2); background: var(--surface-3);
+  border: 1px solid var(--border); border-radius: var(--r-full);
+}
+.hist-kind.k-manual { color: var(--accent-hover); background: var(--accent-bg); border-color: var(--accent-line); }
+.hist-kind.k-before-delete,
+.hist-kind.k-before-shrink { color: var(--danger); background: var(--danger-bg); border-color: rgba(235, 87, 87, .4); }
+.hist-kind.k-before-replace,
+.hist-kind.k-before-restore { color: var(--warning); background: var(--warning-bg); border-color: rgba(226, 179, 85, .4); }
+.hist-meta {
+  margin-top: 3px; color: var(--text-3); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hist-restore { flex: none; }
+
 .toast-wrap {
   position: fixed; right: 20px; bottom: 20px; z-index: 200;
   display: flex; flex-direction: column; align-items: flex-end; gap: 8px;

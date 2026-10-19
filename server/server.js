@@ -8,6 +8,7 @@ import { exec } from 'node:child_process';
 import {
   ROOT, DATA_DIR, ensureDirs, loadConfig, saveConfig, maskKey,
   listNovels, createNovel, getNovel, saveNovel, deleteNovel, newId, countWords,
+  listSnapshots, createSnapshot, readSnapshot,
 } from './store.js';
 import { buildTask, TASKS } from './prompts.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
@@ -326,6 +327,35 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { novel: saveNovel(merged) });
     }
 
+    // 版本历史：列表 / 立即备份 / 恢复
+    if (seg[3] === 'snapshots' && seg.length === 4) {
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      if (method === 'GET') return sendJson(res, 200, { snapshots: listSnapshots(id) });
+      if (method === 'POST') {
+        const body = await readBody(req);
+        const snapshot = createSnapshot(n, {
+          kind: 'manual',
+          label: typeof body.label === 'string' ? body.label.slice(0, 40) : '',
+          force: true,
+        });
+        return sendJson(res, 200, { snapshot, snapshots: listSnapshots(id) });
+      }
+    }
+    if (seg[3] === 'restore' && seg.length === 4 && method === 'POST') {
+      const body = await readBody(req);
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      const snap = readSnapshot(id, Number(body.ts));
+      if (!snap) return sendJson(res, 404, { error: '快照不存在或已被清理' });
+      // 恢复前先把当前状态存一份，恢复本身也能撤回
+      createSnapshot(n, { kind: 'before-restore', label: '恢复前', force: true });
+      snap.id = n.id;
+      snap.updatedAt = Date.now();
+      saveNovel(snap);
+      return sendJson(res, 200, { novel: snap });
+    }
+
     // 章节集合
     if (seg[3] === 'chapters') {
       const n = getNovel(id);
@@ -372,6 +402,10 @@ async function handleApi(req, res, url) {
 
       if (method === 'DELETE' && seg.length === 5) {
         const cid = seg[4];
+        const ch = n.chapters.find((c) => c.id === cid);
+        if (!ch) return sendJson(res, 404, { error: '章节不存在' });
+        // 删章是不可逆操作，不依赖 10 分钟节流，强制留一份
+        createSnapshot(n, { kind: 'before-delete', label: `删除章节前：${ch.title || '未命名'}`, force: true });
         n.chapters = n.chapters.filter((c) => c.id !== cid);
         saveNovel(n);
         return sendJson(res, 200, { novel: n });
