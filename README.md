@@ -126,7 +126,8 @@ web/
   style.css    设计系统（明暗双主题令牌）
   app.js       前端全部逻辑
 dev/
-  mock-openai.js  假模型调试服务（可选，不联网）
+  mock-openai.js      假模型调试服务（可选，不联网）
+  gen-large-novel.js  生成大稿用于性能测试（120 章 × 3000 字只需几秒）
 tools/node/    项目内便携 Node 运行时（可删，改用系统 Node）
 ```
 

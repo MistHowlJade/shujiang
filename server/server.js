@@ -213,6 +213,9 @@ async function upstreamErrorText(resp) {
 async function handleApi(req, res, url) {
   const { pathname } = url;
   const method = req.method.toUpperCase();
+  // DELETE 的处理逻辑不需要请求体。若不主动排空，Node 在响应后会丢弃未读数据，
+  // 浏览器侧会表现为「200 + 空响应」或 Failed to fetch（前端拿不到 novel 就会把界面清空）。
+  if (method === 'DELETE') req.resume();
   const seg = pathname.split('/').filter(Boolean); // ['api', 'novels', ':id', ...]
 
   /* --- 配置 --- */
@@ -370,19 +373,6 @@ async function handleApi(req, res, url) {
       if (method === 'DELETE' && seg.length === 5) {
         const cid = seg[4];
         n.chapters = n.chapters.filter((c) => c.id !== cid);
-        saveNovel(n);
-        return sendJson(res, 200, { novel: n });
-      }
-
-      if (method === 'POST' && seg[4] === 'reorder') {
-        const body = await readBody(req);
-        const order = body.order || [];
-        const map = new Map(n.chapters.map((c) => [c.id, c]));
-        const next = order.map((cid) => map.get(cid)).filter(Boolean);
-        n.chapters.forEach((c) => {
-          if (!order.includes(c.id)) next.push(c);
-        });
-        n.chapters = next;
         saveNovel(n);
         return sendJson(res, 200, { novel: n });
       }

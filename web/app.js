@@ -10,7 +10,9 @@ const ico = (name, cls = '') => `<svg class="ico ${cls}"><use href="#i-${name}" 
 
 function debounce(fn, ms) {
   let t;
-  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+  const d = (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+  d.cancel = () => { clearTimeout(t); t = null; };
+  return d;
 }
 function toast(msg, kind = '') {
   const box = document.createElement('div');
@@ -73,13 +75,20 @@ const api = {
     return j;
   },
   async send(url, body, method = 'POST') {
-    const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    // 只有确实要发数据时才带 body 与 Content-Type。
+    // DELETE 带 body 而服务端不读时，连接会被重置（表现为 200 + 空响应 或 Failed to fetch）。
+    const opt = { method };
+    if (body !== undefined) {
+      opt.headers = { 'Content-Type': 'application/json' };
+      opt.body = JSON.stringify(body);
+    }
+    const r = await fetch(url, opt);
     const j = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
     return j;
   },
   put(url, body) { return this.send(url, body, 'PUT'); },
-  del(url) { return this.send(url, {}, 'DELETE'); },
+  del(url) { return this.send(url, undefined, 'DELETE'); },
 };
 
 /** 流式生成：逐块回调，返回完整文本 */
@@ -408,25 +417,35 @@ const saveChapterDebounced = debounce(async () => {
   }
 }, 600);
 
-// 兜底保存：失焦、切走标签页、关闭页面时立刻落盘（后台标签页的定时器会被节流）
-function flushSave() {
+// 兜底保存：失焦、切章、切标签页、关闭页面时立刻落盘。
+// beacon=true 只用于页面即将卸载的场景（sendBeacon 是唯一能活过卸载的方式），
+// 但它有 64KB 上限且失败时返回 false —— 所以其余场景一律走普通 PUT，避免长章节静默丢失。
+function flushSave({ beacon = false } = {}) {
   const ch = currentChapter();
   if (!ch || !S.novel || !S.dirty) return;
-  const payload = JSON.stringify({
+  const payload = {
     title: ch.title, content: ch.content, summary: ch.summary,
     memory: ch.memory, status: ch.status, outline: ch.outline, outlineId: ch.outlineId,
-  });
+  };
   const url = `/api/novels/${S.novel.id}/chapters/${ch.id}`;
-  try {
-    navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }));
-    S.dirty = false;
-    setSave('');
-  } catch {
-    api.put(url, JSON.parse(payload)).catch(() => {});
+  saveChapterDebounced.cancel();
+  S.dirty = false;
+  setSave('');
+  if (beacon) {
+    let ok = false;
+    try {
+      ok = navigator.sendBeacon(url, new Blob([JSON.stringify(payload)], { type: 'application/json' }));
+    } catch { ok = false; }
+    if (ok) return;
   }
+  api.put(url, payload).catch((err) => {
+    S.dirty = true;
+    setSave('dirty', '保存失败');
+    toast(`保存失败：${err.message}`, 'err');
+  });
 }
-window.addEventListener('beforeunload', flushSave);
-document.addEventListener('visibilitychange', () => { if (document.hidden) flushSave(); });
+window.addEventListener('beforeunload', () => flushSave({ beacon: true }));
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushSave({ beacon: true }); });
 
 function markDirty() {
   S.dirty = true;
