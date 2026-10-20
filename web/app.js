@@ -195,6 +195,7 @@ const S = {
   controller: null,
   batchController: null,   // 批量补记忆：跑的时候不许关弹窗，也不许再起别的 AI 任务
   stageFilter: '',         // 章节列表筛选：'' / 'open' / 'draft' / 'revising' / 'done'
+  threadFilter: 'all',     // 线索页筛选：all / unresolved / foreshadowing
   out: '',
   reasoning: '',
   lastOp: null,
@@ -384,6 +385,7 @@ async function openNovel(id, opts = {}) {
   S.out = ''; S.reasoning = '';
   volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   S.stageFilter = '';          // 筛选也一样，换作品先看全貌
+  S.threadFilter = 'all';      // 线索页也回到全部
   setView('studio');
   renderStudio();
 }
@@ -720,15 +722,18 @@ function openMoveChapterModal(index) {
   });
 }
 
-/** 章节右侧 ⋯ 菜单：调整这一章归哪一卷 / 状态 */
+/** 章节右侧 ⋯ 菜单：查看记忆 / 调整这一章归哪一卷、状态 */
 function openChapterMenu(anchor, index) {
   const eff = effVolumeIds();
   const cur = eff[index] || '';
   const prev = neighborVolume(eff, index, -1);
   const next = neighborVolume(eff, index, 1);
   const label = (x) => (x ? (volumeTitle(x.id) || '未分卷') : '未分卷');
-  const stage = stageOf(S.novel?.chapters[index]);
+  const ch = S.novel?.chapters[index];
+  const stage = stageOf(ch);
   showPop(anchor, [
+    { label: '查看章节记忆', disabled: !ch?.memory, run: () => ch?.memory && openMemoryModal(ch) },
+    '-',
     { label: `并入上一卷（${label(prev)}）`, disabled: !prev, run: () => setChapterVolume(index, prev ? prev.id : '') },
     { label: `并入下一卷（${label(next)}）`, disabled: !next, run: () => setChapterVolume(index, next ? next.id : '') },
     '-',
@@ -1082,14 +1087,15 @@ function renderStudio() {
     li.innerHTML = `
       <span class="ci-no">${i + 1}</span>
       <span class="ci-title">${esc(c.title || '未命名')}</span>
-      <span class="ci-words">${c.memory ? '<i class="ci-mem" title="已有章节记忆"></i>' : ''}${w || ''}</span>
+      <span class="ci-words">${c.memory ? '<button type="button" class="ci-mem" data-a="memory" title="查看本章记忆" aria-label="查看本章记忆"></button>' : ''}${w || ''}</span>
       <span class="ci-act">${moveButtons}
         <button class="mini-act" data-a="menu" title="分卷 / 本章操作">${ico('more')}</button>
         <button class="mini-act del" data-a="del" title="删除本章">${ico('x')}</button>
       </span>`;
     li.addEventListener('click', (e) => {
-      const act = e.target.closest('.mini-act')?.dataset.a;
+      const act = e.target.closest('.mini-act, .ci-mem')?.dataset.a;
       if (!act) return selectChapter(c.id);
+      if (act === 'memory') return openMemoryModal(c);
       if (act === 'up' && !filtered && i > 0) return moveChapter(i, i - 1);
       if (act === 'down' && !filtered && i < n.chapters.length - 1) return moveChapter(i, i + 1);
       if (act === 'menu') return openChapterMenu(e.target.closest('.mini-act'), i);
@@ -1984,6 +1990,62 @@ $('#applyReplace').addEventListener('click', async () => {
 $('#applyInsert').addEventListener('click', () => { if (S.out) { insertIntoContent(S.out, 'insert'); toast('已插入光标处 · 按 Ctrl+Z 可撤销', 'ok'); } });
 
 /* ============================================================
+ * 章节记忆查看 / 线索追踪
+ * ============================================================ */
+/** 章节记忆里的数组字段可能是字符串数组，也可能被模型写成 {text/title}；统一成可显示的文本 */
+function memoryItems(mem, key) {
+  const raw = mem?.[key];
+  const list = Array.isArray(raw) ? raw : (typeof raw === 'string' ? [raw] : []);
+  return list.map((item) => {
+    if (typeof item === 'string') return item;
+    if (item && typeof item === 'object') return item.text || item.title || item.name || item.character || item.event || item.state || item.summary || '';
+    return '';
+  }).map((text) => String(text).replace(/\s+/g, ' ').trim()).filter(Boolean);
+}
+
+function memoryListHtml(title, items) {
+  if (!items.length) return '';
+  return `<section class="mem-block"><h4>${title}</h4><ul class="mem-list">${items.map((item) => `<li>${esc(item)}</li>`).join('')}</ul></section>`;
+}
+
+function openMemoryModal(ch) {
+  if (!ch?.memory) return toast('本章还没有章节记忆', 'err');
+  const mem = ch.memory;
+  const no = ch.no || (S.novel?.chapters.indexOf(ch) + 1) || 1;
+  const summary = String(mem.summary || '').trim() || String(ch.summary || '').trim();
+  const blocks = [
+    memoryListHtml('关键事件', memoryItems(mem, 'events')),
+    memoryListHtml('出场人物', memoryItems(mem, 'characters')),
+    memoryListHtml('状态变化', memoryItems(mem, 'stateChanges')),
+    memoryListHtml('伏笔', memoryItems(mem, 'foreshadowing')),
+    memoryListHtml('未决', memoryItems(mem, 'unresolved')),
+  ].filter(Boolean).join('');
+  const empty = !summary && !blocks;
+  showModal(`<div class="mem-head"><h3>章节记忆</h3><button class="icon-btn sm mem-x" id="memX" title="关闭" aria-label="关闭">${ico('x')}</button></div>
+    <p class="modal-sub">第 ${no} 章《${esc(ch.title || '未命名')}》 · 后续章节会按相关度召回这份记忆。</p>
+    ${empty
+      ? '<div class="mem-empty">这条记忆里还没有可显示的内容。可以重新生成，或先补全本章正文。</div>'
+      : `${summary ? `<section class="mem-block"><h4>概要</h4><p class="mem-summary">${esc(summary)}</p></section>` : ''}${blocks}`}
+    <div class="modal-foot mem-foot">
+      <button class="btn btn-text" id="memOpen">打开本章</button>
+      <button class="btn btn-text" id="memRegen">重新生成</button>
+      <button class="btn btn-primary" id="memClose">关闭</button>
+    </div>`, (box) => {
+    box.querySelector('#memOpen').onclick = () => { closeModal(); openChapterFromIndex(ch.id); };
+    box.querySelector('#memClose').onclick = () => closeModal();
+    box.querySelector('#memX').onclick = () => closeModal();
+    box.querySelector('#memRegen').onclick = () => {
+      if (!confirm('重新生成会覆盖当前章节记忆，继续？')) return;
+      const chapterId = ch.id;
+      closeModal();
+      if (S.view !== 'studio') setView('studio');
+      if (S.chapterId !== chapterId) selectChapter(chapterId);
+      setTimeout(() => $('[data-quick="memory"]')?.click(), 30);
+    };
+  });
+}
+
+/* ============================================================
  * 批量补章节记忆
  * ============================================================ */
 function memoryCandidates(from, to, skipExisting) {
@@ -2369,6 +2431,7 @@ function renderBible() {
   if (bibleTab === 'characters') return renderCharactersTab(host, n);
   if (bibleTab === 'world') return renderWorldTab(host, n);
   if (bibleTab === 'timeline') return renderTimelineTab(host, n);
+  if (bibleTab === 'threads') return renderThreadsTab(host, n);
   return renderStyleTab(host, n);
 }
 
@@ -2817,6 +2880,108 @@ function renderWorldTab(host, n) {
     arr.forEach((x) => n.bible.world.push({ id: uid('w'), keywords: [], ...x, keywords: x.keywords || [] }));
     renderBible();
     saveNovelPart({ bible: n.bible }, `已加入 ${arr.length} 条世界观`);
+  };
+}
+
+/* ---- 线索追踪 ---- */
+const THREAD_KINDS = {
+  unresolved: { label: '未决', order: 0 },
+  foreshadowing: { label: '伏笔', order: 1 },
+};
+
+function collectThreads(n) {
+  const map = new Map();
+  for (const [index, ch] of (n.chapters || []).entries()) {
+    if (!ch.memory) continue;
+    const no = ch.no || index + 1;
+    for (const kind of Object.keys(THREAD_KINDS)) {
+      for (const text of memoryItems(ch.memory, kind)) {
+        const key = `${kind}\u0000${text}`;
+        let item = map.get(key);
+        if (!item) {
+          item = { kind, text, chapters: [] };
+          map.set(key, item);
+        }
+        if (!item.chapters.some((x) => x.id === ch.id)) {
+          item.chapters.push({ id: ch.id, no, title: ch.title || '' });
+        }
+      }
+    }
+  }
+  return [...map.values()].map((item) => {
+    const nos = [...new Set(item.chapters.map((c) => c.no))].sort((a, b) => a - b);
+    const latest = item.chapters.reduce((a, b) => (b.no >= a.no ? b : a), item.chapters[0]);
+    return { ...item, nos, latest };
+  }).sort((a, b) => {
+    const lastA = a.nos[a.nos.length - 1] || 0;
+    const lastB = b.nos[b.nos.length - 1] || 0;
+    return lastB - lastA
+      || THREAD_KINDS[a.kind].order - THREAD_KINDS[b.kind].order
+      || a.text.localeCompare(b.text, 'zh');
+  });
+}
+
+function threadMeta(item) {
+  const nos = item.nos || [];
+  if (nos.length <= 1) return `第 ${nos[0] || '?'} 章`;
+  if (nos.length <= 4) return `第 ${nos.join('、')} 章`;
+  return `第 ${nos[0]}–${nos[nos.length - 1]} 章 · 跨 ${nos.length} 章`;
+}
+
+function renderThreadsTab(host, n) {
+  const threads = collectThreads(n);
+  const counts = {
+    unresolved: threads.filter((t) => t.kind === 'unresolved').length,
+    foreshadowing: threads.filter((t) => t.kind === 'foreshadowing').length,
+  };
+  const total = threads.length;
+  const memCount = (n.chapters || []).filter((c) => c.memory).length;
+  const filter = ['all', 'unresolved', 'foreshadowing'].includes(S.threadFilter) ? S.threadFilter : 'all';
+  const visible = filter === 'all' ? threads : threads.filter((t) => t.kind === filter);
+  host.innerHTML = `
+    <div class="bible-block">
+      <h2>线索追踪
+        <span style="flex:1"></span>
+        <button class="btn btn-sm" id="threadsBatch">${ico('refresh')}批量补记忆</button>
+      </h2>
+      <p class="dim small">从每章记忆的「未决」「伏笔」自动汇总，重复的线索会合并；点一条可跳到最近提到的章节。它不替代设定库，只是把散在几十万字里的线头集中起来。线索是否已经回收，以正文为准。</p>
+      <div class="thread-stats">
+        <span class="thread-stat"><b>${counts.unresolved}</b> 条未决</span>
+        <span class="thread-stat"><b>${counts.foreshadowing}</b> 条伏笔</span>
+        <span class="thread-stat">已读取 <b>${memCount}</b> / ${n.chapters.length} 章记忆</span>
+      </div>
+      ${total ? `<div class="segmented thread-filter" id="threadFilter">
+        ${[
+          ['all', '全部', total],
+          ['unresolved', '未决', counts.unresolved],
+          ['foreshadowing', '伏笔', counts.foreshadowing],
+        ].map(([kind, label, count]) => `<button data-tf="${kind}" class="${filter === kind ? 'on' : ''}">${label} ${count}</button>`).join('')}
+      </div>` : ''}
+      <div class="thread-list">
+        ${visible.length ? visible.map((item) => `<button type="button" class="thread-row" data-thread-ch="${item.latest.id}" title="跳到第 ${item.latest.no} 章">
+          <span class="thread-kind ${item.kind}">${THREAD_KINDS[item.kind].label}</span>
+          <span class="thread-text">${esc(item.text)}</span>
+          <span class="thread-meta">${threadMeta(item)}</span>
+        </button>`).join('') : `<div class="thread-empty">${total
+          ? '没有符合当前筛选的线索。'
+          : memCount
+            ? '章节记忆里还没有未决或伏笔记录。'
+            : '还没有章节记忆。先给已写章节批量补记忆，这里才会出现未决和伏笔。'}</div>`}
+      </div>
+      ${memCount > 0 && memCount < n.chapters.length ? `<p class="dim small thread-hint">还有 ${n.chapters.length - memCount} 章没有章节记忆，线索可能不完整。</p>` : ''}
+    </div>`;
+  $$('#threadFilter button', host).forEach((btn) => {
+    btn.onclick = () => {
+      S.threadFilter = btn.dataset.tf;
+      renderThreadsTab(host, n);
+    };
+  });
+  $$('.thread-row', host).forEach((row) => {
+    row.onclick = () => openChapterFromIndex(row.dataset.threadCh);
+  });
+  $('#threadsBatch', host).onclick = () => {
+    setView('studio');
+    openBatchMemory();
   };
 }
 
