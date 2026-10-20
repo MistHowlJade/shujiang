@@ -9,7 +9,7 @@ import {
   ROOT, DATA_DIR, ensureDirs, loadConfig, saveConfig, maskKey,
   listNovels, createNovel, getNovel, saveNovel, deleteNovel, newId, countWords,
   listSnapshots, createSnapshot, readSnapshot, chapterVolumeIds, volumeLabel,
-  CHAPTER_STAGES,
+  findOutlineEntry, CHAPTER_STAGES,
 } from './store.js';
 import { buildTask, TASKS } from './prompts.js';
 import { buildEpub } from './epub.js';
@@ -392,6 +392,19 @@ function writeChapter(n, index, cid, body) {
   if (delta > 0) addWords(n.id, delta);
 }
 
+const OUTLINE_KEYS = ['scene', 'characters', 'summary', 'hook'];
+const OUTLINE_FIELD_MAX = 4000;
+
+// 章纲只收这四个文本字段，去掉首尾空白；空字段不落盘，免得 JSON 里堆一串空串
+function cleanOutline(raw) {
+  const out = {};
+  for (const key of OUTLINE_KEYS) {
+    const value = typeof raw?.[key] === 'string' ? raw[key].trim() : '';
+    if (value) out[key] = value.slice(0, OUTLINE_FIELD_MAX);
+  }
+  return out;
+}
+
 async function handleApi(req, res, url) {
   const { pathname } = url;
   const method = req.method.toUpperCase();
@@ -573,6 +586,30 @@ async function handleApi(req, res, url) {
         else n.chapters.push(ch);
         saveNovel(n);
         return sendJson(res, 200, { chapter: ch, novel: n });
+      }
+
+      // 章纲编辑：一次写回「本章快照 + 设定库里的对应章纲」，避免两处各改一半。
+      // 只动章纲字段，不碰正文、标题和写作状态。
+      if (method === 'PUT' && seg.length === 6 && seg[5] === 'outline') {
+        const cid = seg[4];
+        const body = await readBody(req);
+        if (!body || typeof body.outline !== 'object' || body.outline === null) {
+          return sendJson(res, 400, { error: 'outline 必须是一个对象' });
+        }
+        const i = n.chapters.findIndex((c) => c.id === cid);
+        if (i < 0) return sendJson(res, 404, { error: '章节不存在' });
+        const outline = cleanOutline(body.outline);
+        const ch = n.chapters[i];
+        ch.outline = Object.keys(outline).length ? outline : null;
+        const linked = findOutlineEntry(n, ch.outlineId)?.entry || null;
+        if (linked) {
+          for (const key of OUTLINE_KEYS) {
+            if (Object.prototype.hasOwnProperty.call(outline, key)) linked[key] = outline[key];
+            else delete linked[key];
+          }
+        }
+        saveNovel(n);
+        return sendJson(res, 200, { chapter: n.chapters[i], linkedOutlineId: linked?.id || '' });
       }
 
       if (method === 'PUT' && seg.length === 5) {

@@ -352,6 +352,25 @@ body[data-theme="light"] .segmented button.on { box-shadow: var(--sh-1); }
   background: var(--surface-3); border: 1px solid var(--border);
   padding: 1px 5px; border-radius: var(--r-xs);
 }
+
+/* 写作栏：本章章纲卡片 */
+.chapter-outline-card { padding: 12px 14px; }
+.co-head { display: flex; align-items: center; gap: 7px; min-height: 24px; }
+.co-title { font-size: 12px; font-weight: 600; color: var(--text-1); }
+.co-badge {
+  padding: 1px 7px; border: 1px solid var(--border); border-radius: var(--r-full);
+  background: var(--surface-3); color: var(--text-4); font-size: 10px; line-height: 1.55; white-space: nowrap;
+}
+.co-badge.linked { border-color: transparent; background: var(--accent-bg); color: var(--accent-hover); }
+.co-grow { flex: 1; }
+.co-act { height: 24px; padding: 0 7px; font-size: 11px; }
+.co-body { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.co-row { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 7px; align-items: start; }
+.co-k { padding-top: 1px; color: var(--text-4); font-size: 10.5px; }
+.co-v { color: var(--text-2); font-size: 12px; line-height: 1.66; white-space: pre-wrap; overflow-wrap: anywhere; }
+.co-empty { color: var(--text-3); font-size: 11.5px; line-height: 1.7; }
+.co-empty .btn { height: 22px; margin-left: 2px; padding: 0 5px; font-size: 11px; }
+
 .details { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
 .details summary {
   display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;
@@ -576,7 +595,7 @@ kbd {
 .vol-items { list-style: none; margin: 0; padding: 0 0 3px 12px; }
 .vol-group.closed .vol-items { display: none; }
 .vol-items .chapter-item { padding-left: 6px; }
-.bible-block.flash { animation: flashRing 1.3s var(--ease); }
+.bible-block.flash, .chapter-item.flash, .outline-row.flash { animation: flashRing 1.3s var(--ease); border-radius: var(--r-sm); }
 @keyframes flashRing {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
   15%, 60% { box-shadow: 0 0 0 2px var(--accent-line); }
@@ -809,21 +828,52 @@ kbd {
   background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg);
 }
 .vol-head { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; }
+.vol-head > .dim.small { flex: 0 0 auto; white-space: nowrap; }
 .vol-head .vol-tag {
   flex: 0 0 auto; padding: 2px 9px; border-radius: var(--r-full);
   font-size: 11px; color: var(--accent-hover); background: var(--accent-bg);
 }
 .outline-row {
-  display: grid; grid-template-columns: 64px minmax(120px, 1fr) 1.3fr 1.5fr;
+  display: grid;
+  grid-template-columns: 58px minmax(110px, .9fr) 1.15fr 1.3fr minmax(130px, .9fr);
+  grid-template-areas: "no title scene summary extra";
   gap: 7px; align-items: start; margin-bottom: 7px;
 }
 .outline-row > span {
-  padding-top: 9px; font-size: 11px; color: var(--text-3);
-  text-align: right; cursor: pointer; user-select: none;
+  grid-area: no; padding-top: 9px; font-size: 11px; color: var(--text-3);
+  text-align: right; cursor: pointer; user-select: none; white-space: nowrap;
   transition: color var(--dur) var(--ease);
 }
 .outline-row > span:hover { color: var(--danger); }
+.outline-row > input[data-ck="title"] { grid-area: title; }
+.outline-row > textarea[data-ck="scene"] { grid-area: scene; }
+.outline-row > textarea[data-ck="summary"] { grid-area: summary; }
+.outline-extra { grid-area: extra; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.outline-extra > * { flex: 1; min-width: 0; }
 .outline-row .textarea { min-height: 34px; font-size: 12.5px; }
+.outline-extra .input { min-height: 34px; font-size: 12.5px; }
+@media (max-width: 1100px) {
+  .outline-row {
+    grid-template-columns: 46px minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "no title title"
+      "no scene summary"
+      "no extra extra";
+  }
+  .outline-extra { flex-direction: row; }
+}
+@media (max-width: 720px) {
+  .outline-row {
+    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-areas:
+      "no title"
+      "no scene"
+      "no summary"
+      "no extra";
+  }
+  .outline-row > span { font-size: 10px; }
+  .outline-extra { flex-direction: column; }
+}
 
 /* ==========================================================================
    设置
@@ -889,6 +939,8 @@ kbd {
 .modal .field-label { margin-top: 12px; }
 .modal .field-label:first-of-type { margin-top: 0; }
 .modal textarea { min-height: 170px; font-family: var(--font-write); font-size: 13.5px; line-height: 1.85; }
+.modal .co-form textarea { min-height: 0; resize: vertical; }
+.modal .co-form .field-label { margin-top: 12px; }
 
 /* 导出：只导出定稿 */
 .export-done {

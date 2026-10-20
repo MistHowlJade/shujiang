@@ -308,6 +308,16 @@ export function volumeLabel(volume, no) {
   return `第${seq}卷 ${name}`;
 }
 
+/** 按 id 找大纲里的章纲条目，返回 { volume, entry }；找不到返回 null */
+export function findOutlineEntry(novel, outlineId) {
+  if (!outlineId) return null;
+  for (const volume of novel?.outline?.volumes || []) {
+    const entry = (volume.chapters || []).find((c) => c?.id === outlineId);
+    if (entry) return { volume, entry };
+  }
+  return null;
+}
+
 /**
  * 每一章归在哪一卷：返回与 chapters 等长的卷 id 数组（'' = 未分卷）。
  * 规则（按优先级）：

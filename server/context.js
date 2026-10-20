@@ -1,6 +1,6 @@
 // 上下文组装器：把"设定库 + 大纲 + 章节记忆 + 前文"按相关度筛选后拼成给模型看的资料包。
 // 纯词法匹配（无向量库、无外部依赖），对中文小说这种专有名词密集的文本效果足够好。
-import { chapterVolumeIds } from './store.js';
+import { chapterVolumeIds, findOutlineEntry } from './store.js';
 
 const DEFAULT_BUDGET = 26000; // 资料包字符预算（约合 1.5~2 万字正文所需的参考量）
 
@@ -111,12 +111,23 @@ export function buildContext(novel, opts = {}) {
   const chapter = idx >= 0 ? chapters[idx] : null;
   const prevIndex = idx >= 0 ? idx : chapters.length;
 
+  // 章节上的 outline 是「建章时的快照」，设定库里的章纲才是作者后来改过的最新版。
+  // 两边都有时以设定库为准，否则会出现「大纲里改了，生成时还在按老快照写」。
+  const linkedOutline = findOutlineEntry(novel, chapter?.outlineId)?.entry || null;
+  const chapterOutline = {
+    scene: linkedOutline?.scene || chapter?.outline?.scene || '',
+    characters: linkedOutline?.characters || chapter?.outline?.characters || '',
+    summary: linkedOutline?.summary || chapter?.outline?.summary || '',
+    hook: linkedOutline?.hook || chapter?.outline?.hook || '',
+  };
+
   // 查询串 = 本章标题 + 本章要求 + 最近概要 + 用户补充搜索词
   const query = [
     chapter?.title,
     chapter?.summary,
-    chapter?.outline?.summary,
-    chapter?.outline?.scene,
+    chapterOutline.summary,
+    chapterOutline.scene,
+    chapterOutline.characters,
     opts.extraQuery,
     chapters.slice(Math.max(0, prevIndex - 3), prevIndex).map((c) => `${c.title} ${c.summary || c.memory?.summary || ''}`).join(' '),
   ]
@@ -181,13 +192,19 @@ export function buildContext(novel, opts = {}) {
     const detail = (currentVolume.chapters || [])
       .map((c, i) => {
         const mark = chapter && c.id && c.id === chapter.outlineId ? ' ←本章' : '';
-        return `第${noOf.get(c.id) || i + 1}章 ${c.title || ''}${mark}\n  场景：${c.scene || c.summary || ''}${c.hook ? `｜钩子：${c.hook}` : ''}`;
+        const bits = [
+          c.scene && `场景：${c.scene}`,
+          c.characters && `出场：${c.characters}`,
+          c.summary && `事件：${c.summary}`,
+          c.hook && `钩子：${c.hook}`,
+        ].filter(Boolean);
+        return `第${noOf.get(c.id) || i + 1}章 ${c.title || ''}${mark}\n  ${bits.join('｜')}`;
       })
       .join('\n');
     push(`第${volumes.indexOf(currentVolume) + 1}卷《${currentVolume.name}》章纲`, detail.slice(0, 4000), true);
   }
-  if (chapter?.outline || chapter?.summary) {
-    const o = chapter.outline || {};
+  if (chapter && (chapterOutline.scene || chapterOutline.characters || chapterOutline.summary || chapterOutline.hook || chapter.summary)) {
+    const o = chapterOutline;
     push(
       '本章要点',
       [o.scene && `场景：${o.scene}`, o.characters && `出场：${o.characters}`, o.summary || chapter.summary, o.hook && `章末钩子：${o.hook}`]

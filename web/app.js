@@ -783,6 +783,22 @@ function gotoSettingsVolume(vid) {
   });
 }
 
+/** 从写作栏跳到设定库里对应的那条章纲，闪一下，便于继续编辑 */
+function gotoSettingsOutline(outlineId) {
+  const ref = findOutlineRef(S.novel, outlineId);
+  if (!ref) return toast('这条章纲已经不在设定库里了', 'err');
+  setView('bible');
+  $('#bibleTabs button[data-bible="outline"]')?.click();
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const block = $$('#volList .vol-block')[ref.volIndex];
+    const row = block?.querySelectorAll('.outline-row')[ref.index];
+    if (!row) return;
+    row.scrollIntoView({ block: 'center' });
+    row.classList.add('flash');
+    setTimeout(() => row.classList.remove('flash'), 1400);
+  }));
+}
+
 /** 新建 / 编辑一卷。startIndex >= 0 表示「从这一章起归入新卷」 */
 function openVolumeModal(vid, startIndex = -1, inheritFrom = '') {
   const n = S.novel;
@@ -921,6 +937,43 @@ window.addEventListener('blur', closePop);
  * ============================================================ */
 const currentChapter = () => S.novel?.chapters.find((c) => c.id === S.chapterId) || null;
 
+/** 按 id 找设定库里的章纲，返回卷序号和条目序号，方便定位与滚动 */
+function findOutlineRef(novel, outlineId) {
+  if (!novel || !outlineId) return null;
+  const volumes = novel.outline?.volumes || [];
+  for (let volIndex = 0; volIndex < volumes.length; volIndex++) {
+    const chapters = volumes[volIndex].chapters || [];
+    const index = chapters.findIndex((c) => c?.id === outlineId);
+    if (index >= 0) return { volume: volumes[volIndex], entry: chapters[index], volIndex, index };
+  }
+  return null;
+}
+
+const linkedOutlineOf = (ch, novel = S.novel) => (ch?.outlineId ? findOutlineRef(novel, ch.outlineId) : null);
+
+/** 本章生成时实际使用的章纲：设定库最新章纲优先，其次才是建章时的快照 */
+function effectiveChapterOutline(ch) {
+  const linked = linkedOutlineOf(ch);
+  const snap = ch?.outline && typeof ch.outline === 'object' ? ch.outline : {};
+  const first = (...values) => {
+    for (const value of values) {
+      const text = String(value ?? '').trim();
+      if (text) return text;
+    }
+    return '';
+  };
+  const entry = linked?.entry || {};
+  return {
+    linked,
+    outline: {
+      scene: first(entry.scene, snap.scene),
+      characters: first(entry.characters, snap.characters),
+      summary: first(entry.summary, snap.summary),
+      hook: first(entry.hook, snap.hook),
+    },
+  };
+}
+
 /* 章节状态：草稿 → 修改中 → 定稿。
  * 和「章节记忆」的 status 字段无关：那个是给 AI 存档用的，这里追踪的是人的写作进度。 */
 const STAGE_LABEL = { draft: '草稿', revising: '修改中', done: '定稿' };
@@ -971,6 +1024,7 @@ function renderStudio() {
     $('#chStage').value = 'draft';
     $('#chStage').className = 'stage-select';
     $('#footInfo').textContent = '';
+    $('#chapterOutlineCard').hidden = true;
     setEmpty(true, '还没有打开作品', '回「书架」选一部旧作，或者新建一部开始写。', false);
     histSync();
     renderTopbarActions();
@@ -1103,6 +1157,7 @@ function renderStudio() {
   $('#genWords').value = n.meta.targetWordsPerChapter || 3000;
   $('#genModel').placeholder = S.config?.model || '默认';
   updateFoot();
+  renderChapterOutlineCard();
   renderTopbarActions();
 }
 
@@ -1495,16 +1550,107 @@ $('#chContent').addEventListener('keydown', (e) => {
   }
 });
 
+/** 写作栏顶部的「本章章纲」卡片：显示当前真正会喂给 AI 的场景/人物/概要/钩子 */
+function renderChapterOutlineCard() {
+  const card = $('#chapterOutlineCard');
+  if (!card) return;
+  const ch = currentChapter();
+  if (!S.novel || !ch) { card.hidden = true; return; }
+  card.hidden = false;
+  const { outline, linked } = effectiveChapterOutline(ch);
+  const badge = $('#coBadge');
+  badge.textContent = linked ? '已关联大纲' : '仅本章';
+  badge.classList.toggle('linked', !!linked);
+  $('#coLocate').hidden = !linked;
+  const rows = [
+    ['场景', outline.scene],
+    ['人物', outline.characters],
+    ['概要', outline.summary],
+    ['钩子', outline.hook],
+  ].filter(([, value]) => value);
+  $('#coEdit').textContent = rows.length ? '编辑' : '添加';
+  $('#coBody').innerHTML = rows.length
+    ? rows.map(([label, value]) => `<div class="co-row"><span class="co-k">${label}</span><span class="co-v">${esc(value)}</span></div>`).join('')
+    : `<div class="co-empty">还没有本章章纲。补上场景、人物和章末钩子，生成本章时会更贴大纲。<button type="button" class="btn btn-sm btn-text" data-co-edit>现在补上</button></div>`;
+}
+
+const OUTLINE_FIELDS = ['scene', 'characters', 'summary', 'hook'];
+
+async function openChapterOutlineModal() {
+  const ch = currentChapter();
+  if (!ch || !S.novel) return;
+  const novelId = S.novel.id;
+  // 章纲保存只改章纲字段，但如果正文还有没落盘的改动，先把它写下去，别让两个请求互相覆盖
+  await flushSave().catch(() => {});
+  // 等落盘的这一小会儿里，作者可能已经切了章 / 切了书，别把弹窗开在错的章节上
+  if (S.novel?.id !== novelId || S.chapterId !== ch.id) return;
+  const { outline, linked } = effectiveChapterOutline(ch);
+  const value = (key) => esc(outline[key] || '');
+  showModal(`<h3>编辑本章章纲</h3>
+    <p class="modal-sub">${linked ? '保存后会同时更新设定库里的对应章纲。' : '这一章没有关联大纲，章纲只用于本章生成。'}</p>
+    <div class="co-form">
+      <label class="field-label">场景 / 地点<textarea class="textarea" id="coScene" rows="2" placeholder="例：深夜的宗门后山，雨还没停。">${value('scene')}</textarea></label>
+      <label class="field-label">出场人物<input class="input" id="coCharacters" value="${value('characters')}" placeholder="例：林昭、沈鹤" /></label>
+      <label class="field-label">核心事件<textarea class="textarea" id="coSummary" rows="3" placeholder="例：林昭撞见沈鹤私会外敌，被迫交手，只暴露一半实力。">${value('summary')}</textarea></label>
+      <label class="field-label">章末钩子<textarea class="textarea" id="coHook" rows="2" placeholder="例：长老在暗处看清了那一剑，认出了他的师承。">${value('hook')}</textarea></label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="coCancel">取消</button>
+      <button class="btn btn-primary" id="coSave">保存章纲</button>
+    </div>`, (box) => {
+    const save = async () => {
+      const btn = box.querySelector('#coSave');
+      if (btn.disabled) return;
+      btn.disabled = true;
+      btn.textContent = '保存中…';
+      const values = {
+        scene: box.querySelector('#coScene').value.trim(),
+        characters: box.querySelector('#coCharacters').value.trim(),
+        summary: box.querySelector('#coSummary').value.trim(),
+        hook: box.querySelector('#coHook').value.trim(),
+      };
+      try {
+        const res = await api.put(`/api/novels/${novelId}/chapters/${ch.id}/outline`, { outline: values });
+        ch.outline = res.chapter?.outline || null;
+        if (S.novel?.id === novelId) {
+          const linkedNow = linkedOutlineOf(ch);
+          if (linkedNow) {
+            for (const key of OUTLINE_FIELDS) {
+              if (ch.outline?.[key]) linkedNow.entry[key] = ch.outline[key];
+              else delete linkedNow.entry[key];
+            }
+          }
+          renderChapterOutlineCard();
+          updateFoot();
+        }
+        closeModal();
+        toast('本章章纲已保存', 'ok');
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = '保存章纲';
+        toast(err.message, 'err');
+      }
+    };
+    box.querySelector('#coCancel').onclick = () => closeModal();
+    box.querySelector('#coSave').onclick = save;
+    box.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); save(); }
+    });
+    box.querySelector('#coScene').focus();
+  });
+}
+
 function updateFoot() {
   const ch = currentChapter();
   if (!ch) { $('#footInfo').textContent = ''; return; }
   const i = S.novel.chapters.indexOf(ch);
   const vol = volumesOf().length ? volumeTitle(effVolumeIds()[i]) : '';
+  const hook = effectiveChapterOutline(ch).outline.hook;
   $('#footInfo').textContent = [
     vol,
     `第 ${i + 1} / ${S.novel.chapters.length} 章`,
     ch.memory ? '已存档记忆' : '未生成记忆',
-    ch.outline?.hook ? `钩子：${ch.outline.hook}` : '',
+    hook ? `钩子：${hook}` : '',
   ].filter(Boolean).join('　·　');
 }
 
@@ -1530,6 +1676,15 @@ $('#chStage').addEventListener('change', () => {
 $('#stageFilter').addEventListener('change', () => {
   S.stageFilter = $('#stageFilter').value;
   renderStudio();
+});
+
+$('#coEdit').addEventListener('click', openChapterOutlineModal);
+$('#coLocate').addEventListener('click', () => {
+  const ch = currentChapter();
+  if (ch?.outlineId) gotoSettingsOutline(ch.outlineId);
+});
+$('#coBody').addEventListener('click', (e) => {
+  if (e.target.closest('[data-co-edit]')) openChapterOutlineModal();
 });
 
 async function moveChapter(from, to) {
@@ -2297,8 +2452,12 @@ function renderOutlineTab(host, n) {
       row.innerHTML = `
         <span class="dim small" title="双击左侧标签可删除这条章纲">第 ${ci + 1} 章</span>
         <input class="input" data-ck="title" value="${esc(c.title || '')}" placeholder="章节名" />
-        <textarea class="input" data-ck="scene" placeholder="场景 / 出场人物">${esc(c.scene || '')}</textarea>
-        <textarea class="input" data-ck="summary" placeholder="核心事件 / 章末钩子">${esc(c.summary || '')}</textarea>`;
+        <textarea class="input" data-ck="scene" placeholder="场景 / 地点">${esc(c.scene || '')}</textarea>
+        <textarea class="input" data-ck="summary" placeholder="核心事件">${esc(c.summary || '')}</textarea>
+        <div class="outline-extra">
+          <input class="input" data-ck="characters" value="${esc(c.characters || '')}" placeholder="出场人物" />
+          <input class="input" data-ck="hook" value="${esc(c.hook || '')}" placeholder="章末钩子" />
+        </div>`;
       row.querySelectorAll('[data-ck]').forEach((el) => el.addEventListener('input', () => {
         c[el.dataset.ck] = el.value;
         saveNovelPart({ outline: n.outline });
@@ -3391,9 +3550,9 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       if (e.key.toLowerCase() === 'y' || e.shiftKey) doRedo(); else doUndo();
     }
-  } else if (S.view === 'studio' && S.novel && e.key === 'Enter' && e.shiftKey) {
+  } else if ($('#modalMask').hidden && S.view === 'studio' && S.novel && e.key === 'Enter' && e.shiftKey) {
     e.preventDefault(); generateChapter();
-  } else if (S.view === 'studio' && S.novel && e.key === 'Enter') {
+  } else if ($('#modalMask').hidden && S.view === 'studio' && S.novel && e.key === 'Enter') {
     e.preventDefault(); continueWriting();
   } else if (e.key === 'E' && e.shiftKey) {
     e.preventDefault(); exportBook();

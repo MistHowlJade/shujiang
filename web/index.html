@@ -189,6 +189,16 @@
             <div class="assist-body">
               <!-- 写作 -->
               <div class="assist-pane on" data-pane="write">
+                <div class="card chapter-outline-card" id="chapterOutlineCard" hidden>
+                  <div class="co-head">
+                    <span class="co-title">本章章纲</span>
+                    <span class="co-badge" id="coBadge"></span>
+                    <span class="co-grow"></span>
+                    <button class="btn btn-sm btn-text co-act" id="coLocate" hidden title="在设定库中定位这条章纲">定位</button>
+                    <button class="btn btn-sm btn-text co-act" id="coEdit">编辑</button>
+                  </div>
+                  <div class="co-body" id="coBody"></div>
+                </div>
                 <div class="card">
                   <label class="field-label">本章要求<span class="field-hint">留空则按章纲推进</span></label>
                   <textarea id="genReq" class="textarea" rows="3" placeholder="例：主角第一次进宗门大比，遇上宿敌，只暴露一半实力，结尾被长老注意到。"></textarea>
