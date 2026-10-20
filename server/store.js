@@ -292,6 +292,16 @@ export function readSnapshot(id, ts) {
 
 /* ---------------- 分卷归属 ---------------- */
 
+/** 导出时显示的卷名：卷名本身已经带「第 N 卷」就不再重复加前缀 */
+export function volumeLabel(volume, no) {
+  const name = String(volume?.name || '').trim();
+  const seq = Number(no) || 0;
+  if (!name) return `第${seq}卷`;
+  if (name === `第 ${seq} 卷` || name === `第${seq}卷` || name === String(seq)) return `第${seq}卷`;
+  if (/^第\s*[0-9０-９一二三四五六七八九十百千两]+\s*[卷部]/.test(name)) return name;
+  return `第${seq}卷 ${name}`;
+}
+
 /**
  * 每一章归在哪一卷：返回与 chapters 等长的卷 id 数组（'' = 未分卷）。
  * 规则（按优先级）：

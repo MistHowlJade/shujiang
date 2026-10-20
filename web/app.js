@@ -2823,19 +2823,31 @@ function exportBook() {
   showModal(`<h3>导出《${esc(S.novel.title)}》</h3>
     <div class="grid2">
       <label class="field-label">格式
-        <select id="exFmt" class="input"><option value="txt">TXT（纯文本）</option><option value="md">Markdown</option></select>
+        <select id="exFmt" class="input"><option value="txt">TXT（纯文本）</option><option value="md">Markdown</option><option value="epub">EPUB（电子书）</option></select>
       </label>
       <label class="field-label">范围
         <select id="exScope" class="input"><option value="all">全书</option><option value="chapter">当前章</option></select>
       </label>
     </div>
+    <div class="dim small" id="exHint" hidden>EPUB 会导出全书，自动生成标题页、目录和分卷结构，适合放进手机 / 阅读器。</div>
     <div class="modal-foot"><button class="btn btn-text" id="exCancel">取消</button><button class="btn btn-primary" id="exOk">下载</button></div>`,
     (box) => {
+      const fmtEl = box.querySelector('#exFmt');
+      const scopeEl = box.querySelector('#exScope');
+      const hintEl = box.querySelector('#exHint');
+      const sync = () => {
+        const epub = fmtEl.value === 'epub';
+        scopeEl.disabled = epub;
+        if (epub) scopeEl.value = 'all';
+        hintEl.hidden = !epub;
+      };
+      fmtEl.onchange = sync;
+      sync();
       box.querySelector('#exCancel').onclick = closeModal;
       box.querySelector('#exOk').onclick = () => {
-        const fmt = box.querySelector('#exFmt').value;
-        const scope = box.querySelector('#exScope').value;
-        const q = scope === 'chapter' && S.chapterId ? `&chapterId=${S.chapterId}` : '';
+        const fmt = fmtEl.value;
+        const scope = scopeEl.value;
+        const q = fmt !== 'epub' && scope === 'chapter' && S.chapterId ? `&chapterId=${S.chapterId}` : '';
         window.location.href = `/api/novels/${S.novel.id}/export?format=${fmt}${q}`;
         closeModal();
       };

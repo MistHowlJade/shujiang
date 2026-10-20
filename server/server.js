@@ -8,9 +8,10 @@ import { exec } from 'node:child_process';
 import {
   ROOT, DATA_DIR, ensureDirs, loadConfig, saveConfig, maskKey,
   listNovels, createNovel, getNovel, saveNovel, deleteNovel, newId, countWords,
-  listSnapshots, createSnapshot, readSnapshot, chapterVolumeIds,
+  listSnapshots, createSnapshot, readSnapshot, chapterVolumeIds, volumeLabel,
 } from './store.js';
 import { buildTask, TASKS } from './prompts.js';
+import { buildEpub } from './epub.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
 import { addWords, setGoal, statsSummary } from './stats.js';
 
@@ -636,9 +637,24 @@ async function handleApi(req, res, url) {
     if (seg[3] === 'export' && method === 'GET') {
       const n = getNovel(id);
       if (!n) return sendJson(res, 404, { error: '作品不存在' });
-      const format = url.searchParams.get('format') === 'md' ? 'md' : 'txt';
+      const raw = url.searchParams.get('format');
+      const format = raw === 'md' ? 'md' : raw === 'epub' ? 'epub' : 'txt';
       const cid = url.searchParams.get('chapterId');
       const list = cid ? n.chapters.filter((c) => c.id === cid) : n.chapters;
+
+      if (format === 'epub') {
+        // EPUB 始终导出全书：单章电子书没有阅读价值，目录也按全书分卷生成
+        const buf = buildEpub(n, n.chapters);
+        const name = `${safeName(n.title)}.epub`;
+        res.writeHead(200, {
+          'Content-Type': 'application/epub+zip',
+          'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+          'Content-Length': buf.length,
+          'Cache-Control': 'no-store',
+        });
+        return res.end(buf);
+      }
+
       const text = format === 'md' ? exportMarkdown(n, list) : exportTxt(n, list);
       const name = `${safeName(n.title)}${cid && list[0] ? `_第${list[0].no}章` : ''}.${format}`;
       res.writeHead(200, {
@@ -824,7 +840,7 @@ function exportTxt(n, chapters) {
   const body = chapters.map((c) => {
     const v = plan.of(c);
     // 每卷只在它的第一章前面写一次卷名
-    const vor = v && v.id !== lastVol ? `\n\n${'-'.repeat(30)}\n第${v.no}卷 ${v.name}` : '';
+    const vor = v && v.id !== lastVol ? `\n\n${'-'.repeat(30)}\n${volumeLabel(v, v.no)}` : '';
     lastVol = v ? v.id : '';
     return `${vor}\n\n第${c.no}章 ${c.title}\n\n${(c.content || '').trim()}`;
   }).join('\n');
@@ -842,7 +858,7 @@ function exportMarkdown(n, chapters) {
   let lastVol = '';
   chapters.forEach((c) => {
     const v = plan.of(c);
-    if (v && v.id !== lastVol) lines.push(`**第${v.no}卷 ${v.name}**\n`);
+    if (v && v.id !== lastVol) lines.push(`**${volumeLabel(v, v.no)}**\n`);
     lastVol = v ? v.id : '';
     lines.push(`## 第${c.no}章 ${c.title}\n`);
     lines.push((c.content || '').trim().split(/\n+/).map((p) => `　　${p}`).join('\n\n'));

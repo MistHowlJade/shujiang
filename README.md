@@ -150,7 +150,7 @@ tools\node\node.exe dev\mock-openai.js
 - **删除一卷**：卷里的正文完整保留，自动归入上一卷；卷里的章纲会一起删掉（删前会确认）。
 - **长篇**：章节超过 40 章时，默认只展开当前章所在的卷，点卷标题可折叠 / 展开。
 
-导出 TXT / Markdown 时，会在每卷第一章前加一行卷名（TXT 为 `第N卷 卷名`，Markdown 为 `**第N卷 卷名**`）。
+导出 TXT / Markdown 时，会在每卷第一章前加一行卷名（TXT 为 `第N卷 卷名`，Markdown 为 `**第N卷 卷名**`）；EPUB 会把卷名放进目录分组，并在该卷第一章前显示卷名。
 
 数据上，卷存在作品文件的 `outline.volumes` 里：
 
@@ -177,7 +177,7 @@ tools\node\node.exe dev\mock-openai.js
 4. **一致性检查**：把当前章与设定库、前文记忆对照，列出硬伤
 
 ### 导出
-`Ctrl+Shift+E` 或右上角导出：TXT / Markdown，可选全书或当前章。
+`Ctrl+Shift+E` 或右上角导出：TXT / Markdown，可选全书或当前章；也可以导出 EPUB 电子书。EPUB 始终打包全书，自动生成标题页、可跳转目录、分卷分组和章前卷名，零外部依赖，下载后可直接放进手机或阅读器。
 
 ### 自动保存：写不进去一定会让你知道
 正文停下 600ms 自动写盘；失焦、切章、切标签页、`Ctrl+S` 都会立刻落盘。要命的是写不进去的时候，所以：
@@ -234,6 +234,7 @@ data/
 ```
 server/
   server.js    HTTP 服务、路由、SSE 流式转发、导入导出
+  epub.js      EPUB 3 打包（手写 ZIP + XHTML，零依赖）
   store.js      JSON 文件存储层
   context.js   上下文组装：相关度检索、范围抽取、预算裁剪
   prompts.js   全部任务提示词（生成/续写/润色/检查/记忆/文风…）
