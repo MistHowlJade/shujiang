@@ -769,6 +769,41 @@ kbd {
 .entry .del:hover { background: var(--danger-bg); color: var(--danger); }
 .entry .del .ico { width: 14px; height: 14px; }
 
+/* 人物出场索引 */
+.char-appear {
+  display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;
+  margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--border);
+  color: var(--text-3); font-size: 11.5px;
+}
+.ca-label { flex: none; padding-top: 2px; }
+.ca-chips { display: flex; flex-wrap: wrap; gap: 5px; flex: 1; min-width: 0; }
+.ca-chip {
+  padding: 1px 8px; border: 1px solid var(--border); border-radius: var(--r-full);
+  background: var(--surface-3); color: var(--text-2);
+  font: inherit; font-size: 11px; line-height: 1.7; cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.ca-chip:hover { border-color: var(--border-2); background: var(--surface-4); color: var(--text-1); }
+.ca-more { border-color: transparent; background: transparent; color: var(--accent); padding-inline: 4px; }
+.ca-more:hover { border-color: transparent; background: var(--accent-bg); color: var(--accent-hover); }
+.ca-count { flex: none; padding-top: 2px; color: var(--text-4); font-variant-numeric: tabular-nums; }
+
+.appear-list {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 52vh; overflow: auto; margin: 0 -4px; padding: 2px 4px;
+}
+.appear-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 11px; text-align: left; font: inherit;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
+  color: var(--text-1); cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.appear-row:hover { border-color: var(--border-2); background: var(--surface-3); }
+.ar-no { flex: none; color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ar-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.ar-meta { flex: none; color: var(--text-4); font-size: 11px; }
+
 .vol-block {
   margin-bottom: 12px; padding: 13px 15px;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg);

@@ -2407,6 +2407,104 @@ function parseOutlineMarkdown(text) {
   return vols.filter((x) => x.chapters.length || x.name);
 }
 
+/* ---- 人物出场索引 ---- */
+/** 章节记忆里的 characters 可能是数组、字符串，也可能被模型写成「张三、李四」 */
+function splitMemoryCharacters(value) {
+  const out = [];
+  const push = (v) => {
+    if (typeof v === 'string') {
+      out.push(...v.split(/[、,，/／;；|]+/).map((x) => x.trim()).filter(Boolean));
+    } else if (v && typeof v === 'object' && typeof v.name === 'string') {
+      out.push(...v.name.split(/[、,，/／;；|]+/).map((x) => x.trim()).filter(Boolean));
+    }
+  };
+  if (Array.isArray(value)) value.forEach(push);
+  else push(value);
+  return out;
+}
+
+/** 去掉括号备注、空格和连接符后再比对，兼容「张三（少年）」「艾伦·史密斯」这类写法 */
+function normalizeCharacterName(value) {
+  return String(value || '')
+    .replace(/[（(【\[][^）)】\]]*[）)】\]]/g, '')
+    .replace(/[\s·•.。]+/g, '')
+    .toLowerCase();
+}
+
+/** 一次扫完全书记忆：归一化人名 → 出场章节。相同人名的重复记录只算一次 */
+function buildCharacterAppearances(novel) {
+  const index = new Map();
+  for (const ch of novel?.chapters || []) {
+    const seen = new Set();
+    for (const raw of splitMemoryCharacters(ch.memory?.characters)) {
+      const key = normalizeCharacterName(raw);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      let chapters = index.get(key);
+      if (!chapters) { chapters = new Map(); index.set(key, chapters); }
+      chapters.set(ch.id, ch);
+    }
+  }
+  return index;
+}
+
+/** 人物卡按「姓名 + 检索关键词」找记忆里的名字，别名也能命中 */
+function appearancesForCharacter(character, index) {
+  const keys = [character?.name, ...(character?.keywords || [])]
+    .map(normalizeCharacterName)
+    .filter(Boolean);
+  if (!keys.length) return [];
+  const byId = new Map();
+  for (const key of keys) {
+    for (const ch of index.get(key)?.values() || []) byId.set(ch.id, ch);
+  }
+  return [...byId.values()].sort((a, b) => (a.no || 0) - (b.no || 0));
+}
+
+function characterAppearancesHtml(chapters, charIndex) {
+  if (!chapters.length) return '';
+  const shown = chapters.slice(0, 8);
+  return `<div class="char-appear">
+    <span class="ca-label">出场</span>
+    <div class="ca-chips">
+      ${shown.map((ch) => `<button type="button" class="ca-chip" data-chapter="${esc(ch.id)}" title="第 ${ch.no} 章 · ${esc(ch.title || '未命名')}">第 ${ch.no} 章</button>`).join('')}
+      ${chapters.length > shown.length ? `<button type="button" class="ca-chip ca-more" data-appear-more="${charIndex}" title="查看全部 ${chapters.length} 章">+${chapters.length - shown.length}</button>` : ''}
+    </div>
+    <span class="ca-count">${chapters.length} 章</span>
+  </div>`;
+}
+
+function openChapterFromIndex(id) {
+  const ch = S.novel?.chapters.find((c) => c.id === id);
+  if (!ch) return toast('这一章已经不存在了', 'err');
+  S.stageFilter = '';                 // 从索引跳转时先看全貌，别让当前筛选把目标章藏起来
+  setView('studio');
+  selectChapter(ch.id);
+  requestAnimationFrame(() => {
+    const row = chapterRow(ch.id);
+    if (row) { row.scrollIntoView({ block: 'nearest' }); row.classList.add('flash'); setTimeout(() => row.classList.remove('flash'), 1200); }
+  });
+}
+
+function openCharacterAppearancesModal(name, chapters) {
+  showModal(`<h3>「${esc(name || '未命名')}」出场索引</h3>
+    <p class="modal-sub">依据章节记忆统计，共 ${chapters.length} 章。点击章节可直接打开。</p>
+    <div class="appear-list">
+      ${chapters.map((ch) => `<button type="button" class="appear-row" data-chapter="${esc(ch.id)}">
+        <span class="ar-no">第 ${ch.no} 章</span>
+        <span class="ar-title">${esc(ch.title || '未命名')}</span>
+        <span class="ar-meta">${STAGE_LABEL[stageOf(ch)] || '草稿'}</span>
+      </button>`).join('')}
+    </div>
+    <div class="modal-foot"><button class="btn btn-text" id="appearClose">关闭</button></div>`,
+    (box) => {
+      box.querySelector('#appearClose').onclick = closeModal;
+      box.querySelectorAll('[data-chapter]').forEach((el) => {
+        el.onclick = () => { closeModal(); openChapterFromIndex(el.dataset.chapter); };
+      });
+    });
+}
+
 /* ---- 人物 ---- */
 function renderCharactersTab(host, n) {
   host.innerHTML = `
@@ -2416,13 +2514,15 @@ function renderCharactersTab(host, n) {
         <button class="btn btn-sm" id="aiChar">AI 生成人物</button>
         <button class="btn btn-sm" id="addChar">${ico('plus')}新增人物</button>
       </h2>
-      <p class="dim small">人物卡会自动进入生成上下文。系统用名字与身份做相关度匹配，本章提到谁，就重点带上谁。</p>
+      <p class="dim small">人物卡会自动进入生成上下文。系统用名字与身份做相关度匹配，本章提到谁，就重点带上谁；存过章节记忆后，会按姓名与关键词汇总出场章节，点章节号即可跳转。</p>
       <div class="entry-list" id="charList"></div>
     </div>`;
   const list = $('#charList', host);
+  const charIndex = buildCharacterAppearances(n);
   if (!n.bible.characters.length) list.innerHTML = '<p class="dim">还没有人物卡。</p>';
   n.bible.characters.forEach((c, i) => {
     const div = document.createElement('div');
+    const appearances = appearancesForCharacter(c, charIndex);
     div.className = 'entry';
     div.innerHTML = `
       <div class="entry-head">
@@ -2443,17 +2543,29 @@ function renderCharactersTab(host, n) {
         ${field('成长弧线', 'arc', c)}
         ${field('检索关键词（逗号分隔）', 'kwText', { kwText: (c.keywords || []).join('，') })}
       </div>
-      ${field('关系（每行一条：对象|关系|备注）', 'relText', { relText: (c.relations || []).map((r) => `${r.to}|${r.type || ''}|${r.note || ''}`).join('\n') }, { area: true, rows: 2 })}`;
+      ${field('关系（每行一条：对象|关系|备注）', 'relText', { relText: (c.relations || []).map((r) => `${r.to}|${r.type || ''}|${r.note || ''}`).join('\n') }, { area: true, rows: 2 })}
+      <div class="char-appear-slot">${characterAppearancesHtml(appearances, i)}</div>`;
     bindFields(div, c, () => saveNovelPart({ bible: n.bible }));
     const kw = div.querySelector('[data-key="kwText"]');
-    kw.addEventListener('input', () => { c.keywords = kw.value.split(/[,，、\s]+/).filter(Boolean); });
+    kw.addEventListener('input', () => {
+      c.keywords = kw.value.split(/[,，、\s]+/).filter(Boolean);
+      saveNovelPart({ bible: n.bible });     // kwText 在 bindFields 里被跳过，需要自己触发保存
+    });
     const rel = div.querySelector('[data-key="relText"]');
     rel.addEventListener('input', () => {
       c.relations = rel.value.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
         const [to, type, note] = l.split('|').map((x) => (x || '').trim());
         return { to: to || '', type: type || '', note: note || '' };
       }).filter((r) => r.to);
+      saveNovelPart({ bible: n.bible });
     });
+    // 改姓名或别名（关键词）后，失焦时只重画这一张卡的出场索引，不整页重排
+    const paintAppear = () => {
+      const slot = div.querySelector('.char-appear-slot');
+      if (slot) slot.innerHTML = characterAppearancesHtml(appearancesForCharacter(c, charIndex), i);
+    };
+    div.querySelector('[data-key="name"]').addEventListener('change', paintAppear);
+    kw.addEventListener('change', paintAppear);
     div.querySelector('.del').onclick = () => {
       if (!confirm(`删除人物「${c.name || i + 1}」？`)) return;
       n.bible.characters.splice(i, 1);
@@ -2461,6 +2573,14 @@ function renderCharactersTab(host, n) {
       saveNovelPart({ bible: n.bible });
     };
     list.appendChild(div);
+  });
+  list.addEventListener('click', (e) => {
+    const chapterBtn = e.target.closest('[data-chapter]');
+    if (chapterBtn) return openChapterFromIndex(chapterBtn.dataset.chapter);
+    const moreBtn = e.target.closest('[data-appear-more]');
+    if (!moreBtn) return;
+    const c = n.bible.characters[Number(moreBtn.dataset.appearMore)];
+    if (c) openCharacterAppearancesModal(c.name, appearancesForCharacter(c, charIndex));
   });
 
   $('#addChar', host).onclick = () => {
@@ -2510,7 +2630,10 @@ function renderWorldTab(host, n) {
       ${field('检索关键词（逗号分隔）', 'kwText', { kwText: (w.keywords || []).join('，') })}`;
     bindFields(div, w, () => saveNovelPart({ bible: n.bible }));
     const kw = div.querySelector('[data-key="kwText"]');
-    kw.addEventListener('input', () => { w.keywords = kw.value.split(/[,，、\s]+/).filter(Boolean); });
+    kw.addEventListener('input', () => {
+      w.keywords = kw.value.split(/[,，、\s]+/).filter(Boolean);
+      saveNovelPart({ bible: n.bible });     // 同上：关键词字段不在 bindFields 的自动保存里
+    });
     div.querySelector('.del').onclick = () => {
       if (!confirm(`删除设定「${w.name || i + 1}」？`)) return;
       n.bible.world.splice(i, 1);
