@@ -16,6 +16,7 @@
   <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3.5 12.5 8.5 4.7 8.5-4.7"/><path d="m3.5 16.8 8.5 4.7 8.5-4.7"/></symbol>
   <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6h.09A1.7 1.7 0 0 0 10 3.05V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.92z"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 5h16l-6 7v6l-4 2v-8z"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m8 8 4-4 4 4"/><path d="M12 4v12"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m8 12 4 4 4-4"/><path d="M12 16V4"/></symbol>
@@ -119,6 +120,17 @@
               </div>
             </div>
             <div class="chapter-meta" id="chapterMeta"></div>
+            <div class="chapter-filter">
+              <svg class="ico"><use href="#i-filter" /></svg>
+              <select id="stageFilter" class="stage-filter" aria-label="筛选章节状态" title="按章节状态筛选左侧列表（不会影响正在编辑的章节）">
+                <option value="">全部章节</option>
+                <option value="open">未定稿</option>
+                <option value="draft">草稿</option>
+                <option value="revising">修改中</option>
+                <option value="done">定稿</option>
+              </select>
+              <span class="stage-stat" id="stageStat"></span>
+            </div>
             <ul class="chapter-list" id="chapterList"></ul>
           </aside>
 
@@ -127,6 +139,11 @@
             <div class="editor-head">
               <input id="chTitle" class="ch-title" placeholder="章节标题" />
               <div class="pane-tools">
+                <select id="chStage" class="stage-select" aria-label="本章状态" title="章节状态：草稿 / 修改中 / 定稿" disabled>
+                  <option value="draft">草稿</option>
+                  <option value="revising">修改中</option>
+                  <option value="done">定稿</option>
+                </select>
                 <span class="chip" id="chWords">0 字</span>
                 <button class="icon-btn sm" id="undoBtn" title="撤销（Ctrl+Z）" disabled><svg class="ico"><use href="#i-undo" /></svg></button>
                 <button class="icon-btn sm" id="redoBtn" title="重做（Ctrl+Shift+Z）" disabled><svg class="ico"><use href="#i-redo" /></svg></button>

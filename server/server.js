@@ -9,6 +9,7 @@ import {
   ROOT, DATA_DIR, ensureDirs, loadConfig, saveConfig, maskKey,
   listNovels, createNovel, getNovel, saveNovel, deleteNovel, newId, countWords,
   listSnapshots, createSnapshot, readSnapshot, chapterVolumeIds, volumeLabel,
+  CHAPTER_STAGES,
 } from './store.js';
 import { buildTask, TASKS } from './prompts.js';
 import { buildEpub } from './epub.js';
@@ -382,6 +383,7 @@ function tryJson(text) {
 const COUNTED_MAX = 200000;   // 单次保存的记账上限，挡住异常调用把统计冲爆
 function writeChapter(n, index, cid, body) {
   const { counted, ...fields } = body || {};   // counted 只用于统计，不能混进章节数据
+  if (fields.stage !== undefined && !CHAPTER_STAGES.has(fields.stage)) delete fields.stage;
   const before = countWords(n.chapters[index].content);
   n.chapters[index] = { ...n.chapters[index], ...fields, id: cid, createdAt: n.chapters[index].createdAt };
   const grown = countWords(n.chapters[index].content) - before;
@@ -560,6 +562,7 @@ async function handleApi(req, res, url) {
           summary: body.summary || '',
           content: body.content || '',
           status: 'draft',
+          stage: 'draft',
           outline: body.outline || null,
           memory: null,
           // 归入哪一卷由前端决定（新章节默认跟着前一章走，见 web/app.js 的 addChapter）
@@ -719,6 +722,7 @@ async function handleApi(req, res, url) {
           summary: '',
           content: p.content,
           status: 'draft',
+          stage: 'draft',
           memory: null,
           createdAt: Date.now(),
         };

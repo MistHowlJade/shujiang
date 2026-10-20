@@ -10,6 +10,9 @@ export const DATA_DIR = path.join(ROOT, 'data');
 export const NOVELS_DIR = path.join(DATA_DIR, 'novels');
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
+// 章节的写作状态：草稿 → 修改中 → 定稿（和 AI 用的 chapter.status 无关）
+export const CHAPTER_STAGES = new Set(['draft', 'revising', 'done']);
+
 const CONFIG_DEFAULT = {
   providers: [],
   activeProviderId: '',
@@ -155,6 +158,8 @@ export function getNovel(id) {
     v.chapters.forEach((c) => { c.id ||= newId('o'); });
   });
   n.chapters ||= [];
+  // 老作品没有 stage 字段：读出来统一按草稿处理，下一次保存就会写回磁盘
+  for (const c of n.chapters) if (!CHAPTER_STAGES.has(c.stage)) c.stage = 'draft';
   n.meta = { ...blankNovel().meta, ...(n.meta || {}) };
   // 记下磁盘上的字数，saveNovel 用它判断这次落盘是不是「骤降」
   lastWrittenWords.set(n.id, (n.chapters || []).reduce((s, c) => s + (c.words || countWords(c.content || '')), 0));
@@ -165,6 +170,7 @@ export function saveNovel(novel) {
   novel.updatedAt = Date.now();
   novel.chapters = (novel.chapters || []).map((c, i) => ({
     ...c,
+    stage: CHAPTER_STAGES.has(c.stage) ? c.stage : 'draft',
     no: i + 1,
     words: countWords(c.content || ''),
   }));
