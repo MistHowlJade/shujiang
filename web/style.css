@@ -811,6 +811,40 @@ kbd {
 .modal .field-label:first-of-type { margin-top: 0; }
 .modal textarea { min-height: 170px; font-family: var(--font-write); font-size: 13.5px; line-height: 1.85; }
 
+/* ---------------- 导入文稿 ---------------- */
+.import-drop {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 17px 16px; margin-bottom: 4px; text-align: center;
+  background: var(--surface-2); border: 1px dashed var(--border-2);
+  border-radius: var(--r-lg); cursor: pointer;
+  transition: border-color .15s var(--ease), background .15s var(--ease);
+}
+.import-drop:hover, .import-drop.over { border-color: var(--accent); background: var(--accent-bg); }
+.import-drop:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.import-drop > .ico { width: 22px; height: 22px; color: var(--text-2); }
+.import-drop:hover > .ico, .import-drop.over > .ico { color: var(--accent-hover); }
+.import-drop > div:nth-child(2) { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; }
+.import-drop b { color: var(--text-1); font-weight: 600; }
+.import-file { color: var(--text-3); font-size: 11px; }
+.import-note { margin-top: 8px; }
+.import-note b { color: var(--text-2); font-weight: 600; }
+
+.drop-mask {
+  position: fixed; inset: 0; z-index: 300; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--mask); backdrop-filter: blur(3px);
+  animation: fadeIn 120ms var(--ease);
+}
+.drop-card {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 26px 40px; text-align: center;
+  background: var(--surface-1); border: 1.5px dashed var(--accent-line);
+  border-radius: var(--r-xl); box-shadow: var(--sh-3);
+}
+.drop-card > .ico { width: 26px; height: 26px; color: var(--accent); }
+.drop-card b { font-size: 14px; font-weight: 600; }
+.drop-card span { color: var(--text-3); font-size: 11.5px; }
+
 /* ---------------- 版本历史 ---------------- */
 .modal-sub { margin: -6px 0 16px; color: var(--text-3); font-size: 12px; line-height: 1.75; }
 .hist-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }

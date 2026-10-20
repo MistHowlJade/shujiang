@@ -358,7 +358,7 @@ function openNewNovelModal() {
 $('#newNovelBtn').addEventListener('click', openNewNovelModal);
 $('#emptyNewBtn').addEventListener('click', openNewNovelModal);
 
-async function openNovel(id) {
+async function openNovel(id, opts = {}) {
   // 换作品前先把当前作品的改动落盘 —— 一旦换过去，旧作品的内存内容就被替换了，
   // 没落盘的部分谁也救不回来。落不下去时明确问一句，别默默丢。
   if (S.novel && S.novel.id !== id && S.unsaved.size) {
@@ -373,7 +373,8 @@ async function openNovel(id) {
   }
   const { novel } = await api.get(`/api/novels/${id}`);
   S.novel = novel;
-  S.chapterId = novel.chapters[0]?.id || null;
+  const want = opts.chapterId && novel.chapters.some((c) => c.id === opts.chapterId) ? opts.chapterId : null;
+  S.chapterId = want || novel.chapters[0]?.id || null;
   S.out = ''; S.reasoning = '';
   volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   setView('studio');
@@ -2498,23 +2499,160 @@ $('#openDataBtn').addEventListener('click', () => {
 /* ============================================================
  * 11. 导入 / 导出
  * ============================================================ */
-$('#importBtn').addEventListener('click', () => {
+const IMPORT_LIMIT = 20 * 1024 * 1024;
+const isTextFile = (f) => !!f && (/\.(txt|md|markdown)$/i.test(f.name) || /^text\//i.test(f.type || ''));
+const fmtSize = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
+
+/**
+ * 读文本文件并判断编码。浏览器没有内置「猜编码」，但可以用 fatal 模式试 UTF-8：
+ * 合法就是 UTF-8，抛错就按 GB18030（兼容 GBK）解。带 BOM 的直接按 BOM 来。
+ */
+async function readTextFile(file) {
+  if (file.size > IMPORT_LIMIT) throw new Error(`文件有 ${fmtSize(file.size)}，超过 20 MB，建议先在编辑器里拆成几份`);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return { text: new TextDecoder('utf-8').decode(bytes.subarray(3)), enc: 'UTF-8（带 BOM）' };
+  }
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return { text: new TextDecoder('utf-16le').decode(bytes.subarray(2)), enc: 'UTF-16 LE' };
+  }
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return { text: new TextDecoder('utf-16be').decode(bytes.subarray(2)), enc: 'UTF-16 BE' };
+  }
+  try {
+    return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes), enc: 'UTF-8' };
+  } catch {
+    // 不是合法 UTF-8，按中文旧稿最常见的 GBK / GB18030 解
+  }
+  try {
+    return { text: new TextDecoder('gb18030').decode(bytes), enc: 'GB18030 / GBK' };
+  } catch {
+    return { text: new TextDecoder('utf-8').decode(bytes), enc: 'UTF-8（有无法识别的字符）' };
+  }
+}
+
+function openImportModal(file) {
   if (!S.novel) return toast('先打开作品', 'err');
+  const more = S.novel.chapters.length ? '追加到现有章节末尾' : '作为这本书的第一批章节';
   showModal(`<h3>导入已有文稿</h3>
-    <p class="dim small">粘贴正文，系统会按「第X章」自动切分成章节追加到末尾。适合接手旧稿后让 AI 续写。</p>
-    <textarea id="impText" class="input" placeholder="第一章 落霜&#10;&#10;正文……&#10;&#10;第二章 归途&#10;&#10;正文……"></textarea>
+    <p class="modal-sub">导入到《${esc(S.novel.title)}》：支持 .txt / .md，自动识别 UTF-8 / GBK。按「第X章」切分，按「第X卷」分组，${more}。</p>
+    <div class="import-drop" id="impDrop" title="选择文件，或把文件拖到这里" role="button" tabindex="0">
+      ${ico('upload')}
+      <div><b>选择文件</b><span class="dim">或拖到这里</span></div>
+      <div class="import-file" id="impFileInfo">.txt / .md · 最大 20 MB</div>
+      <input type="file" id="impFile" accept=".txt,.md,text/plain,text/markdown" hidden>
+    </div>
+    <label class="field-label">也可以直接粘贴
+      <textarea id="impText" class="input" placeholder="第一章 落霜&#10;&#10;正文……&#10;&#10;第二章 归途&#10;&#10;正文……"></textarea>
+    </label>
+    <div class="import-note dim small" id="impNote" hidden></div>
     <div class="modal-foot"><button class="btn btn-text" id="impCancel">取消</button><button class="btn btn-primary" id="impOk">导入</button></div>`,
     (box) => {
+      const drop = box.querySelector('#impDrop');
+      const input = box.querySelector('#impFile');
+      const ta = box.querySelector('#impText');
+      const info = box.querySelector('#impFileInfo');
+      const note = box.querySelector('#impNote');
+
+      const loadFile = async (f) => {
+        if (!f) return;
+        if (!isTextFile(f)) return toast('只支持 .txt / .md 文件', 'err');
+        info.textContent = `读取 ${f.name}…`;
+        try {
+          const r = await readTextFile(f);
+          ta.value = r.text;
+          info.textContent = `${f.name} · ${fmtSize(f.size)}`;
+          note.hidden = false;
+          note.innerHTML = `识别为 <b>${esc(r.enc)}</b> · ${fmtWords(countWords(r.text))} 字 · ${r.text.split('\n').length} 行`;
+        } catch (err) {
+          info.textContent = '.txt / .md · 最大 20 MB';
+          toast(err.message || '读不了这个文件', 'err');
+        }
+      };
+
+      drop.onclick = () => input.click();
+      drop.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        input.click();
+      });
+      input.onchange = () => loadFile(input.files[0]);
+      drop.addEventListener('dragover', (e) => {
+        if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        drop.classList.add('over');
+      });
+      drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+      drop.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        drop.classList.remove('over');
+        dragDepth = 0;
+        showDropMask(false);
+        loadFile(e.dataTransfer.files?.[0]);
+      });
+
       box.querySelector('#impCancel').onclick = closeModal;
       box.querySelector('#impOk').onclick = async () => {
-        const text = box.querySelector('#impText').value;
-        if (!text.trim()) return;
-        const r = await api.send(`/api/novels/${S.novel.id}/import`, { text });
-        closeModal();
-        await openNovel(S.novel.id);
-        toast(`导入 ${r.imported} 个章节`, 'ok');
+        const text = ta.value;
+        if (!text.trim()) return toast('还没有可导入的正文', 'err');
+        const btn = box.querySelector('#impOk');
+        btn.disabled = true;
+        btn.textContent = '导入中…';
+        try {
+          const r = await api.send(`/api/novels/${S.novel.id}/import`, { text });
+          closeModal();
+          await openNovel(S.novel.id, { chapterId: r.firstChapterId });
+          toast(`导入 ${r.imported} 章${r.volumes ? ` · ${r.volumes} 卷` : ''}`, 'ok');
+        } catch (err) {
+          toast(`导入失败：${err.message}`, 'err');
+          btn.disabled = false;
+          btn.textContent = '导入';
+        }
       };
+
+      if (file) loadFile(file);
     });
+}
+
+$('#importBtn').addEventListener('click', () => openImportModal());
+
+/* 把 .txt / .md 拖到窗口任意位置也能导入 */
+let dragDepth = 0;
+function showDropMask(on) {
+  const mask = $('#dropMask');
+  if (mask) mask.hidden = !on;
+}
+const dragHasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+window.addEventListener('dragenter', (e) => {
+  if (!dragHasFiles(e)) return;
+  e.preventDefault();
+  dragDepth += 1;
+  if (S.novel) showDropMask(true);
+});
+window.addEventListener('dragover', (e) => {
+  if (!dragHasFiles(e)) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+window.addEventListener('dragleave', (e) => {
+  if (!dragHasFiles(e)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) showDropMask(false);
+});
+window.addEventListener('dragend', () => { dragDepth = 0; showDropMask(false); });
+window.addEventListener('drop', (e) => {
+  if (!dragHasFiles(e)) return;
+  // 无论能不能导入，都拦下浏览器「直接打开文件」的默认行为
+  e.preventDefault();
+  dragDepth = 0;
+  showDropMask(false);
+  const f = e.dataTransfer.files?.[0];
+  if (!f) return;
+  if (!S.novel) return toast('先打开一部作品，再把文稿拖进来', 'err');
+  if (!isTextFile(f)) return toast('只支持 .txt / .md 文件', 'err');
+  openImportModal(f);
 });
 
 function exportBook() {
@@ -2786,6 +2924,7 @@ function cmdkSource() {
     op('续写当前章', 'pen', () => { setView('studio'); showAssistTab('write'); continueWriting(); }, 'Ctrl+↵');
     op('一致性检查', 'shield', () => { setView('studio'); showAssistTab('check'); $('#consistencyBtn').click(); });
     op('责编评审', 'stamp', () => { setView('studio'); showAssistTab('check'); $('#reviewBtn').click(); });
+    op('导入文稿', 'upload', () => { setView('studio'); openImportModal(); });
     op('导出作品', 'download', () => exportBook(), 'Ctrl+Shift+E');
     op('版本历史', 'clock', () => { setView('studio'); openHistory(); });
     op('撤销', 'undo', () => { setView('studio'); doUndo(); }, 'Ctrl+Z');

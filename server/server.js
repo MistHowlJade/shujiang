@@ -682,24 +682,46 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { count, chapters: chaptersTouched });
     }
 
-    // 导入已有文稿：按“第X章”自动切分
+    // 导入已有文稿：按「第X章」切分，按「第X卷」分组。
+    // 文件读取与编码识别在前端完成（浏览器才有 GBK 解码器），这里只认文本。
     if (seg[3] === 'import' && method === 'POST') {
       const body = await readBody(req);
       const n = getNovel(id);
       if (!n) return sendJson(res, 404, { error: '作品不存在' });
-      const parts = splitChapters(body.text || '');
-      const created = parts.map((p) => ({
-        id: newId('c'),
-        title: p.title,
-        summary: '',
-        content: p.content,
-        status: 'draft',
-        memory: null,
-        createdAt: Date.now(),
+      const parsed = parseManuscript(body.text || '');
+      if (!parsed.chapters.length) return sendJson(res, 400, { error: '没有识别到正文，检查一下文件是不是空的' });
+      const volumes = parsed.volumes.map((v) => ({
+        id: newId('v'),
+        name: v.name,
+        desc: '',
+        chapters: [],
       }));
+      const created = parsed.chapters.map((p) => {
+        const ch = {
+          id: newId('c'),
+          title: p.title,
+          summary: '',
+          content: p.content,
+          status: 'draft',
+          memory: null,
+          createdAt: Date.now(),
+        };
+        // 卷标题下面的章节写死归属；文件有分卷时，卷前的序言明确标成「未分卷」，
+        // 免得追加到一本已有分卷的书里时，前言被上一卷吸走。
+        if (p.volume != null && volumes[p.volume]) ch.volumeId = volumes[p.volume].id;
+        else if (parsed.volumes.length) ch.volumeId = '';
+        return ch;
+      });
+      if (volumes.length) n.outline.volumes.push(...volumes);
       n.chapters.push(...created);
       saveNovel(n);
-      return sendJson(res, 200, { imported: created.length, novel: n });
+      return sendJson(res, 200, {
+        imported: created.length,
+        volumes: volumes.length,
+        volumeNames: volumes.map((v) => v.name),
+        firstChapterId: created[0].id,
+        novel: n,
+      });
     }
   }
 
@@ -900,30 +922,116 @@ function searchNovel(novel, q, limit) {
   return { q, total, chapters: matchedChapters, truncated: results.length < matchedChapters, results };
 }
 
-const CHAPTER_RE = /^[ \t　]*第\s*([0-9零一二三四五六七八九十百千两]+)\s*[章节回][ \t　]*([^\n\r]{0,40})$/m;
+/* ------------------------------------------------------------------ */
+/* 导入解析：卷标题 + 章标题                                            */
+/* ------------------------------------------------------------------ */
 
-function splitChapters(text) {
+const NUM_CN = '[0-9零一二三四五六七八九十百千两]+';
+// 章标题：第1章 / 第一章 / 第 1 回 / 第1章：落霜；标题最多 40 字
+const CHAPTER_RE = new RegExp(`^第\\s*${NUM_CN}\\s*[章节回](?:[ \\t　]+([^\\n\\r]{0,40}))?$`);
+// 紧凑写法「第1章落霜」：标题里不能有句末标点，免得把「第一章正文。」当成标题
+const CHAPTER_TIGHT_RE = new RegExp(`^第\\s*${NUM_CN}\\s*[章节回]([:：、.，,·\\-—]+)?([^\\n\\r。！？；…]{0,40})$`);
+// 楔子、序章、番外这类没有编号的章节
+const CHAPTER_ALT_RE = /^(序章|楔子|引子|序言|尾声|后记|番外(?:[0-9零一二三四五六七八九十百千两]+)?)(?:[ \t　:：、.，,·\-—]+([^\n\r]{0,40}))?$/;
+// 卷标题：第一卷 少年游 / 第 1 部 / 卷一
+const VOLUME_RE = new RegExp(`^第\\s*${NUM_CN}\\s*[卷部篇](?:[ \\t　]+([^\\n\\r]{0,50}))?$`);
+const VOLUME_TIGHT_RE = new RegExp(`^第\\s*${NUM_CN}\\s*[卷部篇]([:：、.，,·\\-—]+)?([^\\n\\r。！？；…]{0,50})$`);
+const VOLUME_SHORT_RE = new RegExp(`^卷\\s*${NUM_CN}(?:[ \\t　]+([^\\n\\r]{0,50}))?$`);
+const VOLUME_SHORT_TIGHT_RE = new RegExp(`^卷\\s*${NUM_CN}([:：、.，,·\\-—]+)?([^\\n\\r。！？；…]{0,50})$`);
+
+/** 去掉 Markdown 标题标记与整行加粗，留下可判断的纯标题文本 */
+function cleanHeading(line) {
+  return String(line || '')
+    .trim()
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/^>\s*/, '')
+    .replace(/^(\*\*|\*|__|_|~~|`)\s*/, '')
+    .replace(/\s*(\*\*|\*|__|_|~~|`)$/, '')
+    .trim();
+}
+
+/** 判断一行是不是卷 / 章标题；是就返回结构化信息，不是返回 null */
+function headingInfo(line) {
+  const t = cleanHeading(line);
+  if (!t) return null;
+  let m = t.match(VOLUME_RE) || t.match(VOLUME_SHORT_RE);
+  if (m) return { kind: 'volume', name: (m[1] || '').trim(), raw: t };
+  m = t.match(VOLUME_TIGHT_RE) || t.match(VOLUME_SHORT_TIGHT_RE);
+  if (m) return { kind: 'volume', name: (m[2] || '').trim(), raw: t };
+  m = t.match(CHAPTER_RE);
+  if (m) return { kind: 'chapter', title: (m[1] || '').trim() || t, raw: t };
+  m = t.match(CHAPTER_TIGHT_RE);
+  if (m) return { kind: 'chapter', title: (m[2] || '').trim() || t, raw: t };
+  if (CHAPTER_ALT_RE.test(t)) return { kind: 'chapter', title: t, raw: t };
+  return null;
+}
+
+/**
+ * 把整份文稿拆成章节；卷标题之间的章节归入该卷。
+ * 返回 { chapters: [{ title, content, volume }], volumes: [{ name }] }
+ * volume 是 volumes 的下标，null 表示卷前的序言。
+ * 没有章标题但只有卷标题时（比如按卷写的旧稿），每卷正文会变成一章。
+ */
+function parseManuscript(text) {
   const src = String(text || '').replace(/\r\n?/g, '\n').trim();
-  if (!src) return [];
+  if (!src) return { chapters: [], volumes: [] };
   const lines = src.split('\n');
   const marks = [];
   lines.forEach((line, i) => {
-    if (CHAPTER_RE.test(line.trim())) marks.push({ i, title: line.trim() });
+    const h = headingInfo(line);
+    if (h) marks.push({ i, ...h });
   });
-  if (!marks.length) {
-    return [{ title: '导入内容', content: src }];
-  }
-  const out = [];
+  if (!marks.length) return { chapters: [{ title: '导入内容', content: src, volume: null }], volumes: [] };
+
+  const volumes = [];
+  const chapters = [];
+  let current = null;
+
+  // 卷标题和下一个标题之间的文字：后面紧跟章标题就并进那一章，否则单独成章
+  const flushIntro = () => {
+    if (!current || !current.intro) return;
+    chapters.push({
+      title: current.name || current.raw || '导入内容',
+      content: current.intro,
+      volume: current.index,
+    });
+    current.intro = '';
+  };
+
   const head = lines.slice(0, marks[0].i).join('\n').trim();
-  if (head) out.push({ title: '前言', content: head });
+  if (head) chapters.push({ title: '前言', content: head, volume: null });
+
   marks.forEach((mk, k) => {
     const end = k + 1 < marks.length ? marks[k + 1].i : lines.length;
     const body = lines.slice(mk.i + 1, end).join('\n').trim();
-    // 去掉「第X章」标记本身，并顺手吃掉紧跟的分隔符（空格、冒号、顿号、点、破折号等）
-    const title = mk.title.replace(/^第\s*[0-9零一二三四五六七八九十百千两]+\s*[章节回][\s:：、.，,·\-—]*/, '').trim();
-    out.push({ title: title || mk.title, content: body });
+    if (mk.kind === 'volume') {
+      flushIntro();
+      volumes.push({ name: mk.name });
+      current = { index: volumes.length - 1, intro: body, name: mk.name, raw: mk.raw };
+      return;
+    }
+    let content = body;
+    if (current && current.intro) {
+      content = `${current.intro}\n\n${content}`.trim();
+      current.intro = '';
+    }
+    chapters.push({ title: mk.title, content, volume: current ? current.index : null });
   });
-  return out;
+  flushIntro();
+
+  // 丢掉一个字都没装的空卷，并把章节上的卷下标重新排好
+  const used = new Set(chapters.map((c) => c.volume).filter((v) => v != null));
+  const kept = [];
+  const remap = new Map();
+  volumes.forEach((v, i) => {
+    if (!used.has(i)) return;
+    remap.set(i, kept.length);
+    kept.push(v);
+  });
+  for (const c of chapters) {
+    if (c.volume != null) c.volume = remap.get(c.volume) ?? null;
+  }
+  return { chapters, volumes: kept };
 }
 
 /* ------------------------------------------------------------------ */
