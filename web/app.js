@@ -69,8 +69,12 @@ function showModal(html, onMount) {
   return box;
 }
 function closeModal() { $('#modalMask').hidden = true; $('#modal').innerHTML = ''; }
-$('#modalMask').addEventListener('mousedown', (e) => { if (e.target.id === 'modalMask') closeModal(); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#modalMask').hidden) closeModal(); });
+$('#modalMask').addEventListener('mousedown', (e) => {
+  if (e.target.id === 'modalMask' && !S.batchController) closeModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('#modalMask').hidden && !S.batchController) closeModal();
+});
 
 /* ============================================================
  * 1. 接口封装
@@ -189,6 +193,7 @@ const S = {
   savingId: null,
   saveErr: null,
   controller: null,
+  batchController: null,   // 批量补记忆：跑的时候不许关弹窗，也不许再起别的 AI 任务
   out: '',
   reasoning: '',
   lastOp: null,
@@ -908,7 +913,7 @@ function renderStudio() {
     li.innerHTML = `
       <span class="ci-no">${i + 1}</span>
       <span class="ci-title">${esc(c.title || '未命名')}</span>
-      <span class="ci-words">${w || ''}</span>
+      <span class="ci-words">${c.memory ? '<i class="ci-mem" title="已有章节记忆"></i>' : ''}${w || ''}</span>
       <span class="ci-act">
         <button class="mini-act" data-a="up" title="上移">${ico('chev-up')}</button>
         <button class="mini-act" data-a="down" title="下移">${ico('chev-down')}</button>
@@ -1547,7 +1552,7 @@ function setBusy(busy) {
 }
 
 async function runStream(body, { target = 'out' } = {}) {
-  if (S.controller) { toast('已有任务在跑，先停止', 'err'); return ''; }
+  if (S.controller || S.batchController) { toast('已有任务在跑，先停止', 'err'); return ''; }
   const ac = new AbortController();
   S.controller = ac;
   setBusy(true);
@@ -1653,10 +1658,167 @@ $('#applyReplace').addEventListener('click', async () => {
 });
 $('#applyInsert').addEventListener('click', () => { if (S.out) { insertIntoContent(S.out, 'insert'); toast('已插入光标处 · 按 Ctrl+Z 可撤销', 'ok'); } });
 
+/* ============================================================
+ * 批量补章节记忆
+ * ============================================================ */
+function memoryCandidates(from, to, skipExisting) {
+  return (S.novel?.chapters || []).filter((c) =>
+    c.no >= from && c.no <= to && (c.content || '').trim() && (!skipExisting || !c.memory));
+}
+
+function openBatchMemory() {
+  if (!S.novel) return toast('先打开作品', 'err');
+  if (S.controller || S.batchController) return toast('已有任务在跑，先停止', 'err');
+  const chapters = S.novel.chapters;
+  if (!chapters.length) return toast('这部作品还没有章节', 'err');
+  const last = chapters[chapters.length - 1].no || chapters.length;
+  const firstMissing = chapters.find((c) => (c.content || '').trim() && !c.memory);
+
+  showModal(`<h3>批量补全章节记忆</h3>
+    <p class="modal-sub">逐章让 AI 提炼人物、事件、状态变化与伏笔，存进章节记忆。导入旧稿后跑一遍，后续续写和一致性检查就能用上前情。每章调用一次模型，长篇需要一些时间，也会产生费用。</p>
+    <div class="grid2">
+      <label class="field-label">从第几章<input id="bmpFrom" class="input" type="number" min="1" max="${last}" value="${firstMissing ? firstMissing.no : 1}" /></label>
+      <label class="field-label">到第几章<input id="bmpTo" class="input" type="number" min="1" max="${last}" value="${last}" /></label>
+    </div>
+    <label class="find-check bmp-skip"><input type="checkbox" id="bmpSkip" checked /> 跳过已有记忆的章节</label>
+    <div class="dim small" id="bmpCount"></div>
+    <div class="batch-progress" id="bmpBox" hidden>
+      <div class="batch-bar"><i id="bmpBar"></i></div>
+      <div class="batch-line"><span id="bmpNow">准备中…</span><span id="bmpNums">0 / 0</span></div>
+      <div class="batch-log" id="bmpLog"></div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-text" id="bmpCancel">取消</button><button class="btn btn-primary" id="bmpStart">开始补全</button></div>`,
+  (box) => {
+    const fromEl = box.querySelector('#bmpFrom');
+    const toEl = box.querySelector('#bmpTo');
+    const skipEl = box.querySelector('#bmpSkip');
+    const countEl = box.querySelector('#bmpCount');
+    const startBtn = box.querySelector('#bmpStart');
+    const cancelBtn = box.querySelector('#bmpCancel');
+    const boxEl = box.querySelector('#bmpBox');
+    const bar = box.querySelector('#bmpBar');
+    const nowEl = box.querySelector('#bmpNow');
+    const numsEl = box.querySelector('#bmpNums');
+    const logEl = box.querySelector('#bmpLog');
+    let ranOnce = false;
+
+    const range = () => {
+      const a0 = Math.max(1, Math.min(last, Number(fromEl.value) || 1));
+      const b0 = Math.max(1, Math.min(last, Number(toEl.value) || last));
+      return a0 <= b0 ? { from: a0, to: b0 } : { from: b0, to: a0 };
+    };
+    const candidates = () => {
+      const { from, to } = range();
+      return memoryCandidates(from, to, skipEl.checked);
+    };
+    const refresh = () => {
+      const { from, to } = range();
+      const list = memoryCandidates(from, to, skipEl.checked);
+      const all = memoryCandidates(from, to, false);
+      countEl.textContent = list.length
+        ? `将处理 ${list.length} 章${all.length > list.length ? `（范围内 ${all.length} 章有正文，已有记忆的会跳过）` : ''}`
+        : '这个范围里没有需要补的章节。';
+      startBtn.disabled = !list.length || !!S.batchController;
+      startBtn.textContent = S.batchController ? '补全中…' : !list.length && ranOnce ? '已完成' : ranOnce ? '继续补全' : '开始补全';
+    };
+    fromEl.oninput = toEl.oninput = skipEl.onchange = refresh;
+
+    const setProgress = (done, total, ch) => {
+      bar.style.width = `${total ? Math.round((done / total) * 100) : 0}%`;
+      numsEl.textContent = `${done} / ${total}`;
+      nowEl.textContent = ch ? `第 ${ch.no} 章 ${ch.title || ''}` : '准备中…';
+    };
+
+    const run = async () => {
+      const list = candidates();
+      if (!list.length) { refresh(); return toast('这个范围里没有需要补的章节'); }
+      const ac = new AbortController();
+      ranOnce = true;
+      S.batchController = ac;
+      refresh();
+      fromEl.disabled = toEl.disabled = skipEl.disabled = true;
+      cancelBtn.textContent = '停止';
+      startBtn.textContent = '补全中…';
+      boxEl.hidden = false;
+      logEl.textContent = '';
+      let done = 0;
+      let failed = 0;
+      let streak = 0;
+      let stopped = false;
+      let gaveUp = false;
+
+      for (let i = 0; i < list.length; i++) {
+        if (ac.signal.aborted) { stopped = true; break; }
+        const ch = list[i];
+        setProgress(i, list.length, ch);
+        try {
+          let acc = '';
+          await streamAI({ task: 'memory', novelId: S.novel.id, chapterId: ch.id }, {
+            signal: ac.signal,
+            onDelta: (d) => { acc += d; },
+          });
+          if (ac.signal.aborted) { stopped = true; break; }
+          const obj = parseJsonLoose(acc);
+          if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('模型没按 JSON 格式输出');
+          ch.memory = obj;
+          if (!ch.summary && obj.summary) ch.summary = obj.summary;
+          ch.status = 'done';
+          await api.send(`/api/novels/${S.novel.id}/chapters/${ch.id}`, {
+            memory: ch.memory,
+            summary: ch.summary,
+            status: ch.status,
+          }, 'PUT');
+          done += 1;
+          streak = 0;
+        } catch (err) {
+          if (ac.signal.aborted || err?.name === 'AbortError') { stopped = true; break; }
+          failed += 1;
+          streak += 1;
+          const line = document.createElement('div');
+          line.textContent = `第 ${ch.no} 章：${err.message || '失败'}`;
+          logEl.appendChild(line);
+          setProgress(i + 1, list.length, ch);
+          if (streak >= 3) {
+            gaveUp = true;
+            const warn = document.createElement('div');
+            warn.textContent = '连续失败 3 章，已自动停下。检查模型设置后再继续。';
+            logEl.appendChild(warn);
+            break;
+          }
+        }
+        setProgress(i + 1, list.length, ch);
+      }
+
+      S.batchController = null;
+      fromEl.disabled = toEl.disabled = skipEl.disabled = false;
+      refresh();
+      const left = candidates().length;
+      startBtn.disabled = !left;
+      startBtn.textContent = !left ? '已完成' : (stopped || gaveUp) ? '继续补全' : '再跑一次';
+      cancelBtn.textContent = '关闭';
+      if (stopped) toast(`已停止 · 完成 ${done} 章${failed ? `，失败 ${failed} 章` : ''}`);
+      else if (gaveUp) toast(`已停止：完成 ${done} 章，失败 ${failed} 章`, 'err');
+      else if (failed && !done) toast(`补记忆失败：${failed} 章`, 'err');
+      else toast(`补记忆完成：${done} 章${failed ? `，失败 ${failed} 章` : ''}`, failed ? 'err' : 'ok');
+      renderStudio();
+    };
+
+    startBtn.onclick = run;
+    cancelBtn.onclick = () => {
+      if (S.batchController) S.batchController.abort();
+      else closeModal();
+    };
+    refresh();
+    setTimeout(() => fromEl.focus(), 30);
+  });
+}
+
 $$('[data-quick]').forEach((btn) => btn.addEventListener('click', async () => {
+  const kind = btn.dataset.quick;
+  if (kind === 'batchMemory') return openBatchMemory();
+
   const ch = currentChapter();
   if (!ch) return toast('先选一章', 'err');
-  const kind = btn.dataset.quick;
 
   if (kind === 'memory') {
     if (!ch.content.trim()) return toast('本章还没正文', 'err');
@@ -1669,6 +1831,7 @@ $$('[data-quick]').forEach((btn) => btn.addEventListener('click', async () => {
     ch.status = 'done';
     markDirty();
     updateFoot();
+    renderStudio();
     toast('章节记忆已存档，后续写作会自动带上', 'ok');
   }
 
@@ -2925,6 +3088,7 @@ function cmdkSource() {
     op('一致性检查', 'shield', () => { setView('studio'); showAssistTab('check'); $('#consistencyBtn').click(); });
     op('责编评审', 'stamp', () => { setView('studio'); showAssistTab('check'); $('#reviewBtn').click(); });
     op('导入文稿', 'upload', () => { setView('studio'); openImportModal(); });
+    op('批量补全章节记忆', 'refresh', () => { setView('studio'); openBatchMemory(); });
     op('导出作品', 'download', () => exportBook(), 'Ctrl+Shift+E');
     op('版本历史', 'clock', () => { setView('studio'); openHistory(); });
     op('撤销', 'undo', () => { setView('studio'); doUndo(); }, 'Ctrl+Z');

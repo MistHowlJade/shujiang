@@ -509,6 +509,10 @@ kbd {
 .ci-no { font-size: 11px; color: var(--text-3); text-align: center; font-variant-numeric: tabular-nums; }
 .ci-title { font-size: 12.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ci-words { font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.ci-mem {
+  display: inline-block; width: 5px; height: 5px; margin-right: 5px;
+  border-radius: 50%; background: var(--success); vertical-align: 1px;
+}
 .ci-act { display: flex; gap: 1px; opacity: 0; transition: opacity var(--dur) var(--ease); }
 .chapter-item:hover .ci-act { opacity: 1; }
 .mini-act {
@@ -828,6 +832,22 @@ kbd {
 .import-file { color: var(--text-3); font-size: 11px; }
 .import-note { margin-top: 8px; }
 .import-note b { color: var(--text-2); font-weight: 600; }
+
+/* ---------------- 批量补章节记忆 ---------------- */
+.bmp-skip { margin-top: 12px; }
+.batch-progress { margin-top: 14px; }
+.batch-bar { height: 6px; overflow: hidden; background: var(--surface-3); border-radius: var(--r-full); }
+.batch-bar i { display: block; width: 0; height: 100%; background: var(--accent); transition: width .2s var(--ease); }
+.batch-line {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-top: 7px; color: var(--text-3); font-size: 11.5px;
+}
+.batch-line span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.batch-line span:last-child { flex: none; font-variant-numeric: tabular-nums; }
+.batch-log {
+  max-height: 110px; overflow: auto; margin-top: 6px;
+  color: var(--danger); font-size: 11.5px; line-height: 1.75;
+}
 
 .drop-mask {
   position: fixed; inset: 0; z-index: 300; pointer-events: none;
