@@ -8,7 +8,7 @@ import { exec } from 'node:child_process';
 import {
   ROOT, DATA_DIR, ensureDirs, loadConfig, saveConfig, maskKey,
   listNovels, createNovel, getNovel, saveNovel, deleteNovel, newId, countWords,
-  listSnapshots, createSnapshot, readSnapshot,
+  listSnapshots, createSnapshot, readSnapshot, chapterVolumeIds,
 } from './store.js';
 import { buildTask, TASKS } from './prompts.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
@@ -561,6 +561,8 @@ async function handleApi(req, res, url) {
           status: 'draft',
           outline: body.outline || null,
           memory: null,
+          // 归入哪一卷由前端决定（新章节默认跟着前一章走，见 web/app.js 的 addChapter）
+          volumeId: typeof body.volumeId === 'string' ? body.volumeId : '',
           createdAt: Date.now(),
         };
         if (typeof body.at === 'number' && body.at >= 0 && body.at <= n.chapters.length) n.chapters.splice(body.at, 0, ch);
@@ -600,6 +602,34 @@ async function handleApi(req, res, url) {
         saveNovel(n);
         return sendJson(res, 200, { novel: n });
       }
+    }
+
+    // 分卷归属：只改 volumeId，不动正文。
+    // 章节列表里的「并入上一卷 / 从此章起新的一卷」都走这里 —— 整本回传
+    // （PUT /api/novels/:id）会把请求期间新敲进去的字一并覆盖，这里只补一个字段。
+    // volumeId 传 null 表示「删掉明确值」，让这一章回到按章纲 / 跟着上一章。
+    if (seg[3] === 'chapter-volume' && seg.length === 4 && method === 'POST') {
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      const body = await readBody(req);
+      const sets = Array.isArray(body.set) ? body.set.slice(0, 3000) : [];
+      let changed = 0;
+      for (const s of sets) {
+        const c = n.chapters.find((x) => x.id === s?.id);
+        if (!c) continue;
+        if (s.volumeId === null || s.volumeId === undefined) {
+          if (c.volumeId === undefined) continue;
+          delete c.volumeId;
+          changed += 1;
+          continue;
+        }
+        const v = typeof s.volumeId === 'string' ? s.volumeId.slice(0, 40) : '';
+        if ((c.volumeId || '') === v) continue;
+        c.volumeId = v;
+        changed += 1;
+      }
+      if (changed) saveNovel(n);
+      return sendJson(res, 200, { ok: true, changed });
     }
 
     // 导出
@@ -767,7 +797,15 @@ function exportTxt(n, chapters) {
   const head = [`《${n.title}》`, n.author ? `作者：${n.author}` : '', n.genre ? `类型：${n.genre}` : '', n.meta?.logline ? `简介：${n.meta.logline}` : '']
     .filter(Boolean)
     .join('\n');
-  const body = chapters.map((c) => `\n\n第${c.no}章 ${c.title}\n\n${(c.content || '').trim()}`).join('\n');
+  const plan = volumePlan(n);
+  let lastVol = '';
+  const body = chapters.map((c) => {
+    const v = plan.of(c);
+    // 每卷只在它的第一章前面写一次卷名
+    const vor = v && v.id !== lastVol ? `\n\n${'-'.repeat(30)}\n第${v.no}卷 ${v.name}` : '';
+    lastVol = v ? v.id : '';
+    return `${vor}\n\n第${c.no}章 ${c.title}\n\n${(c.content || '').trim()}`;
+  }).join('\n');
   return `${head}\n${'-'.repeat(30)}${body}\n`;
 }
 
@@ -778,12 +816,31 @@ function exportMarkdown(n, chapters) {
   if (n.meta?.logline) lines.push(`\n> ${n.meta.logline}`);
   if (n.meta?.synopsis) lines.push(`\n## 作品简介\n\n${n.meta.synopsis}`);
   lines.push('\n---\n');
+  const plan = volumePlan(n);
+  let lastVol = '';
   chapters.forEach((c) => {
+    const v = plan.of(c);
+    if (v && v.id !== lastVol) lines.push(`**第${v.no}卷 ${v.name}**\n`);
+    lastVol = v ? v.id : '';
     lines.push(`## 第${c.no}章 ${c.title}\n`);
     lines.push((c.content || '').trim().split(/\n+/).map((p) => `　　${p}`).join('\n\n'));
     lines.push('');
   });
   return lines.join('\n');
+}
+
+/** 导出时用的分卷视图：按「章节 → 卷」的归属规则算出卷序号与卷名（见 store.js） */
+function volumePlan(n) {
+  const vols = n.outline?.volumes || [];
+  const ids = chapterVolumeIds(n);
+  const index = new Map((n.chapters || []).map((c, i) => [c.id, i]));
+  return {
+    of(chapter) {
+      const i = index.get(chapter.id);
+      const v = i === undefined ? null : vols.find((x) => x.id === ids[i]);
+      return v ? { id: v.id, no: vols.indexOf(v) + 1, name: v.name || '未命名' } : null;
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -907,8 +964,10 @@ const server = http.createServer(async (req, res) => {
 
 function listen(port, attempt = 0) {
   server.once('error', (err) => {
-    if (err.code === 'EADDRINUSE' && attempt < 20) {
-      console.log(`端口 ${port} 被占用，尝试 ${port + 1} …`);
+    // EADDRINUSE：端口被别的程序占着；EACCES：Windows 上对方独占绑定时报这个
+    // （本机就可能被下载器之类的后台程序占住 8848），两种都往后顺延重试。
+    if ((err.code === 'EADDRINUSE' || err.code === 'EACCES') && attempt < 20) {
+      console.log(`端口 ${port} 被别的程序占着（${err.code}），改用 ${port + 1} …`);
       listen(port + 1, attempt + 1);
     } else {
       console.error('启动失败：', err.message);

@@ -148,6 +148,12 @@ export function getNovel(id) {
   n.bible.timeline ||= [];
   n.outline ||= { volumes: [], notes: '' };
   n.outline.volumes ||= [];
+  // 分卷要有稳定 id：章节用 chapter.volumeId 指向它。老数据没有 id，读进来时补上。
+  n.outline.volumes.forEach((v) => {
+    v.id ||= newId('v');
+    v.chapters ||= [];
+    v.chapters.forEach((c) => { c.id ||= newId('o'); });
+  });
   n.chapters ||= [];
   n.meta = { ...blankNovel().meta, ...(n.meta || {}) };
   // 记下磁盘上的字数，saveNovel 用它判断这次落盘是不是「骤降」
@@ -282,6 +288,37 @@ export function readSnapshot(id, ts) {
   if (!ts) return null;
   const n = readJson(snapFile(id, ts), null);
   return n && n.id ? n : null;
+}
+
+/* ---------------- 分卷归属 ---------------- */
+
+/**
+ * 每一章归在哪一卷：返回与 chapters 等长的卷 id 数组（'' = 未分卷）。
+ * 规则（按优先级）：
+ *   1. 本章写死的 volumeId（'' 表示明确不算任何卷）—— 只作用于这一章；
+ *   2. 章纲归属：本章的 outlineId 指向哪一卷的章纲（大纲驱动的书靠这条）；
+ *   3. 都没有 → 跟着上一章（手写章节夹在中间时不至于掉队）。
+ * 注意第 1 条不是「从这里往后都算这一卷」：那样一卷的开头被挪走后，
+ * 后面几十章会跟着黏过去。要整段改归属就逐章写下来（见 web/app.js 的 assignRange）。
+ * 客户端 web/app.js 的 effVolumeIds() 是同一套规则，两边要一起改。
+ */
+export function chapterVolumeIds(novel) {
+  const vols = novel?.outline?.volumes || [];
+  const byOutline = new Map();
+  for (const v of vols) {
+    for (const o of (v.chapters || [])) if (o?.id) byOutline.set(o.id, v.id || '');
+  }
+  const known = new Set(vols.map((v) => v.id).filter(Boolean));
+  let inherit = '';
+  return (novel?.chapters || []).map((c) => {
+    const raw = typeof c.volumeId === 'string' ? c.volumeId : null;
+    // 明确值只认「已存在的卷」：卷被删掉后留下的僵尸 id 当没写过，别让它拦着后面的归属
+    const own = raw === null ? null : raw === '' || raw === '-' ? '' : known.has(raw) ? raw : null;
+    if (own !== null) { inherit = own; return own; }
+    const o = c.outlineId ? byOutline.get(c.outlineId) : '';
+    if (o) { inherit = o; return o; }
+    return inherit;
+  });
 }
 
 /* ---------------- 工具 ---------------- */

@@ -1,5 +1,6 @@
 // 上下文组装器：把"设定库 + 大纲 + 章节记忆 + 前文"按相关度筛选后拼成给模型看的资料包。
 // 纯词法匹配（无向量库、无外部依赖），对中文小说这种专有名词密集的文本效果足够好。
+import { chapterVolumeIds } from './store.js';
 
 const DEFAULT_BUDGET = 26000; // 资料包字符预算（约合 1.5~2 万字正文所需的参考量）
 
@@ -153,23 +154,34 @@ export function buildContext(novel, opts = {}) {
   if (novel.outline?.notes) push('大纲备注', String(novel.outline.notes).slice(0, 1200));
 
   /* 2. 当前卷 / 当前章大纲 */
+  // 当前卷优先按「章节列表里的分卷归属」判定（显式标记 / 章纲归属，见 store.js），
+  // 这样作者在章节列表里把某一章并入别的卷时，喂给模型的卷纲也跟着变。
   let currentVolume = null;
-  if (idx >= 0) {
+  if (chapter && idx >= 0) {
+    const volId = chapterVolumeIds(novel)[idx];
+    if (volId) currentVolume = volumes.find((v) => v.id === volId) || null;
+  }
+  // 老数据既没有分卷标记、章节也没挂章纲时，才按大纲章数顺推。
+  // 只要书里已经有任何归属信号（显式 volumeId 或 outlineId），就尊重它：
+  // 明确标成「未分卷」的章节不该被硬塞进某一卷。
+  const hasVolumeSignal = (novel.chapters || []).some((c) => typeof c.volumeId === 'string' || c.outlineId);
+  if (!currentVolume && idx >= 0 && !hasVolumeSignal) {
     let cursor = 0;
     for (const v of volumes) {
       const n = (v.chapters || []).length;
-      if (idx < cursor + n) {
-        currentVolume = v;
-        break;
-      }
+      if (idx < cursor + n) { currentVolume = v; break; }
       cursor += n;
     }
   }
   if (currentVolume) {
+    // 章纲的编号优先用真实章节号：卷二的第一条章纲是「第 21 章」而不是「第 1 章」，
+    // 模型据此才知道故事进行到哪一段。
+    const noOf = new Map();
+    for (const c of (novel.chapters || [])) if (c.outlineId && c.no) noOf.set(c.outlineId, c.no);
     const detail = (currentVolume.chapters || [])
       .map((c, i) => {
         const mark = chapter && c.id && c.id === chapter.outlineId ? ' ←本章' : '';
-        return `第${chapter ? idx - (idx - (currentVolume.chapters || []).indexOf(c)) : i + 1}章 ${c.title || ''}${mark}\n  场景：${c.scene || c.summary || ''}${c.hook ? `｜钩子：${c.hook}` : ''}`;
+        return `第${noOf.get(c.id) || i + 1}章 ${c.title || ''}${mark}\n  场景：${c.scene || c.summary || ''}${c.hook ? `｜钩子：${c.hook}` : ''}`;
       })
       .join('\n');
     push(`第${volumes.indexOf(currentVolume) + 1}卷《${currentVolume.name}》章纲`, detail.slice(0, 4000), true);

@@ -375,6 +375,7 @@ async function openNovel(id) {
   S.novel = novel;
   S.chapterId = novel.chapters[0]?.id || null;
   S.out = ''; S.reasoning = '';
+  volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   setView('studio');
   renderStudio();
 }
@@ -488,6 +489,365 @@ async function openStatsModal() {
 }
 
 /* ============================================================
+ * 4.6 分卷：章节目录按卷归组
+ * ------------------------------------------------------------
+ * 卷本身存在「设定 → 分卷与章纲」里（novel.outline.volumes），这里负责
+ * 把章节列表按卷折叠显示，以及就地调整「哪几章归哪一卷」。
+ * 归属规则（跟服务端 store.js 的 chapterVolumeIds 是同一套）：
+ *   本章或前面章节的显式标记 ＞ 章纲归属（outlineId 落在哪一卷）＞ 未分卷
+ * 于是作者只在一卷的第一章上打个标记，后面几十章跟着走，换卷时再打一个；
+ * volumeId === '-' 表示「明确不算任何卷」，只影响那一章。
+ * ============================================================ */
+const volToggled = new Map();      // 卷 id → 作者手动展开/收起（没点过的按默认来）
+
+/** 每章归属的卷 id（与 S.novel.chapters 等长），'' 表示未分卷。规则见 server/store.js 的 chapterVolumeIds */
+function effVolumeIds() {
+  const n = S.novel;
+  if (!n) return [];
+  const byOutline = new Map();
+  for (const v of (n.outline?.volumes || [])) {
+    for (const o of (v.chapters || [])) if (o?.id) byOutline.set(o.id, v.id || '');
+  }
+  const known = new Set((n.outline?.volumes || []).map((v) => v.id).filter(Boolean));
+  let inherit = '';
+  return n.chapters.map((c) => {
+    const raw = typeof c.volumeId === 'string' ? c.volumeId : null;
+    const own = raw === null ? null : raw === '' || raw === '-' ? '' : known.has(raw) ? raw : null;
+    if (own !== null) { inherit = own; return own; }
+    const o = c.outlineId ? byOutline.get(c.outlineId) : '';
+    if (o) { inherit = o; return o; }
+    return inherit;
+  });
+}
+
+const volumesOf = () => (S.novel?.outline?.volumes || []);
+const volumeById = (id) => volumesOf().find((v) => v.id === id) || null;
+function volumeNo(id) {
+  const i = volumesOf().findIndex((v) => v.id === id);
+  return i < 0 ? 0 : i + 1;
+}
+/** 「第 2 卷 · 少年游」；卷名本身就是「第 2 卷」时不再重复前缀；查不到卷时给空串 */
+function volumeTitle(id) {
+  const v = volumeById(id);
+  if (!v) return '';
+  const no = volumeNo(id);
+  const name = String(v.name || '').trim();
+  if (!name || name === `第 ${no} 卷` || name === `第${no}卷` || name === String(no)) return `第 ${no} 卷`;
+  return `第 ${no} 卷 · ${name}`;
+}
+
+/** 长篇默认只展开当前章所在的那一卷，短篇全展开 */
+function isVolOpen(vid) {
+  if (volToggled.has(vid)) return volToggled.get(vid);
+  const n = S.novel;
+  if (!n || n.chapters.length <= 40) return true;
+  const i = n.chapters.findIndex((c) => c.id === S.chapterId);
+  return vid === (i >= 0 ? effVolumeIds()[i] : '');
+}
+
+function toggleVol(vid) {
+  volToggled.set(vid, !isVolOpen(vid));
+  renderStudio();
+}
+
+/** 建一个分卷分组容器，返回往里放章节的 <ul> */
+function volGroupEl(ul, vid, group) {
+  const v = volumeById(vid);
+  const open = isVolOpen(vid);
+  const li = document.createElement('li');
+  li.className = `vol-group${open ? '' : ' closed'}`;
+  const words = group.chapters.reduce((s, c) => s + countWords(c.content), 0);
+  li.innerHTML = `
+    <div class="vol-head" title="${open ? '点击收起这一卷' : '点击展开这一卷'}">
+      <button class="vol-toggle" type="button">${ico('chev-down')}</button>
+      <span class="vol-name">${v ? esc(volumeTitle(vid)) : '未分卷'}</span>
+      <span class="vol-stat">${group.chapters.length} 章 · ${fmtWords(words)} 字</span>
+      <button class="mini-act" data-a="vmenu" type="button" title="本卷操作">${ico('more')}</button>
+    </div>
+    <ul class="vol-items"></ul>`;
+  const toggle = () => toggleVol(vid);
+  li.querySelector('.vol-toggle').addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
+  li.querySelector('.vol-head').addEventListener('click', (e) => { if (!e.target.closest('.mini-act')) toggle(); });
+  li.querySelector('[data-a="vmenu"]').addEventListener('click', (e) => { e.stopPropagation(); openVolumeGroupMenu(e.currentTarget, vid, group); });
+  ul.appendChild(li);
+  return li.querySelector('.vol-items');
+}
+
+/** 只改卷归属：走单独的接口，避免整本回传时把正在编辑的正文一起覆盖掉 */
+async function saveChapterVolumes(sets) {
+  const n = S.novel;
+  if (!n || !sets.length) return;
+  try { await api.send(`/api/novels/${n.id}/chapter-volume`, { set: sets }); }
+  catch (err) { toast(`分卷没保存成功：${err.message}`, 'err'); }
+}
+
+/**
+ * 把第 index 章改成归入 volId（'' 表示未分卷）。
+ * 明确值只作用于写下的那一章；但「下一章」如果原本只是跟着上一章走，
+ * 会跟着一起变 —— 所以顺手把它的归属写死，只挪一章不会带走后面几十章。
+ */
+function setChapterVolume(index, volId, { pinAfter = index + 1 } = {}) {
+  const n = S.novel;
+  const ch = n?.chapters[index];
+  if (!ch) return Promise.resolve();
+  const eff = effVolumeIds();
+  const sets = [];
+  const val = volId || '';
+  if (ch.volumeId !== val) { ch.volumeId = val; sets.push({ id: ch.id, volumeId: val }); }
+  const next = pinAfter >= 0 ? n.chapters[pinAfter] : null;
+  if (next && typeof next.volumeId !== 'string') {      // 只有「跟着上一章」的那种才需要钉
+    const keep = eff[pinAfter] || '';
+    next.volumeId = keep;
+    sets.push({ id: next.id, volumeId: keep });
+  }
+  renderStudio();
+  return saveChapterVolumes(sets);
+}
+
+/** 把 [from, to] 逐章写成同一种归属：整段操作一律走这里，避免依赖「跟着上一章」带来的连带变化 */
+function assignRange(from, to, volId) {
+  const n = S.novel;
+  if (!n) return Promise.resolve();
+  const val = volId || '';
+  const sets = [];
+  for (let i = from; i <= Math.min(to, n.chapters.length - 1); i += 1) {
+    const ch = n.chapters[i];
+    if (!ch || ch.volumeId === val) continue;
+    ch.volumeId = val;
+    sets.push({ id: ch.id, volumeId: val });
+  }
+  renderStudio();
+  return saveChapterVolumes(sets);
+}
+
+/** 从 index 起、到「它所在的这一段」结束，整段改成 volId（用于「从此章起新的一卷」） */
+function assignRunFrom(index, volId) {
+  const eff = effVolumeIds();
+  const cur = eff[index] || '';
+  let to = index;
+  while (to + 1 < eff.length && (eff[to + 1] || '') === cur) to += 1;
+  return assignRange(index, to, volId);
+}
+
+/** 把 [from, to] 的手动归属清掉：这些章回到「按章纲归组 / 跟着上一章」 */
+async function clearRangeVolume(from, to) {
+  const n = S.novel;
+  if (!n) return;
+  const sets = [];
+  for (let i = from; i <= Math.min(to, n.chapters.length - 1); i += 1) {
+    const ch = n.chapters[i];
+    if (!ch || typeof ch.volumeId !== 'string') continue;
+    delete ch.volumeId;
+    sets.push({ id: ch.id, volumeId: null });
+  }
+  renderStudio();
+  return saveChapterVolumes(sets);
+}
+
+/** 这本书有没有章纲（有才谈得上「按章纲归组」） */
+const hasOutlineChapters = () => volumesOf().some((v) => (v.chapters || []).length > 0);
+
+/** 根据当前章节反推：它前面最近一个不同的卷（用于「并入上一卷」） */
+function neighborVolume(eff, index, dir) {
+  const cur = eff[index] || '';
+  for (let i = index + dir; i >= 0 && i < eff.length; i += dir) {
+    const v = eff[i] || '';
+    if (v !== cur) return { id: v, index: i };
+  }
+  return null;
+}
+
+/** 章节右侧 ⋯ 菜单：调整这一章归哪一卷 */
+function openChapterMenu(anchor, index) {
+  const eff = effVolumeIds();
+  const cur = eff[index] || '';
+  const prev = neighborVolume(eff, index, -1);
+  const next = neighborVolume(eff, index, 1);
+  const label = (x) => (x ? (volumeTitle(x.id) || '未分卷') : '未分卷');
+  showPop(anchor, [
+    { label: `并入上一卷（${label(prev)}）`, disabled: !prev, run: () => setChapterVolume(index, prev ? prev.id : '') },
+    { label: `并入下一卷（${label(next)}）`, disabled: !next, run: () => setChapterVolume(index, next ? next.id : '') },
+    '-',
+    { label: '从此章起新的一卷…', run: () => openVolumeModal(null, index, cur) },
+    { label: cur ? '把本章移出分卷' : '不归任何卷（保持不变）', disabled: !cur, run: () => setChapterVolume(index, '') },
+    '-',
+    { label: '上移本章', disabled: index === 0, run: () => moveChapter(index, index - 1) },
+    { label: '下移本章', disabled: index >= (S.novel?.chapters.length || 0) - 1, run: () => moveChapter(index, index + 1) },
+  ]);
+}
+
+/** 卷标题上的 ⋯ 菜单：编辑 / 删除 / 整段并入邻卷 */
+function openVolumeGroupMenu(anchor, vid, group) {
+  const v = volumeById(vid);
+  const eff = effVolumeIds();
+  const prev = neighborVolume(eff, group.from, -1);
+  const next = neighborVolume(eff, group.to, 1);
+  // 整段操作：把这一段逐章写成目标归属（不依赖继承，段外章节分毫不动）
+  const intoPrev = () => assignRange(group.from, group.to, prev ? prev.id : '');
+  const intoNext = () => assignRange(group.from, group.to, next ? next.id : '');
+  const lab = (x) => (x ? volumeTitle(x.id) || '未分卷' : '没有');
+  const items = [];
+  if (hasOutlineChapters()) items.push({ label: '这一段改回跟着章纲走（清除手动分卷）', run: () => clearRangeVolume(group.from, group.to) });
+  if (v) {
+    items.push({ label: '编辑卷名与卷纲…', run: () => openVolumeModal(vid) });
+    items.push({ label: '去「设定」里编辑章纲', run: () => gotoSettingsVolume(vid) });
+    items.push('-');
+    items.push({ label: `把这一段并入上一卷（${lab(prev)}）`, disabled: !prev, run: intoPrev });
+    items.push({ label: `把这一段并入下一卷（${lab(next)}）`, disabled: !next, run: intoNext });
+    items.push('-');
+    items.push({ label: '删除这一卷（章节保留）', run: () => deleteVolume(vid) });
+  } else {
+    items.push({ label: `把这一段并入上一卷（${lab(prev)}）`, disabled: !prev, run: intoPrev });
+    items.push({ label: `把这一段并入下一卷（${lab(next)}）`, disabled: !next, run: intoNext });
+    items.push('-');
+    items.push({ label: '从这一段起新的一卷…', run: () => openVolumeModal(null, group.from, '') });
+  }
+  showPop(anchor, items);
+}
+
+function gotoSettingsVolume(vid) {
+  setView('bible');
+  const i = volumesOf().findIndex((v) => v.id === vid);
+  requestAnimationFrame(() => {
+    const block = $$('#volList .vol-block')[i];
+    if (block) { block.scrollIntoView({ block: 'center' }); block.classList.add('flash'); setTimeout(() => block.classList.remove('flash'), 1400); }
+  });
+}
+
+/** 新建 / 编辑一卷。startIndex >= 0 表示「从这一章起归入新卷」 */
+function openVolumeModal(vid, startIndex = -1, inheritFrom = '') {
+  const n = S.novel;
+  if (!n) return;
+  n.outline.volumes ||= [];
+  const vols = n.outline.volumes;
+  const v = vid ? volumeById(vid) : null;
+  const creating = !v;
+  const seq = vols.length + 1;
+  const hint = creating && startIndex >= 0
+    ? `从第 ${startIndex + 1} 章起归入这一卷${inheritFrom ? `（原来是「${volumeTitle(inheritFrom) || '未分卷'}」）` : ''}`
+    : '卷名与卷纲会喂给 AI 当上下文；具体章纲在「设定 → 分卷与章纲」里编辑。';
+  showModal(`
+    <h3>${creating ? '新建分卷' : '编辑分卷'}</h3>
+    <p class="modal-sub">${esc(hint)}</p>
+    <label class="field-label">卷名
+      <input class="input" id="volName" value="${esc(v?.name || `第 ${seq} 卷`)}" placeholder="例：第一卷 少年游" />
+    </label>
+    <label class="field-label">本卷定位 / 卷纲（可留空）
+      <textarea class="input" id="volDesc" rows="4" placeholder="这一卷的主要冲突、人物变化、要在哪里收束">${esc(v?.desc || '')}</textarea>
+    </label>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="volCancel">取消</button>
+      <button class="btn btn-primary" id="volOk">${creating ? '创建并归入' : '保存'}</button>
+    </div>`, (box) => {
+    const nameEl = box.querySelector('#volName');
+    nameEl.focus();
+    nameEl.select();
+    box.querySelector('#volCancel').onclick = closeModal;
+    const ok = async () => {
+      const name = nameEl.value.trim() || `第 ${seq} 卷`;
+      const desc = box.querySelector('#volDesc').value.trim();
+      if (creating) {
+        const nv = { id: uid('v'), name, desc, chapters: [] };
+        vols.push(nv);
+        saveNovelPart({ outline: n.outline });
+        closeModal();
+        // 从这一章起、到这一段结束，整段归入新卷（逐章写死，段外不动）
+        if (startIndex >= 0) await assignRunFrom(startIndex, nv.id);
+        else renderStudio();
+        toast(`已新建「${name}」`, 'ok');
+      } else {
+        v.name = name;
+        v.desc = desc;
+        saveNovelPart({ outline: n.outline });
+        closeModal();
+        renderStudio();
+        toast('分卷已更新', 'ok');
+      }
+    };
+    box.querySelector('#volOk').onclick = ok;
+    box.querySelector('#volDesc').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); ok(); }
+    });
+  });
+}
+
+/** 从当前章开始新建一卷（命令面板用） */
+function newVolumeFromCurrent() {
+  const n = S.novel;
+  if (!n) return toast('先打开作品', 'err');
+  const i = n.chapters.findIndex((c) => c.id === S.chapterId);
+  if (i < 0) return toast('先在章节列表里选一章', 'err');
+  openVolumeModal(null, i, effVolumeIds()[i] || '');
+}
+
+/** 把某一卷名下的章节改到 target 卷（target 为空则是未分卷）；内容一个字都不动 */
+async function unassignVolume(vid, target = '') {
+  const n = S.novel;
+  if (!n) return 0;
+  const eff = effVolumeIds();
+  const sets = [];
+  for (let i = 0; i < eff.length; i += 1) {
+    if (eff[i] !== vid) continue;
+    const ch = n.chapters[i];
+    if (!ch || ch.volumeId === target) continue;
+    ch.volumeId = target;
+    sets.push({ id: ch.id, volumeId: target });
+  }
+  await saveChapterVolumes(sets);
+  return sets.length;
+}
+
+async function deleteVolume(vid) {
+  const n = S.novel;
+  const v = volumeById(vid);
+  if (!n || !v) return;
+  const eff = effVolumeIds();
+  const first = eff.indexOf(vid);
+  const count = eff.filter((x) => x === vid).length;
+  const outlineCount = (v.chapters || []).length;
+  if (!confirm(`删除「${v.name || '未命名'}」这一卷？\n\n该卷 ${count} 章正文会完整保留，归入上一卷（没有上一卷就变成未分卷）。\n${outlineCount ? `卷里的 ${outlineCount} 条章纲会一起删除。` : ''}`)) return;
+  // 这一卷的章节整段并进上一卷
+  let target = '';
+  for (let i = first - 1; i >= 0; i -= 1) { if (eff[i] !== vid) { target = eff[i]; break; } }
+  await unassignVolume(vid, target);
+  const at = n.outline.volumes.indexOf(v);
+  if (at >= 0) n.outline.volumes.splice(at, 1);
+  saveNovelPart({ outline: n.outline });
+  renderStudio();
+  toast('已删除这一卷，章节都还在', 'ok');
+}
+
+/* --- 小浮层菜单：卷与章节操作共用 --- */
+let popEl = null;
+function closePop() {
+  if (popEl) { popEl.remove(); popEl = null; }
+}
+function showPop(anchor, items) {
+  closePop();
+  const el = document.createElement('div');
+  el.className = 'popmenu';
+  for (const it of items) {
+    if (it === '-') { el.insertAdjacentHTML('beforeend', '<div class="popmenu-sep"></div>'); continue; }
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'popmenu-item';
+    b.textContent = it.label;
+    b.disabled = !!it.disabled;
+    b.addEventListener('click', () => { closePop(); it.run(); });
+    el.appendChild(b);
+  }
+  document.body.appendChild(el);
+  const r = anchor.getBoundingClientRect();
+  el.style.left = `${Math.max(8, Math.min(r.left - 6, window.innerWidth - el.offsetWidth - 10))}px`;
+  el.style.top = `${Math.max(8, Math.min(r.bottom + 4, window.innerHeight - el.offsetHeight - 10))}px`;
+  popEl = el;
+}
+document.addEventListener('mousedown', (e) => { if (popEl && !popEl.contains(e.target)) closePop(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePop(); });
+window.addEventListener('resize', closePop);
+window.addEventListener('blur', closePop);
+
+/* ============================================================
  * 5. 工作台
  * ============================================================ */
 const currentChapter = () => S.novel?.chapters.find((c) => c.id === S.chapterId) || null;
@@ -526,14 +886,21 @@ function renderStudio() {
   }
   const n = S.novel;
   const total = n.chapters.reduce((s, c) => s + countWords(c.content), 0);
-  $('#chapterMeta').innerHTML = `${esc(n.genre || '未分类')} · ${n.chapters.length} 章 · ${fmtWords(total)} 字${n.meta.platform ? ` · ${esc(n.meta.platform)}` : ''}`;
+  const curIdx = n.chapters.findIndex((c) => c.id === S.chapterId);
+  const curVol = curIdx >= 0 && volumesOf().length ? volumeTitle(effVolumeIds()[curIdx]) : '';
+  $('#chapterMeta').innerHTML = `${esc(n.genre || '未分类')} · ${curVol ? `${esc(curVol)} · ` : ''}${n.chapters.length} 章 · ${fmtWords(total)} 字${n.meta.platform ? ` · ${esc(n.meta.platform)}` : ''}`;
 
   const ul = $('#chapterList');
+  const keepScroll = ul.scrollTop;
   ul.innerHTML = '';
   if (!n.chapters.length) {
     ul.innerHTML = `<li class="chapter-empty">还没有章节<br>点上方 ＋ 新建一章</li>`;
   }
-  n.chapters.forEach((c, i) => {
+  const eff = effVolumeIds();
+  const groupMode = volumesOf().length > 0;      // 没建过卷的书保持原样的平铺列表
+
+  // 章节行（含 ⋯ 操作菜单）。分卷模式下按卷塞进不同分组，平铺模式直接进 ul。
+  const makeItem = (c, i) => {
     const li = document.createElement('li');
     li.className = `chapter-item ${c.id === S.chapterId ? 'on' : ''}`;
     const w = countWords(c.content);
@@ -544,6 +911,7 @@ function renderStudio() {
       <span class="ci-act">
         <button class="mini-act" data-a="up" title="上移">${ico('chev-up')}</button>
         <button class="mini-act" data-a="down" title="下移">${ico('chev-down')}</button>
+        <button class="mini-act" data-a="menu" title="分卷 / 本章操作">${ico('more')}</button>
         <button class="mini-act del" data-a="del" title="删除本章">${ico('x')}</button>
       </span>`;
     li.addEventListener('click', (e) => {
@@ -551,14 +919,23 @@ function renderStudio() {
       if (!act) return selectChapter(c.id);
       if (act === 'up' && i > 0) return moveChapter(i, i - 1);
       if (act === 'down' && i < n.chapters.length - 1) return moveChapter(i, i + 1);
+      if (act === 'menu') return openChapterMenu(e.target.closest('.mini-act'), i);
       if (act === 'del') {
         (async () => {
           if (!confirm(`删除第 ${i + 1} 章「${c.title}」？`)) return;
+          // 删掉的若是「某一卷的第一章」，标记要交给下一章，
+          // 否则后面几十章会顺着继承回上一卷（整卷凭空合并）。
+          const hadVol = typeof c.volumeId === 'string' ? c.volumeId : '';
+          const nextCh = n.chapters[i + 1];
           const { novel } = await api.del(`/api/novels/${n.id}/chapters/${c.id}`);
           S.novel = novel;
           S.unsaved.delete(c.id);            // 这一章都不要了，别再补存
           pendingCounted.delete(c.id);
           countedWords.delete(c.id);
+          if (hadVol && nextCh && typeof nextCh.volumeId !== 'string' && novel.chapters.some((x) => x.id === nextCh.id)) {
+            nextCh.volumeId = hadVol;
+            saveChapterVolumes([{ id: nextCh.id, volumeId: hadVol }]);
+          }
           S.dirty = S.unsaved.size > 0;
           refreshSavePill();
           if (S.chapterId === c.id) S.chapterId = novel.chapters[Math.min(i, novel.chapters.length - 1)]?.id || null;
@@ -567,8 +944,26 @@ function renderStudio() {
         })();
       }
     });
-    ul.appendChild(li);
-  });
+    return li;
+  };
+
+  if (groupMode) {
+    const groups = [];
+    n.chapters.forEach((c, i) => {
+      const vid = eff[i] || '';
+      const last = groups[groups.length - 1];
+      if (!last || last.id !== vid) groups.push({ id: vid, from: i, chapters: [c] });
+      else last.chapters.push(c);
+    });
+    groups.forEach((g) => {
+      let to = g.from;
+      const box = volGroupEl(ul, g.id, { ...g, to: g.from + g.chapters.length - 1 });
+      g.chapters.forEach((c) => { box.appendChild(makeItem(c, to)); to += 1; });
+    });
+  } else {
+    n.chapters.forEach((c, i) => ul.appendChild(makeItem(c, i)));
+  }
+  ul.scrollTop = keepScroll;
 
   const ch = currentChapter();
   setEmpty(!ch, '这部作品还没有章节', '新建第一章，再让右侧助手按章纲生成正文。', true);
@@ -969,7 +1364,9 @@ function updateFoot() {
   const ch = currentChapter();
   if (!ch) { $('#footInfo').textContent = ''; return; }
   const i = S.novel.chapters.indexOf(ch);
+  const vol = volumesOf().length ? volumeTitle(effVolumeIds()[i]) : '';
   $('#footInfo').textContent = [
+    vol,
     `第 ${i + 1} / ${S.novel.chapters.length} 章`,
     ch.memory ? '已存档记忆' : '未生成记忆',
     ch.outline?.hook ? `钩子：${ch.outline.hook}` : '',
@@ -987,24 +1384,61 @@ function selectChapter(id) {
 async function moveChapter(from, to) {
   const n = S.novel;
   if (!n || to < 0 || to >= n.chapters.length) return;
+  // 分卷归属跟着「位置」走：把两个位置的标记对调，否则一卷的第一章被移走时，
+  // 整卷的起点会跟着它跑（后面几十章一起换卷）。
+  const eff = volumesOf().length ? effVolumeIds() : null;
   const [item] = n.chapters.splice(from, 1);
   n.chapters.splice(to, 0, item);
+  if (eff) {
+    const sets = [];
+    for (const i of [from, to]) {
+      const ch = n.chapters[i];
+      const val = eff[i] || '';
+      if (ch && ch.volumeId !== val) { ch.volumeId = val; sets.push({ id: ch.id, volumeId: val }); }
+    }
+    saveChapterVolumes(sets);
+  }
   renderStudio();
   try {
     const { novel } = await api.put(`/api/novels/${n.id}`, { chapters: n.chapters });
-    n.chapters = novel.chapters;
+    syncOrder(novel.chapters);
     renderStudio();
   } catch (err) { toast(`移动失败：${err.message}`, 'err'); }
 }
 
+/** 只按服务端返回的顺序校正本地章节次序，不替换本地对象 ——
+ *  整份替换会把「请求发出后敲进去的字」从内存里抹掉，稿纸随即被回滚。 */
+function syncOrder(serverChapters) {
+  const n = S.novel;
+  if (!n) return;
+  const rank = new Map((serverChapters || []).map((c, i) => [c.id, i]));
+  n.chapters.sort((a, b) => (rank.get(a.id) ?? -1) - (rank.get(b.id) ?? -1));
+}
+
 async function addChapter() {
-  if (!S.novel) return toast('先打开一部作品', 'err');
-  const at = S.novel.chapters.findIndex((c) => c.id === S.chapterId);
-  const { novel, chapter } = await api.send(`/api/novels/${S.novel.id}/chapters`, {
-    title: `第 ${S.novel.chapters.length + 1} 章`,
+  const n = S.novel;
+  if (!n) return toast('先打开一部作品', 'err');
+  const at = n.chapters.findIndex((c) => c.id === S.chapterId);
+  const eff = volumesOf().length ? effVolumeIds() : null;
+  const insertAt = at >= 0 ? at + 1 : n.chapters.length;
+  // 新章节跟着当前章走，落在同一卷里
+  const volId = eff && at >= 0 ? (eff[at] || '') : '';
+  const { chapter } = await api.send(`/api/novels/${n.id}/chapters`, {
+    title: `第 ${n.chapters.length + 1} 章`,
     at: at >= 0 ? at + 1 : undefined,
+    volumeId: volId,
   });
-  S.novel = novel;
+  n.chapters.splice(insertAt, 0, chapter);
+  // 新章带着明确归属；紧跟其后的那一章若原本只是「跟着上一章」，会被它带跑，
+  // 所以顺手把那一章的归属写死。
+  if (eff && insertAt < eff.length) {
+    const nextCh = n.chapters[insertAt + 1];
+    const keep = eff[insertAt] || '';
+    if (nextCh && typeof nextCh.volumeId !== 'string') {
+      nextCh.volumeId = keep;
+      saveChapterVolumes([{ id: nextCh.id, volumeId: keep }]);
+    }
+  }
   S.chapterId = chapter.id;
   renderStudio();
   $('#chTitle').focus(); $('#chTitle').select();
@@ -1508,9 +1942,12 @@ function renderOutlineTab(host, n) {
     block.querySelector('[data-act="down"]').onclick = () => { if (vi < n.outline.volumes.length - 1) swap(vi, vi + 1); };
     block.querySelector('[data-act="del"]').onclick = () => {
       if (!confirm('删除本卷及其全部章纲？')) return;
+      const vid = v.id;
       n.outline.volumes.splice(vi, 1);
       renderBible();
       saveNovelPart({ outline: n.outline });
+      // 章节列表里原本归这一卷的，改回未分卷（别留下指向已删卷的僵尸标记）
+      if (vid) unassignVolume(vid, '').then(renderStudio);
     };
     block.querySelector('[data-act="add"]').onclick = () => {
       v.chapters = v.chapters || [];
@@ -2358,6 +2795,7 @@ function cmdkSource() {
   op('立即保存', 'check', manualSave, 'Ctrl+S');
   op('切换明暗主题', 'moon', () => $('#themeBtn').click());
   op('写作统计 / 日更目标', 'stamp', () => openStatsModal());
+  op('新建一卷（从当前章起）', 'layers', newVolumeFromCurrent);
 
   const go = (label, icon, v) => out.push({ g: '前往', label, icon, run: () => setView(v) });
   go('书架', 'book', 'shelf');
