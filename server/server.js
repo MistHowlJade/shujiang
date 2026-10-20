@@ -643,12 +643,20 @@ async function handleApi(req, res, url) {
       const raw = url.searchParams.get('format');
       const format = raw === 'md' ? 'md' : raw === 'epub' ? 'epub' : 'txt';
       const cid = url.searchParams.get('chapterId');
-      const list = cid ? n.chapters.filter((c) => c.id === cid) : n.chapters;
+      // 只导出定稿只作用于「全书」；当前章导出是作者明确指定的，不受状态限制
+      const onlyDone = !cid && url.searchParams.get('only') === 'done';
+      const doneList = onlyDone ? n.chapters.filter((c) => c.stage === 'done') : n.chapters;
+      const list = format === 'epub'
+        ? (onlyDone ? doneList : n.chapters)     // EPUB 始终全书，忽略 chapterId
+        : (cid ? n.chapters.filter((c) => c.id === cid) : doneList);
+      // 空书仍可导出（至少保留书名页 / 封面信息）；只有「只导出定稿」没内容时才报错
+      if (!list.length && onlyDone) return sendJson(res, 400, { error: '还没有已定稿的章节' });
+      const suffix = onlyDone ? '_定稿版' : '';
 
       if (format === 'epub') {
         // EPUB 始终导出全书：单章电子书没有阅读价值，目录也按全书分卷生成
-        const buf = buildEpub(n, n.chapters);
-        const name = `${safeName(n.title)}.epub`;
+        const buf = buildEpub(n, list);
+        const name = `${safeName(n.title)}${suffix}.epub`;
         res.writeHead(200, {
           'Content-Type': 'application/epub+zip',
           'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
@@ -659,7 +667,7 @@ async function handleApi(req, res, url) {
       }
 
       const text = format === 'md' ? exportMarkdown(n, list) : exportTxt(n, list);
-      const name = `${safeName(n.title)}${cid && list[0] ? `_第${list[0].no}章` : ''}.${format}`;
+      const name = `${safeName(n.title)}${suffix}${cid && list[0] ? `_第${list[0].no}章` : ''}.${format}`;
       res.writeHead(200, {
         'Content-Type': format === 'md' ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8',
         'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,

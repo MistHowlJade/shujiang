@@ -675,6 +675,51 @@ function setChapterStage(index, stage) {
   toast(`第 ${index + 1} 章已标为「${STAGE_LABEL[stage]}」`, 'ok');
 }
 
+/** 把某一章移动到任意位置（1-based 输入，实际按下标处理） */
+function openMoveChapterModal(index) {
+  const n = S.novel;
+  const ch = n?.chapters[index];
+  if (!ch) return;
+  const max = n.chapters.length;
+  showModal(`<h3>移动章节</h3>
+    <p class="modal-sub">把第 ${index + 1} 章「${esc(ch.title || '未命名')}」放到指定位置。分卷归属会跟着位置一起调整。</p>
+    <label class="field-label">目标位置（1 – ${max}）
+      <input id="movePos" class="input" type="number" min="1" max="${max}" step="1" inputmode="numeric" value="${index + 1}" />
+    </label>
+    <div class="dim small" id="moveHint">当前位于第 ${index + 1} 位。</div>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="moveCancel">取消</button>
+      <button class="btn btn-primary" id="moveOk">移动</button>
+    </div>`, (box) => {
+    const posEl = box.querySelector('#movePos');
+    const hintEl = box.querySelector('#moveHint');
+    const okBtn = box.querySelector('#moveOk');
+    const sync = () => {
+      const pos = Number(posEl.value);
+      const valid = Number.isInteger(pos) && pos >= 1 && pos <= max;
+      okBtn.disabled = !valid || pos === index + 1;
+      hintEl.textContent = !valid
+        ? `请输入 1 – ${max} 之间的整数。`
+        : pos === index + 1 ? '已经在目标位置。' : `移动后位于第 ${pos} 位。`;
+    };
+    posEl.addEventListener('input', sync);
+    posEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !okBtn.disabled) okBtn.click();
+    });
+    posEl.focus();
+    posEl.select();
+    box.querySelector('#moveCancel').onclick = closeModal;
+    okBtn.onclick = async () => {
+      const pos = Number(posEl.value);
+      if (okBtn.disabled) return;
+      closeModal();
+      const ok = await moveChapter(index, pos - 1);
+      if (ok) toast(`已移动到第 ${pos} 位`, 'ok');
+    };
+    sync();
+  });
+}
+
 /** 章节右侧 ⋯ 菜单：调整这一章归哪一卷 / 状态 */
 function openChapterMenu(anchor, index) {
   const eff = effVolumeIds();
@@ -696,6 +741,7 @@ function openChapterMenu(anchor, index) {
     '-',
     { label: S.stageFilter ? '上移本章（先清除筛选）' : '上移本章', disabled: !!S.stageFilter || index === 0, run: () => moveChapter(index, index - 1) },
     { label: S.stageFilter ? '下移本章（先清除筛选）' : '下移本章', disabled: !!S.stageFilter || index >= (S.novel?.chapters.length || 0) - 1, run: () => moveChapter(index, index + 1) },
+    { label: S.stageFilter ? '移动到指定位置…（先清除筛选）' : '移动到指定位置…', disabled: !!S.stageFilter, run: () => openMoveChapterModal(index) },
   ]);
 }
 
@@ -1488,27 +1534,50 @@ $('#stageFilter').addEventListener('change', () => {
 
 async function moveChapter(from, to) {
   const n = S.novel;
-  if (!n || to < 0 || to >= n.chapters.length) return;
-  // 分卷归属跟着「位置」走：把两个位置的标记对调，否则一卷的第一章被移走时，
-  // 整卷的起点会跟着它跑（后面几十章一起换卷）。
+  if (!n || from < 0 || from >= n.chapters.length || to < 0 || to >= n.chapters.length || from === to) return false;
+  // 分卷归属跟着「位置」走：记住移动前每个位置的卷，移动后把整段重新钉一遍。
+  // 只对首尾两个位置处理是不够的 —— 跨多章移动时，中间章节整体位移会让卷边界提前或延后。
   const eff = volumesOf().length ? effVolumeIds() : null;
   const [item] = n.chapters.splice(from, 1);
   n.chapters.splice(to, 0, item);
+  let volumeSave = Promise.resolve();
   if (eff) {
+    const vols = volumesOf();
+    const byOutline = new Map();
+    for (const v of vols) for (const o of (v.chapters || [])) if (o?.id) byOutline.set(o.id, v.id || '');
+    const known = new Set(vols.map((v) => v.id).filter(Boolean));
     const sets = [];
-    for (const i of [from, to]) {
+    const lo = Math.min(from, to);
+    const hi = Math.max(from, to);
+    let inherit = lo > 0 ? (eff[lo - 1] || '') : '';
+    for (let i = lo; i <= hi; i += 1) {
       const ch = n.chapters[i];
-      const val = eff[i] || '';
-      if (ch && ch.volumeId !== val) { ch.volumeId = val; sets.push({ id: ch.id, volumeId: val }); }
+      if (!ch) continue;
+      const raw = typeof ch.volumeId === 'string' ? ch.volumeId : null;
+      const own = raw === null ? null : raw === '' || raw === '-' ? '' : known.has(raw) ? raw : null;
+      const fromOutline = own === null && ch.outlineId ? byOutline.get(ch.outlineId) : '';
+      const current = own !== null ? own : (fromOutline || inherit);
+      const want = eff[i] || '';
+      if (current !== want) {
+        if (ch.volumeId !== want) { ch.volumeId = want; sets.push({ id: ch.id, volumeId: want }); }
+        inherit = want;
+      } else {
+        inherit = current;
+      }
     }
-    saveChapterVolumes(sets);
+    volumeSave = saveChapterVolumes(sets);
   }
   renderStudio();
+  await volumeSave;
   try {
     const { novel } = await api.put(`/api/novels/${n.id}`, { chapters: n.chapters });
     syncOrder(novel.chapters);
     renderStudio();
-  } catch (err) { toast(`移动失败：${err.message}`, 'err'); }
+    return true;
+  } catch (err) {
+    toast(`移动失败：${err.message}`, 'err');
+    return false;
+  }
 }
 
 /** 只按服务端返回的顺序校正本地章节次序，不替换本地对象 ——
@@ -2930,25 +2999,49 @@ function exportBook() {
         <select id="exScope" class="input"><option value="all">全书</option><option value="chapter">当前章</option></select>
       </label>
     </div>
+    <label class="export-done" id="exDoneRow">
+      <input type="checkbox" id="exDone" />
+      <span>只导出定稿章节</span>
+      <span class="export-done-count" id="exDoneCount"></span>
+    </label>
+    <div class="dim small export-done-hint" id="exDoneHint" hidden>章号沿用原书，不会自动重新编号。</div>
     <div class="dim small" id="exHint" hidden>EPUB 会导出全书，自动生成标题页、目录和分卷结构，适合放进手机 / 阅读器。</div>
     <div class="modal-foot"><button class="btn btn-text" id="exCancel">取消</button><button class="btn btn-primary" id="exOk">下载</button></div>`,
     (box) => {
       const fmtEl = box.querySelector('#exFmt');
       const scopeEl = box.querySelector('#exScope');
       const hintEl = box.querySelector('#exHint');
+      const doneEl = box.querySelector('#exDone');
+      const doneRow = box.querySelector('#exDoneRow');
+      const doneCountEl = box.querySelector('#exDoneCount');
+      const doneHintEl = box.querySelector('#exDoneHint');
+      const total = S.novel.chapters.length;
+      const doneCount = S.novel.chapters.filter((c) => stageOf(c) === 'done').length;
       const sync = () => {
         const epub = fmtEl.value === 'epub';
         scopeEl.disabled = epub;
         if (epub) scopeEl.value = 'all';
         hintEl.hidden = !epub;
+        // 单章导出是作者明确指定的，不受「只导出定稿」影响
+        const showDone = scopeEl.value === 'all';
+        doneRow.hidden = !showDone;
+        doneEl.disabled = doneCount === 0;
+        doneRow.classList.toggle('disabled', doneCount === 0);
+        if (doneCount === 0) doneEl.checked = false;
+        doneCountEl.textContent = doneCount ? `已定稿 ${doneCount} / ${total} 章` : '还没有定稿章节';
+        doneHintEl.hidden = !(showDone && doneEl.checked);
       };
       fmtEl.onchange = sync;
+      scopeEl.onchange = sync;
+      doneEl.onchange = sync;
       sync();
       box.querySelector('#exCancel').onclick = closeModal;
       box.querySelector('#exOk').onclick = () => {
         const fmt = fmtEl.value;
         const scope = scopeEl.value;
-        const q = fmt !== 'epub' && scope === 'chapter' && S.chapterId ? `&chapterId=${S.chapterId}` : '';
+        const onlyDone = !doneRow.hidden && doneEl.checked;
+        if (onlyDone && doneCount === 0) return toast('还没有已定稿的章节', 'err');
+        const q = `${fmt !== 'epub' && scope === 'chapter' && S.chapterId ? `&chapterId=${S.chapterId}` : ''}${onlyDone ? '&only=done' : ''}`;
         window.location.href = `/api/novels/${S.novel.id}/export?format=${fmt}${q}`;
         closeModal();
       };

@@ -855,6 +855,20 @@ kbd {
 .modal .field-label:first-of-type { margin-top: 0; }
 .modal textarea { min-height: 170px; font-family: var(--font-write); font-size: 13.5px; line-height: 1.85; }
 
+/* 导出：只导出定稿 */
+.export-done {
+  display: flex; align-items: center; gap: 8px; margin-top: 12px;
+  padding: 10px 12px; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  color: var(--text-2); font-size: 12px; cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.export-done:hover { border-color: var(--border-2); }
+.export-done input { accent-color: var(--accent); }
+.export-done-count { margin-left: auto; color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.export-done.disabled { opacity: .55; cursor: not-allowed; }
+.export-done-hint { margin-top: 7px; }
+
 /* ---------------- 导入文稿 ---------------- */
 .import-drop {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
