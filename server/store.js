@@ -13,6 +13,12 @@ export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 // 章节的写作状态：草稿 → 修改中 → 定稿（和 AI 用的 chapter.status 无关）
 export const CHAPTER_STAGES = new Set(['draft', 'revising', 'done']);
 
+// 单章目标字数只用于进度提示，不限制写作；0 表示没设目标
+export function cleanTargetWords(value) {
+  const n = Math.floor(Number(value));
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 1000000) : 0;
+}
+
 const CONFIG_DEFAULT = {
   providers: [],
   activeProviderId: '',
@@ -163,6 +169,7 @@ export function getNovel(id) {
   n.chapters.forEach((c, i) => {
     c.no = i + 1;
     if (!CHAPTER_STAGES.has(c.stage)) c.stage = 'draft';
+    c.targetWords = cleanTargetWords(c.targetWords);
   });
   n.meta = { ...blankNovel().meta, ...(n.meta || {}) };
   // 记下磁盘上的字数，saveNovel 用它判断这次落盘是不是「骤降」
@@ -175,6 +182,7 @@ export function saveNovel(novel) {
   novel.chapters = (novel.chapters || []).map((c, i) => ({
     ...c,
     stage: CHAPTER_STAGES.has(c.stage) ? c.stage : 'draft',
+    targetWords: cleanTargetWords(c.targetWords),
     no: i + 1,
     words: countWords(c.content || ''),
   }));

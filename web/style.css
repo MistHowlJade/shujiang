@@ -474,7 +474,52 @@ body[data-theme="light"] .segmented button.on { box-shadow: var(--sh-1); }
   border: 1px solid var(--border); border-radius: var(--r-full);
   padding: 2px 9px; white-space: nowrap; font-variant-numeric: tabular-nums;
 }
+.chip-target {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: inherit; line-height: 1.4; cursor: pointer; appearance: none;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease),
+              background var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.chip-target:hover { color: var(--text-1); border-color: var(--border-2); }
+.chip-target:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.chip-target:disabled { cursor: default; opacity: .65; }
+.chip-target.has-target {
+  --goal-bg: var(--accent-bg);
+  color: var(--text-2); border-color: var(--accent-line);
+  background: linear-gradient(90deg, var(--goal-bg) var(--pct, 0%), var(--surface-3) var(--pct, 0%));
+}
+.chip-target.done {
+  --goal-bg: var(--success-bg);
+  color: var(--success); border-color: var(--success);
+}
 .dim-text { color: var(--text-3); font-size: 11.5px; }
+
+/* 章节目标设置 */
+.tg-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tg-preset {
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--r-full);
+  background: var(--surface-2); color: var(--text-3); font-family: inherit;
+  font-size: 11px; cursor: pointer; transition: all var(--dur) var(--ease);
+}
+.tg-preset:hover { color: var(--text-1); border-color: var(--border-2); background: var(--surface-3); }
+.tg-preview {
+  margin-top: 14px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2);
+}
+.tg-preview-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  color: var(--text-3); font-size: 10.5px; font-variant-numeric: tabular-nums;
+}
+#tgPreviewPct { color: var(--text-2); font-weight: 600; }
+.tg-preview-bar {
+  height: 6px; margin-top: 8px; overflow: hidden;
+  border-radius: var(--r-full); background: var(--surface-3);
+}
+.tg-preview-bar > span {
+  display: block; width: 0; height: 100%; border-radius: inherit;
+  background: var(--accent); transition: width 180ms var(--ease), background var(--dur) var(--ease);
+}
+.tg-preview-bar > span.done { background: var(--success); }
 
 .tip {
   display: flex; gap: 9px; padding: 10px 12px; margin-bottom: 12px;
@@ -683,6 +728,17 @@ kbd {
 .kb-no { flex: 0 0 auto; color: var(--text-4); font-size: 10px; font-variant-numeric: tabular-nums; }
 .kb-card-title { flex: 1; min-width: 0; color: var(--text-1); font-size: 12px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
 .kb-card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; color: var(--text-3); font-size: 10px; }
+.kb-goal-done { color: var(--success); }
+.kb-pct { color: var(--text-4); font-variant-numeric: tabular-nums; }
+.kb-goal {
+  height: 3px; margin-top: 6px; overflow: hidden;
+  border-radius: var(--r-full); background: var(--surface-3);
+}
+.kb-goal > span {
+  display: block; width: 0; height: 100%; border-radius: inherit;
+  background: var(--accent); transition: width 180ms var(--ease), background var(--dur) var(--ease);
+}
+.kb-goal > span.done { background: var(--success); }
 .kb-rev { color: var(--warning); }
 .kb-mem { color: var(--accent-hover); }
 .kb-card-foot { display: flex; align-items: center; gap: 6px; margin-top: 7px; }

@@ -9,7 +9,7 @@ import {
   ROOT, DATA_DIR, ensureDirs, loadConfig, saveConfig, maskKey,
   listNovels, createNovel, getNovel, saveNovel, deleteNovel, newId, countWords,
   listSnapshots, createSnapshot, readSnapshot, chapterVolumeIds, volumeLabel,
-  findOutlineEntry, CHAPTER_STAGES,
+  findOutlineEntry, CHAPTER_STAGES, cleanTargetWords,
 } from './store.js';
 import { buildTask, TASKS } from './prompts.js';
 import { buildEpub } from './epub.js';
@@ -593,6 +593,7 @@ async function handleApi(req, res, url) {
           content: body.content || '',
           status: 'draft',
           stage: 'draft',
+          targetWords: cleanTargetWords(body.targetWords),
           outline: body.outline || null,
           memory: null,
           // 归入哪一卷由前端决定（新章节默认跟着前一章走，见 web/app.js 的 addChapter）

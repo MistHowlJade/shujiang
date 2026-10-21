@@ -1590,6 +1590,7 @@ function openChapterMenu(anchor, index) {
     { label: `${stage === 'draft' ? '✓ ' : ''}标为草稿`, run: () => setChapterStage(index, 'draft') },
     { label: `${stage === 'revising' ? '✓ ' : ''}标为修改中`, run: () => setChapterStage(index, 'revising') },
     { label: `${stage === 'done' ? '✓ ' : ''}标为定稿`, run: () => setChapterStage(index, 'done') },
+    { label: targetOf(ch) ? `改本章目标（${fmtWords(targetOf(ch))} 字）…` : '设置本章目标字数…', disabled: !ch, run: () => openChapterTargetModal(index) },
     '-',
     { label: '拆分本章…', run: () => openSplitChapterModal(index) },
     { label: '合并本章…', disabled: index >= (S.novel?.chapters.length || 0) - 1, run: () => openMergeChapterModal(index) },
@@ -1598,6 +1599,79 @@ function openChapterMenu(anchor, index) {
     { label: S.stageFilter ? '下移本章（先清除筛选）' : '下移本章', disabled: !!S.stageFilter || index >= (S.novel?.chapters.length || 0) - 1, run: () => moveChapter(index, index + 1) },
     { label: S.stageFilter ? '移动到指定位置…（先清除筛选）' : '移动到指定位置…', disabled: !!S.stageFilter, run: () => openMoveChapterModal(index) },
   ]);
+}
+
+/** 设置单章目标字数：只影响进度提示，不限制正文长度 */
+function openChapterTargetModal(index) {
+  const n = S.novel;
+  const ch = n?.chapters[index];
+  if (!ch) return toast('先打开一章', 'err');
+  const words = countWords(ch.content);
+  const currentTarget = targetOf(ch);
+  const defaultTarget = Math.max(0, Math.floor(Number(n.meta?.targetWordsPerChapter) || 0));
+  const presets = [...new Set([defaultTarget, 3000, 5000, 10000])]
+    .filter((v) => v > 0 && v <= 1000000);
+
+  showModal(`<h3>设置本章目标</h3>
+    <p class="modal-sub">第 ${index + 1} 章「${esc(ch.title || '未命名')}」· 当前 ${fmtWords(words)} 字。<br>目标只用于进度提示，不会限制你写多少；留空或 0 表示不设。</p>
+    <label class="field-label">目标字数
+      <input class="input" id="tgWords" type="number" min="0" max="1000000" step="100" value="${currentTarget || ''}" placeholder="${defaultTarget ? `例如 ${defaultTarget}` : '留空表示不设目标'}" />
+    </label>
+    <div class="tg-presets" id="tgPresets">
+      ${presets.map((v) => `<button type="button" class="tg-preset" data-v="${v}">${fmtWords(v)} 字</button>`).join('')}
+    </div>
+    <div class="tg-preview">
+      <div class="tg-preview-head"><span id="tgPreviewText"></span><span id="tgPreviewPct"></span></div>
+      <div class="tg-preview-bar"><span id="tgPreviewFill"></span></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="tgClear" ${currentTarget ? '' : 'hidden'}>清除目标</button>
+      <button class="btn btn-text" id="tgCancel">取消</button>
+      <button class="btn btn-primary" id="tgSave">保存目标</button>
+    </div>`, (box) => {
+    const input = box.querySelector('#tgWords');
+    const previewText = box.querySelector('#tgPreviewText');
+    const previewPct = box.querySelector('#tgPreviewPct');
+    const previewFill = box.querySelector('#tgPreviewFill');
+
+    const sync = () => {
+      const target = Math.max(0, Math.min(1000000, Math.floor(Number(input.value) || 0)));
+      const pct = target ? Math.min(100, Math.round((words / target) * 100)) : 0;
+      previewText.textContent = target ? `${fmtWords(words)} / ${fmtWords(target)} 字` : `当前 ${fmtWords(words)} 字 · 未设目标`;
+      previewPct.textContent = target ? `${pct}%` : '—';
+      previewFill.style.width = `${pct}%`;
+      previewFill.classList.toggle('done', target > 0 && words >= target);
+    };
+
+    const commit = (value) => {
+      const target = Math.max(0, Math.min(1000000, Math.floor(Number(value) || 0)));
+      if (target === currentTarget) {
+        closeModal();
+        return;
+      }
+      ch.targetWords = target;
+      markChapterDirty(ch);
+      closeModal();
+      renderStudio();
+      toast(target
+        ? `第 ${index + 1} 章目标设为 ${fmtWords(target)} 字`
+        : `已清除第 ${index + 1} 章目标`, 'ok');
+    };
+
+    input.addEventListener('input', sync);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(input.value); }
+    });
+    box.querySelectorAll('.tg-preset').forEach((btn) => {
+      btn.onclick = () => { input.value = btn.dataset.v; sync(); input.focus(); input.select(); };
+    });
+    box.querySelector('#tgCancel').onclick = closeModal;
+    box.querySelector('#tgClear').onclick = () => commit(0);
+    box.querySelector('#tgSave').onclick = () => commit(input.value);
+    sync();
+    input.focus();
+    input.select();
+  });
 }
 
 /** 卷标题上的 ⋯ 菜单：编辑 / 删除 / 整段并入邻卷 */
@@ -1658,6 +1732,7 @@ function openSplitChapterModal(index) {
   const chapterTitle = ch.title;
   const chapterStage = ch.stage;
   const chapterVolId = ch.volumeId || '';
+  const chapterTarget = targetOf(ch);
 
   showModal(`<h3>拆分第 ${index + 1} 章</h3>
     <p class="modal-sub">把正文从某个位置「剪」成两章。前半段留在本章，后半段自动新建下一章。</p>
@@ -1724,11 +1799,16 @@ function openSplitChapterModal(index) {
       if (!first && !second) return toast('拆分后两边都是空的', 'err');
 
       const newTitle = titleEl.value.trim() || `${chapterTitle}（下）`;
+      // 目标按拆出的正文比例分给两章，至少保证总和不变
+      const firstTarget = chapterTarget ? Math.round((chapterTarget * first.length) / content.length) : 0;
+      const secondTarget = chapterTarget ? chapterTarget - firstTarget : 0;
 
       // 1) 先只保存当前章的前半段（避免 flushSave 连带保存其它待存章节导致竞态）
       const currentCh = S.novel?.chapters.find((c) => c.id === chapterId);
       if (!currentCh) return toast('原章已不存在', 'err');
       currentCh.content = first;
+      currentCh.targetWords = firstTarget;
+      markChapterDirty(currentCh);
       await saveChapterNow(chapterId);
 
       // 2) 创建新章（插在原章之后）
@@ -1738,6 +1818,7 @@ function openSplitChapterModal(index) {
         content: second,
         volumeId: chapterVolId,
         stage: chapterStage,
+        targetWords: secondTarget,
         at: insertAt,
       }, 'POST');
       if (!res.chapter) return toast('新章创建失败', 'err');
@@ -1813,6 +1894,7 @@ function openMergeChapterModal(index) {
       }
       ch.content = mergedContent;
       ch.title = newTitle;
+      ch.targetWords = Math.min(1000000, targetOf(ch) + targetOf(nextCh));
       markChapterDirty(ch);
       await saveChapterNow(chapterId);
 
@@ -2035,6 +2117,15 @@ const STAGE_LABEL = { draft: '草稿', revising: '修改中', done: '定稿' };
 const stageOf = (c) => (c && STAGE_LABEL[c.stage] ? c.stage : 'draft');
 const stageMatches = (c, filter) => !filter
   || (filter === 'open' ? stageOf(c) !== 'done' : stageOf(c) === filter);
+// 单章目标字数：0 表示没设，只用于进度提示，不限制写作
+const targetOf = (c) => {
+  const n = Math.floor(Number(c?.targetWords));
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 1000000) : 0;
+};
+const progressOf = (c) => {
+  const target = targetOf(c);
+  return target ? Math.min(100, Math.round((countWords(c?.content) / target) * 100)) : 0;
+};
 function stageCountsOf(novel) {
   const counts = { draft: 0, revising: 0, done: 0 };
   for (const c of novel?.chapters || []) counts[stageOf(c)] += 1;
@@ -2089,7 +2180,10 @@ function openChapterBoard() {
       $$('.kb-list', board).forEach((el) => { scrolls[el.dataset.stage] = el.scrollTop; });
       const counts = stageCountsOf(n);
       const totalWords = n.chapters.reduce((sum, c) => sum + countWords(c.content), 0);
-      sub.textContent = `共 ${n.chapters.length} 章 · ${fmtWords(totalWords)} 字 · 定稿 ${counts.done}/${n.chapters.length}`;
+      const targeted = n.chapters.filter((c) => targetOf(c) > 0);
+      const achieved = targeted.filter((c) => countWords(c.content) >= targetOf(c)).length;
+      const goalNote = targeted.length ? ` · 目标 ${achieved}/${targeted.length} 章达标` : '';
+      sub.textContent = `共 ${n.chapters.length} 章 · ${fmtWords(totalWords)} 字 · 定稿 ${counts.done}/${n.chapters.length}${goalNote}`;
       bar.innerHTML = BOARD_STAGES.map((stage) => {
         const pct = (counts[stage] / n.chapters.length) * 100;
         return pct ? `<span class="kb-seg ${stage}" style="width:${pct}%"></span>` : '';
@@ -2102,6 +2196,8 @@ function openChapterBoard() {
         const words = rows.reduce((sum, { c }) => sum + countWords(c.content), 0);
         const cards = rows.map(({ c, i }) => {
           const w = countWords(c.content);
+          const target = targetOf(c);
+          const pct = progressOf(c);
           const revs = openRevisionCount(c);
           const vol = volumeTitle(effVolumeIds()[i] || '');
           return `<article class="kb-card ${c.id === S.chapterId ? 'on' : ''}" draggable="true" data-id="${esc(c.id)}" data-index="${i}" tabindex="0" role="button" aria-label="第 ${i + 1} 章 ${esc(c.title || '未命名')}">
@@ -2110,10 +2206,12 @@ function openChapterBoard() {
               <span class="kb-card-title">${esc(c.title || '未命名')}</span>
             </div>
             <div class="kb-card-meta">
-              <span>${w ? `${fmtWords(w)} 字` : '空章'}</span>
+              <span${target && pct >= 100 ? ' class="kb-goal-done"' : ''}>${target ? `${fmtWords(w)} / ${fmtWords(target)} 字` : (w ? `${fmtWords(w)} 字` : '空章')}</span>
+              ${target ? `<span class="kb-pct">${pct}%</span>` : ''}
               ${revs ? `<span class="kb-rev">${revs} 项待改</span>` : ''}
               ${c.memory ? '<span class="kb-mem">有记忆</span>' : ''}
             </div>
+            ${target ? `<div class="kb-goal" title="目标 ${fmtWords(target)} 字"><span class="${pct >= 100 ? 'done' : ''}" style="width:${pct}%"></span></div>` : ''}
             <div class="kb-card-foot">
               <span class="kb-vol">${vol ? esc(vol) : ''}</span>
               <select class="kb-stage" aria-label="修改第 ${i + 1} 章状态">
@@ -2217,6 +2315,27 @@ function renderTopbarActions() {
   mid.onclick = exportBook;
 }
 
+/** 字数胶囊：同时显示单章目标的完成度，点击可改目标 */
+function renderWordChip() {
+  const el = $('#chWords');
+  if (!el) return;
+  const ch = currentChapter();
+  const words = countWords(ch?.content || '');
+  const target = targetOf(ch);
+  const pct = progressOf(ch);
+  el.textContent = `${fmtWords(words)} 字`;
+  el.disabled = !ch;
+  el.classList.toggle('has-target', !!target);
+  el.classList.toggle('done', !!target && words >= target);
+  el.style.setProperty('--pct', `${pct}%`);
+  el.title = !ch
+    ? '先打开或新建一章'
+    : target
+      ? `目标 ${fmtWords(target)} 字 · 已完成 ${pct}%（点击修改）`
+      : '点击设置本章目标字数';
+  el.setAttribute('aria-label', el.title);
+}
+
 function renderStudio() {
   const wrap = $('.editor-wrap');
   const empty = $('#editorEmpty');
@@ -2234,7 +2353,7 @@ function renderStudio() {
   if (!S.novel) {
     $('#chapterList').innerHTML = '<li class="chapter-empty">还没有打开作品<br>回「书架」选择或新建一部</li>';
     $('#chTitle').value = ''; $('#chContent').value = '';
-    $('#chWords').textContent = '0 字';
+    renderWordChip();
     $('#chapterMeta').textContent = '';
     $('#chapterMeta').classList.remove('solo');
     $('.chapter-filter').hidden = true;
@@ -2297,7 +2416,14 @@ function renderStudio() {
     li.dataset.id = c.id;
     li.dataset.stage = stageOf(c);
     const openRevs = openRevisionCount(c);
-    li.title = `${STAGE_LABEL[stageOf(c)]}${c.memory ? ' · 已有章节记忆' : ''}${openRevs ? ` · ${openRevs} 项待改` : ''}`;
+    const target = targetOf(c);
+    const pct = progressOf(c);
+    li.title = [
+      STAGE_LABEL[stageOf(c)],
+      c.memory ? '已有章节记忆' : '',
+      openRevs ? `${openRevs} 项待改` : '',
+      target ? `目标 ${fmtWords(target)} 字 · ${pct}%` : '',
+    ].filter(Boolean).join(' · ');
     const w = countWords(c.content);
     const moveButtons = filtered ? '' : `
         <button class="mini-act" data-a="up" title="上移">${ico('chev-up')}</button>
@@ -2376,7 +2502,7 @@ function renderStudio() {
   const taEl = $('#chContent');
   const nextContent = ch?.content || '';
   if (taEl.value !== nextContent) { taEl.value = nextContent; resetCounted(ch); }   // 值没变就别赋值，免得光标被弹到末尾
-  $('#chWords').textContent = `${countWords(nextContent)} 字`;
+  renderWordChip();
   histSync();
   $('#genWords').value = n.meta.targetWordsPerChapter || 3000;
   $('#genModel').placeholder = S.config?.model || '默认';
@@ -2390,6 +2516,7 @@ function renderStudio() {
 function chapterSavePayload(ch) {
   return {
     title: ch.title, content: ch.content, summary: ch.summary, stage: stageOf(ch),
+    targetWords: targetOf(ch),
     memory: ch.memory, status: ch.status, outline: ch.outline, outlineId: ch.outlineId,
     revisions: Array.isArray(ch.revisions) ? ch.revisions : undefined,
     counted: peekCounted(ch.id),        // 这次该给今日码字量记多少（见「码字量计数」）
@@ -2740,12 +2867,13 @@ function editorChanged() {
   if (!ch) return;
   ch.content = $('#chContent').value;
   const w = countWords(ch.content);
-  $('#chWords').textContent = `${w} 字`;
+  renderWordChip();
   const li = chapterRow(ch.id);
   if (li) li.querySelector('.ci-words').textContent = w;
   markDirty();
   hideSelToolbar();
   updateUndoButtons();
+  updateFoot();
 }
 
 $('#chContent').addEventListener('keydown', (e) => {
@@ -2872,9 +3000,12 @@ function updateFoot() {
   const i = S.novel.chapters.indexOf(ch);
   const vol = volumesOf().length ? volumeTitle(effVolumeIds()[i]) : '';
   const hook = effectiveChapterOutline(ch).outline.hook;
+  const target = targetOf(ch);
+  const pct = progressOf(ch);
   $('#footInfo').textContent = [
     vol,
     `第 ${i + 1} / ${S.novel.chapters.length} 章`,
+    target ? `目标 ${fmtWords(target)} · ${pct}%${pct >= 100 ? ' 已达标' : ''}` : '',
     ch.memory ? '已存档记忆' : '未生成记忆',
     hook ? `钩子：${hook}` : '',
   ].filter(Boolean).join('　·　');
@@ -2904,6 +3035,11 @@ $('#stageFilter').addEventListener('change', () => {
   renderStudio();
 });
 $('#boardBtn').addEventListener('click', openChapterBoard);
+$('#chWords').addEventListener('click', () => {
+  const ch = currentChapter();
+  if (!ch) return;
+  openChapterTargetModal(S.novel.chapters.indexOf(ch));
+});
 
 $('#coEdit').addEventListener('click', openChapterOutlineModal);
 $('#coLocate').addEventListener('click', () => {
@@ -6557,6 +6693,11 @@ function cmdkSource() {
     op('批量补全章节记忆', 'refresh', () => { setView('studio'); openBatchMemory(); });
     op('导出作品', 'download', () => exportBook(), 'Ctrl+Shift+E');
     op('版本历史', 'clock', () => { setView('studio'); openHistory(); });
+    op('设置本章目标字数', 'pulse', () => {
+      setView('studio');
+      const ch = currentChapter();
+      if (ch) openChapterTargetModal(S.novel.chapters.indexOf(ch));
+    });
     op('撤销', 'undo', () => { setView('studio'); doUndo(); }, 'Ctrl+Z');
     op('重做', 'redo', () => { setView('studio'); doRedo(); }, 'Ctrl+Shift+Z');
     op('全书查找 / 替换', 'search', () => { setView('studio'); openFind(); }, 'Ctrl+F');
@@ -6935,5 +7076,5 @@ async function boot() {
   }
 }
 
-window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, restoreNovelBackup };
+window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, openChapterTargetModal, restoreNovelBackup };
 boot();
