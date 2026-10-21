@@ -3081,14 +3081,14 @@ function addRevision() {
   input?.focus();
 }
 
-function toggleRevision(id) {
-  const ch = currentChapter();
+function toggleRevision(id, chapterId = S.chapterId) {
+  const ch = S.novel?.chapters.find((c) => c.id === chapterId) || null;
   if (!ch) return;
   const rev = revisionsOf(ch).find((r) => String(r.id) === String(id));
   if (!rev) return;
   rev.done = !rev.done;
   markChapterDirty(ch);
-  renderRevisionCard();
+  if (ch.id === S.chapterId) renderRevisionCard();
   syncRevisionBadge(ch);
 }
 
@@ -3135,6 +3135,155 @@ function locateRevision(id) {
   ta.scrollTop = Math.max(0, line * lineHeight - ta.clientHeight * 0.32);
 }
 
+function jumpToRevision(chapterId, revId) {
+  const ch = S.novel?.chapters.find((c) => c.id === chapterId);
+  if (!ch) return toast('这一章已经不存在了', 'err');
+  closeModal();
+  openChapterFromIndex(ch.id);
+  showAssistTab('check');
+  if (revId) locateRevision(revId);
+}
+
+/** 全书修订清单：按章汇总，支持筛选、搜索、勾选完成和跳回引文 */
+function openRevisionInbox() {
+  if (!S.novel) return toast('先打开一部作品', 'err');
+  const n = S.novel;
+  const collect = () => n.chapters.flatMap((ch, index) => revisionsOf(ch).map((rev) => ({ ch, index, rev })));
+  const all = collect();
+  const withRevs = new Set(all.map((x) => x.ch.id)).size;
+  const open = all.filter((x) => !x.rev.done).length;
+
+  if (!all.length) {
+    showModal(`
+      <h3>全书修订</h3>
+      <p class="modal-sub">《${esc(n.title)}》 · 全部本地保存，不调用模型。</p>
+      <div class="rev-inbox-empty">还没有任何修订项。<br>在正文里选中要改的句子，再回到「检查 → 本章修订」记一条。</div>
+      <div class="modal-foot">
+        <button class="btn" id="revInboxGo">打开本章修订</button>
+        <button class="btn btn-primary" id="revInboxClose">关闭</button>
+      </div>`, (box) => {
+      box.querySelector('#revInboxClose').onclick = closeModal;
+      box.querySelector('#revInboxGo').onclick = () => {
+        closeModal();
+        if (!currentChapter()) return toast('先打开一章', 'err');
+        setView('studio');
+        showAssistTab('check');
+        setTimeout(() => $('#revInput')?.focus(), 30);
+      };
+    });
+    return;
+  }
+
+  let filter = 'open';
+  let query = '';
+  showModal(`
+    <h3>全书修订</h3>
+    <p class="modal-sub" id="revInboxMeta">${withRevs} 章有修订 · ${open} 项待改 · ${all.length - open} 项完成</p>
+    <div class="rev-inbox-tools">
+      <div class="segmented" id="revInboxFilter">
+        <button type="button" class="on" data-ri-filter="open">待改</button>
+        <button type="button" data-ri-filter="all">全部</button>
+        <button type="button" data-ri-filter="done">已完成</button>
+      </div>
+      <input class="input" id="revInboxSearch" placeholder="搜索修订内容、引文或章节" autocomplete="off" />
+    </div>
+    <div id="revInboxBody"></div>
+    <div class="modal-foot">
+      <span class="health-note">勾选完成 · 点章节或引文跳回正文</span>
+      <button class="btn btn-primary" id="revInboxClose">关闭</button>
+    </div>`, (box) => {
+    const bodyEl = box.querySelector('#revInboxBody');
+    const metaEl = box.querySelector('#revInboxMeta');
+    const searchEl = box.querySelector('#revInboxSearch');
+    const filterEls = [...box.querySelectorAll('[data-ri-filter]')];
+
+    const render = () => {
+      const now = collect();
+      const openNow = now.filter((x) => !x.rev.done).length;
+      const withNow = new Set(now.map((x) => x.ch.id)).size;
+      metaEl.textContent = `${withNow} 章有修订 · ${openNow} 项待改 · ${now.length - openNow} 项完成`;
+
+      const q = query.trim().toLowerCase();
+      const groups = [];
+      n.chapters.forEach((ch, index) => {
+        const revs = revisionsOf(ch).filter((rev) => {
+          if (filter === 'open' && rev.done) return false;
+          if (filter === 'done' && !rev.done) return false;
+          if (!q) return true;
+          const hay = `${ch.title || ''} 第${index + 1}章 ${rev.text || ''} ${rev.quote || ''}`.toLowerCase();
+          return hay.includes(q);
+        }).sort((a, b) => Number(!!a.done) - Number(!!b.done) || (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+        if (revs.length) groups.push({ ch, index, revs });
+      });
+
+      if (!groups.length) {
+        const msg = q
+          ? '没有找到匹配的修订项。'
+          : filter === 'done'
+            ? '还没有已完成的修订项。'
+            : filter === 'open'
+              ? '没有待改的修订项，暂时清空了。'
+              : '没有修订项。';
+        bodyEl.innerHTML = `<div class="rev-inbox-empty">${msg}${q ? '<br><span class="dim small">换个关键词，或把筛选切到「全部」。</span>' : ''}</div>`;
+        return;
+      }
+
+      bodyEl.innerHTML = groups.map(({ ch, index, revs }) => {
+        const allRevs = revisionsOf(ch);
+        const cOpen = allRevs.filter((r) => !r.done).length;
+        const cDone = allRevs.length - cOpen;
+        const count = cOpen ? `${cOpen} 待改${cDone ? ` · ${cDone} 完成` : ''}` : `${cDone} 完成`;
+        return `<section class="rev-inbox-group">
+          <button type="button" class="rev-inbox-chapter" data-ri-chapter="${esc(ch.id)}" title="打开这一章">
+            <span class="ri-no">${String(index + 1).padStart(2, '0')}</span>
+            <span class="ri-title">${esc(ch.title || '未命名')}</span>
+            <span class="ri-count">${count}</span>
+            ${ico('arrow-right')}
+          </button>
+          <ul class="ri-list">
+            ${revs.map((rev) => {
+              const text = String(rev.text || '').trim() || '未填写内容';
+              const quote = String(rev.quote || '').replace(/\s+/g, ' ').trim();
+              const shortQuote = quote.length > 64 ? `${quote.slice(0, 64)}…` : quote;
+              return `<li class="ri-item${rev.done ? ' done' : ''}">
+                <button type="button" class="rev-check" data-ri-toggle data-chapter="${esc(ch.id)}" data-rev="${esc(rev.id || '')}" role="checkbox" aria-checked="${rev.done ? 'true' : 'false'}" title="${rev.done ? '标记为未完成' : '标记为已完成'}">${rev.done ? ico('check') : ''}</button>
+                <div class="ri-main">
+                  <span class="ri-text">${esc(text)}</span>
+                  ${quote ? `<button type="button" class="rev-quote" data-ri-goto data-chapter="${esc(ch.id)}" data-rev="${esc(rev.id || '')}" title="回到原文：${esc(quote)}">${esc(shortQuote)}</button>` : ''}
+                </div>
+              </li>`;
+            }).join('')}
+          </ul>
+        </section>`;
+      }).join('');
+    };
+
+    filterEls.forEach((el) => {
+      el.onclick = () => {
+        filter = el.dataset.riFilter;
+        filterEls.forEach((x) => x.classList.toggle('on', x === el));
+        render();
+      };
+    });
+    searchEl.addEventListener('input', () => { query = searchEl.value; render(); });
+    bodyEl.addEventListener('click', (e) => {
+      const toggle = e.target.closest('[data-ri-toggle]');
+      if (toggle) {
+        toggleRevision(toggle.dataset.rev, toggle.dataset.chapter);
+        render();
+        return;
+      }
+      const goto = e.target.closest('[data-ri-goto]');
+      if (goto) { jumpToRevision(goto.dataset.chapter, goto.dataset.rev); return; }
+      const chapter = e.target.closest('[data-ri-chapter]');
+      if (chapter) jumpToRevision(chapter.dataset.riChapter, '');
+    });
+    box.querySelector('#revInboxClose').onclick = closeModal;
+    render();
+  });
+}
+
+$('#revAll')?.addEventListener('click', openRevisionInbox);
 $('#revAdd')?.addEventListener('click', addRevision);
 $('#revInput')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -5533,6 +5682,7 @@ function cmdkSource() {
       showAssistTab('check');
       setTimeout(() => $('#revInput')?.focus(), 80);
     });
+    op('全书修订清单', 'layers', () => openRevisionInbox());
   }
   op('立即保存', 'check', manualSave, 'Ctrl+S');
   op('切换明暗主题', 'moon', () => $('#themeBtn').click());

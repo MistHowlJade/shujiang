@@ -417,6 +417,35 @@ body[data-theme="light"] .segmented button.on { box-shadow: var(--sh-1); }
 .rev-del:hover { color: var(--danger); }
 .rev-del .ico { width: 12px; height: 12px; }
 .rev-empty { padding: 2px 1px 1px; font-size: 11px; line-height: 1.7; color: var(--text-3); }
+.rev-all { flex: 0 0 auto; height: 22px; padding: 0 6px; font-size: 10.5px; }
+
+/* 全书修订清单 */
+.rev-inbox-tools { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.rev-inbox-tools .segmented { width: 100%; }
+.rev-inbox-tools .input { height: 32px; font-size: 12px; }
+.rev-inbox-group + .rev-inbox-group { margin-top: 14px; }
+.rev-inbox-chapter {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 7px 9px; text-align: left; cursor: pointer;
+  color: var(--text-1); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.rev-inbox-chapter:hover { background: var(--surface-3); border-color: var(--border-2); }
+.rev-inbox-chapter:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-bg); }
+.rev-inbox-chapter .ico { flex: 0 0 auto; width: 13px; height: 13px; color: var(--text-4); }
+.ri-no { flex: 0 0 auto; font-size: 10px; color: var(--text-4); font-variant-numeric: tabular-nums; }
+.ri-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; }
+.ri-count { flex: 0 0 auto; font-size: 10px; color: var(--text-3); white-space: nowrap; }
+.ri-list { list-style: none; margin: 3px 0 0; padding: 0 0 0 5px; border-left: 1px solid var(--border); }
+.ri-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 4px 8px 9px; border-bottom: 1px solid var(--border); }
+.ri-item:last-child { border-bottom: 0; }
+.ri-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ri-text { font-size: 12px; line-height: 1.65; color: var(--text-1); overflow-wrap: anywhere; }
+.ri-item.done .ri-text { color: var(--text-4); text-decoration: line-through; text-decoration-color: var(--text-4); }
+.ri-item.done .rev-check { background: var(--success); border-color: var(--success); }
+.rev-inbox-empty { padding: 22px 10px; text-align: center; font-size: 12px; line-height: 1.85; color: var(--text-3); }
+.rev-inbox-empty .btn { margin-top: 10px; }
 
 .details { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
 .details summary {
