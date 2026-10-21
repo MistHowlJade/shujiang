@@ -548,6 +548,23 @@ async function handleApi(req, res, url) {
         return sendJson(res, 200, { snapshot, snapshots: listSnapshots(id) });
       }
     }
+    // 只取快照里的某一章，供前端做版本对比；不把整本旧稿发到浏览器
+    if (seg[3] === 'snapshots' && seg.length === 7 && seg[5] === 'chapter' && method === 'GET') {
+      const ts = Number(seg[4]);
+      if (!Number.isInteger(ts) || ts <= 0) return sendJson(res, 400, { error: '快照时间无效' });
+      const snap = readSnapshot(id, ts);
+      if (!snap) return sendJson(res, 404, { error: '快照不存在或已被清理' });
+      const ch = (snap.chapters || []).find((c) => c?.id === seg[6]);
+      // 章节在旧版里不存在是正常情况（后来新增 / 合并 / 删改），用 200 返回，避免正常交互在控制台留下 404
+      if (!ch) return sendJson(res, 200, { chapter: null, error: '这一版里还没有这一章（可能是后来新增、合并或删改过）' });
+      return sendJson(res, 200, {
+        chapter: {
+          id: ch.id,
+          title: ch.title || '',
+          content: ch.content || '',
+        },
+      });
+    }
     if (seg[3] === 'restore' && seg.length === 4 && method === 'POST') {
       const body = await readBody(req);
       const n = getNovel(id);

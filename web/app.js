@@ -5562,12 +5562,131 @@ async function snapshotNow(label) {
   }
 }
 
+/** 段落级 diff：只比较非空行，够用且不会把长篇正文卡住 */
+function diffParagraphs(oldText, newText) {
+  const lines = (text) => String(text || '').replace(/\r\n?/g, '\n').split('\n').map((line) => line.trim()).filter(Boolean);
+  const a = lines(oldText);
+  const b = lines(newText);
+  const n = a.length;
+  const m = b.length;
+  // 先削掉共同开头/结尾：多数版本只改了中间几段，这样 DP 表会小很多
+  let head = 0;
+  while (head < n && head < m && a[head] === b[head]) head += 1;
+  let tailA = n;
+  let tailB = m;
+  while (tailA > head && tailB > head && a[tailA - 1] === b[tailB - 1]) {
+    tailA -= 1;
+    tailB -= 1;
+  }
+  const ops = [];
+  for (let k = 0; k < head; k += 1) ops.push({ type: 'same', text: a[k] });
+  const midA = a.slice(head, tailA);
+  const midB = b.slice(head, tailB);
+
+  // 整章重写时不要为了一张几千万格的表把页面卡死；超过阈值就按整段替换展示
+  if (midA.length * midB.length <= 1200000) {
+    const rows = Array.from({ length: midA.length + 1 }, () => new Uint32Array(midB.length + 1));
+    for (let i = midA.length - 1; i >= 0; i -= 1) {
+      const row = rows[i];
+      const next = rows[i + 1];
+      for (let j = midB.length - 1; j >= 0; j -= 1) {
+        row[j] = midA[i] === midB[j] ? next[j + 1] + 1 : Math.max(next[j], row[j + 1]);
+      }
+    }
+    let i = 0;
+    let j = 0;
+    while (i < midA.length && j < midB.length) {
+      if (midA[i] === midB[j]) {
+        ops.push({ type: 'same', text: midA[i] });
+        i += 1;
+        j += 1;
+      } else if (rows[i + 1][j] >= rows[i][j + 1]) {
+        ops.push({ type: 'del', text: midA[i] });
+        i += 1;
+      } else {
+        ops.push({ type: 'add', text: midB[j] });
+        j += 1;
+      }
+    }
+    while (i < midA.length) ops.push({ type: 'del', text: midA[i++] });
+    while (j < midB.length) ops.push({ type: 'add', text: midB[j++] });
+  } else {
+    for (const text of midA) ops.push({ type: 'del', text });
+    for (const text of midB) ops.push({ type: 'add', text });
+  }
+
+  for (let k = tailA; k < n; k += 1) ops.push({ type: 'same', text: a[k] });
+  return ops;
+}
+
+async function openSnapshotDiff(snap) {
+  const ch = currentChapter();
+  if (!ch) return toast('先选择一章', 'err');
+  if (!S.novel || !snap) return;
+  const novelId = S.novel.id;
+  const chapterId = ch.id;
+  const label = `${fmtDate(snap.ts)} · ${SNAP_KIND[snap.kind] || '快照'}`;
+  const box = showModal(`<h3>版本对比 · ${esc(ch.title || '未命名')}</h3>
+    <p class="modal-sub">当前正文 ↔ ${esc(label)}。红色是旧版里被删掉的段落，绿色是现在新增的段落；对比只读，不会改动任何内容。</p>
+    <div class="diff-bar">
+      <div class="diff-sum" id="diffSum"></div>
+      <label class="diff-toggle" id="diffToggleWrap"><input type="checkbox" id="diffShowSame">显示未改动段落</label>
+    </div>
+    <div class="diff-list only-changes" id="diffList"><div class="diff-empty">读取备份中…</div></div>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="diffBack">返回版本历史</button>
+      <button class="btn" id="diffClose">关闭</button>
+    </div>`, (b) => {
+    b.querySelector('#diffBack').onclick = () => openHistory();
+    b.querySelector('#diffClose').onclick = closeModal;
+  }, { wide: true });
+
+  const sumEl = box.querySelector('#diffSum');
+  const listEl = box.querySelector('#diffList');
+  const toggleWrap = box.querySelector('#diffToggleWrap');
+  const showSame = box.querySelector('#diffShowSame');
+  let snapCh;
+  try {
+    const j = await api.get(`/api/novels/${novelId}/snapshots/${snap.ts}/chapter/${chapterId}`);
+    if (!j.chapter) throw new Error(j.error || '这一版里找不到这一章');
+    snapCh = j.chapter;
+  } catch (err) {
+    sumEl.textContent = '';
+    toggleWrap.hidden = true;
+    listEl.innerHTML = `<div class="diff-empty">无法读取这个版本的本章：${esc(err.message)}</div>`;
+    return;
+  }
+
+  const ops = diffParagraphs(snapCh.content, ch.content);
+  const added = ops.filter((o) => o.type === 'add').length;
+  const removed = ops.filter((o) => o.type === 'del').length;
+  const same = ops.filter((o) => o.type === 'same').length;
+  const titleChanged = (snapCh.title || '') !== (ch.title || '');
+  sumEl.innerHTML = `<span class="d-add">+${added} 段</span><span class="d-del">−${removed} 段</span><span>${same} 段未变</span>`;
+  const titleNote = titleChanged ? `<div class="diff-title-note">旧版标题：${esc(snapCh.title || '未命名')}</div>` : '';
+  if (!added && !removed) {
+    toggleWrap.hidden = true;
+    listEl.classList.remove('only-changes');
+    listEl.innerHTML = `${titleNote}<div class="diff-empty">这一章的正文与当前版本一致，没有段落改动。</div>`;
+    return;
+  }
+
+  listEl.innerHTML = `${titleNote}${ops.map((o) => `
+    <div class="diff-line ${o.type}">
+      <span class="diff-sign">${o.type === 'add' ? '+' : o.type === 'del' ? '−' : '·'}</span>
+      <p>${esc(o.text)}</p>
+    </div>`).join('')}`;
+  const apply = () => listEl.classList.toggle('only-changes', !showSame.checked);
+  showSame.onchange = apply;
+  apply();
+}
+
 async function openHistory() {
   if (!S.novel) return toast('先打开作品', 'err');
   await saveChapterNow().catch(() => {});
   const novelId = S.novel.id;
   showModal(`<h3>版本历史 · 《${esc(S.novel.title)}》</h3>
-    <p class="modal-sub">写作时每 10 分钟自动存一份；AI 替换正文、删除章节前也会自动备份。恢复前会先把当前版本存一份，所以恢复本身也能撤回。</p>
+    <p class="modal-sub">写作时每 10 分钟自动存一份；AI 替换正文、删除章节前也会自动备份。恢复前会先把当前版本存一份，所以恢复本身也能撤回。不确定改了什么时，先点「对比」看当前章与那一版的差异。</p>
     <div class="hist-bar">
       <button class="btn btn-primary btn-sm" id="histNow">${ico('clock')}立即备份当前版本</button>
       <span class="hist-count" id="histCount"></span>
@@ -5585,6 +5704,7 @@ async function openHistory() {
         listEl.innerHTML = `<div class="hist-empty">还没有版本记录。<br>继续写作会自动留下快照，也可以点上面的「立即备份」。</div>`;
         return;
       }
+      const byTs = new Map(list.map((s) => [String(s.ts), s]));
       listEl.innerHTML = list.map((s) => `
         <div class="hist-row">
           <div class="hist-info">
@@ -5594,8 +5714,17 @@ async function openHistory() {
             </div>
             <div class="hist-meta">${s.label ? `${esc(s.label)} · ` : ''}${esc(fmtDate(s.ts))} · ${s.chapters} 章 · ${fmtWords(s.words)} 字 · ${Math.max(1, Math.round(s.size / 1024))} KB</div>
           </div>
-          <button class="btn btn-sm hist-restore" data-ts="${s.ts}">${ico('rotate')}恢复</button>
+          <div class="hist-actions">
+            <button class="btn btn-sm btn-text hist-diff" data-ts="${s.ts}" title="对比当前章与这一版的正文">${ico('eye')}对比</button>
+            <button class="btn btn-sm hist-restore" data-ts="${s.ts}">${ico('rotate')}恢复</button>
+          </div>
         </div>`).join('');
+      listEl.querySelectorAll('.hist-diff').forEach((btn) => {
+        btn.onclick = () => {
+          const snap = byTs.get(btn.dataset.ts);
+          if (snap) openSnapshotDiff(snap);
+        };
+      });
       listEl.querySelectorAll('.hist-restore').forEach((btn) => {
         btn.onclick = async () => {
           const ts = Number(btn.dataset.ts);
