@@ -93,7 +93,10 @@
         <div class="page-head">
           <div>
             <h1>我的书架</h1>
-            <p class="page-sub" id="shelfSub">所有作品都保存在本机，不上传云端</p>
+            <div class="page-sub-line">
+              <p class="page-sub" id="shelfSub">所有作品都保存在本机，不上传云端</p>
+              <button class="trash-link" id="trashBtn" title="查看已移入回收站的作品"><svg class="ico"><use href="#i-trash" /></svg>回收站<span class="trash-count" id="trashCount" hidden></span></button>
+            </div>
           </div>
           <div class="page-actions">
             <span class="stat-slot" id="shelfStats"></span>

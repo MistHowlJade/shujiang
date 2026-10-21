@@ -310,7 +310,7 @@ function renderShelf() {
     div.className = 'book';
     div.style.setProperty('--cover', coverOf(n.title));
     div.innerHTML = `
-      <button class="bk-del" title="删除作品">${ico('trash')}</button>
+      <button class="bk-del" title="移到回收站">${ico('trash')}</button>
       <h3>${esc(n.title)}</h3>
       <div class="bk-genre">${esc(n.genre || '未分类')}${(n.tags || []).length ? ' · ' + esc(n.tags.join(' ')) : ''}</div>
       <div class="bk-desc">${esc(n.logline || '还没有写简介')}</div>
@@ -324,19 +324,149 @@ function renderShelf() {
     });
     div.querySelector('.bk-del').addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (!confirm(`删除《${n.title}》？该作品的正文与设定会一并从磁盘删除，无法恢复。`)) return;
-      await api.del(`/api/novels/${n.id}`);
-      if (S.novel?.id === n.id) {
-        S.novel = null; S.chapterId = null;
-        S.unsaved.clear(); S.dirty = false; refreshSavePill();   // 作品都删了，别再去补存
+      if (!confirm(`将《${n.title}》移入回收站？\n之后可以在书架「回收站」里恢复。`)) return;
+      try {
+        await api.del(`/api/novels/${n.id}`);
+        if (S.novel?.id === n.id) {
+          S.novel = null; S.chapterId = null;
+          S.unsaved.clear(); S.dirty = false; refreshSavePill();   // 作品都删了，别再去补存
+        }
+        await loadNovels(); renderShelf(); refreshTrashCount(); toast('已移入回收站');
+      } catch (err) {
+        toast(`移入回收站失败：${err.message || '未知错误'}`, 'err');
       }
-      await loadNovels(); renderShelf(); toast('已删除');
     });
     grid.appendChild(div);
   }
 }
 $('#shelfSearch').addEventListener('input', debounce(renderShelf, 150));
 $('#globalSearchBtn').addEventListener('click', () => openGlobalSearch());
+$('#trashBtn').addEventListener('click', () => openTrash());
+
+function setTrashBadge(count) {
+  const n = Math.max(0, Number(count) || 0);
+  const badge = $('#trashCount');
+  if (badge) {
+    badge.hidden = n === 0;
+    badge.textContent = n > 99 ? '99+' : String(n);
+  }
+  $('#trashBtn')?.classList.toggle('has-items', n > 0);
+}
+
+async function refreshTrashCount() {
+  try {
+    const { items } = await api.get('/api/trash');
+    setTrashBadge((items || []).length);
+    return (items || []).length;
+  } catch {
+    return 0;
+  }
+}
+
+function openTrash() {
+  showModal(`<h3>回收站</h3>
+    <p class="modal-sub">删除的作品会先放在这里；恢复后原样回到书架，版本备份也还在。彻底删除才会清理正文、设定和备份。</p>
+    <div class="trash-list" id="trashList"><div class="find-empty">读取中…</div></div>
+    <div class="modal-foot">
+      <button class="btn btn-text trash-clear" id="trashClear" disabled>清空回收站</button>
+      <button class="btn" id="trashClose">关闭</button>
+    </div>`,
+  (box) => {
+    const listEl = box.querySelector('#trashList');
+    const clearBtn = box.querySelector('#trashClear');
+    let items = [];
+    box.querySelector('#trashClose').onclick = closeModal;
+
+    const render = () => {
+      if (!items.length) {
+        listEl.innerHTML = `<div class="trash-empty">${ico('trash')}<b>回收站是空的</b>删除的作品会先放在这里，之后可以恢复。</div>`;
+        clearBtn.disabled = true;
+      } else {
+        clearBtn.disabled = false;
+        listEl.innerHTML = items.map((item) => {
+          const meta = [item.author, item.genre].filter(Boolean).map((v) => esc(v)).join(' · ');
+          return `<div class="trash-item">
+            <div class="trash-cover" style="--cover:${coverOf(item.title)}">${ico('book-open')}</div>
+            <div class="trash-main">
+              <b class="trash-title">《${esc(item.title)}》</b>
+              <span class="trash-meta">${meta || '未分类'} · ${item.chapterCount} 章 · ${fmtWords(item.words)} 字</span>
+              <span class="trash-meta">删除于 ${esc(item.deletedAt ? fmtDate(item.deletedAt) : '未知时间')}</span>
+            </div>
+            <div class="trash-actions">
+              <button class="btn btn-sm" data-act="restore" data-id="${esc(item.trashId)}">${ico('undo')}恢复</button>
+              <button class="btn btn-sm btn-danger-ghost" data-act="purge" data-id="${esc(item.trashId)}">${ico('trash')}彻底删除</button>
+            </div>
+          </div>`;
+        }).join('');
+      }
+      setTrashBadge(items.length);
+    };
+
+    const load = async () => {
+      try {
+        const data = await api.get('/api/trash');
+        items = data.items || [];
+        render();
+      } catch (err) {
+        listEl.innerHTML = `<div class="find-empty">读取失败：${esc(err.message || '未知错误')}</div>`;
+        clearBtn.disabled = true;
+      }
+    };
+
+    const doRestore = async (item, btn) => {
+      btn.disabled = true;
+      try {
+        await api.send(`/api/trash/${encodeURIComponent(item.trashId)}/restore`, undefined, 'POST');
+        await loadNovels();
+        renderShelf();
+        await load();
+        toast(`已恢复《${item.title}》`, 'ok');
+      } catch (err) {
+        btn.disabled = false;
+        toast(`恢复失败：${err.message || '未知错误'}`, 'err');
+      }
+    };
+
+    const doPurge = async (item, btn) => {
+      if (!confirm(`彻底删除《${item.title}》？\n正文、设定和版本备份都会被清理，无法恢复。`)) return;
+      btn.disabled = true;
+      try {
+        await api.del(`/api/trash/${encodeURIComponent(item.trashId)}`);
+        await load();
+        toast(`已彻底删除《${item.title}》`);
+      } catch (err) {
+        btn.disabled = false;
+        toast(`彻底删除失败：${err.message || '未知错误'}`, 'err');
+      }
+    };
+
+    listEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-act]');
+      if (!btn) return;
+      const item = items.find((x) => x.trashId === btn.dataset.id);
+      if (!item) return;
+      if (btn.dataset.act === 'restore') doRestore(item, btn);
+      else doPurge(item, btn);
+    });
+
+    clearBtn.onclick = async () => {
+      if (!items.length) return;
+      if (!confirm(`清空回收站？\n将彻底删除 ${items.length} 部作品及其版本备份，无法恢复。`)) return;
+      clearBtn.disabled = true;
+      try {
+        await api.del('/api/trash');
+        await load();
+        renderShelf();
+        toast('回收站已清空');
+      } catch (err) {
+        clearBtn.disabled = false;
+        toast(`清空失败：${err.message || '未知错误'}`, 'err');
+      }
+    };
+
+    load();
+  }, { wide: true });
+}
 
 /* ============================================================
  * 作品备份与恢复（JSON）
@@ -430,7 +560,7 @@ async function restoreNovelBackup(file) {
     toast(`已恢复《${res.novel?.title || payload.title}》为新的作品`, 'ok');
   } catch (err) {
     if (created && !restoredId) {
-      try { await api.del(`/api/novels/${created.id}`); } catch {}
+      try { await api.del(`/api/novels/${created.id}?permanent=1`); } catch {}
       try { await loadNovels(); renderShelf(); } catch {}
     }
     toast(`恢复失败：${err.message || '未知错误'}`, 'err');
@@ -6917,6 +7047,7 @@ function cmdkSource() {
   const out = [];
   const op = (label, icon, run, hint) => out.push({ g: '操作', label, icon, run, hint });
   op('新建作品', 'plus', () => openNewNovelModal(), 'N');
+  op('回收站', 'trash', () => openTrash());
   op('全局检索', 'search', () => openGlobalSearch(), 'Ctrl+Shift+F');
   if (S.novel) {
     op('生成本章', 'spark', () => { setView('studio'); showAssistTab('write'); generateChapter(); }, 'Ctrl+Shift+↵');
@@ -7305,6 +7436,7 @@ async function boot() {
   sprintInit();
   renderThemeIcon();
   try { await loadNovels(); } catch { S.novels = []; }
+  refreshTrashCount();
   setView('shelf');
   loadStats();
   if (!S.config?.providers?.length) {
@@ -7312,5 +7444,5 @@ async function boot() {
   }
 }
 
-window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, openChapterTargetModal, toggleFocus, openGlobalSearch, restoreNovelBackup };
+window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, openChapterTargetModal, toggleFocus, openGlobalSearch, openTrash, restoreNovelBackup };
 boot();

@@ -8,6 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(__dirname, '..');
 export const DATA_DIR = path.join(ROOT, 'data');
 export const NOVELS_DIR = path.join(DATA_DIR, 'novels');
+export const TRASH_DIR = path.join(DATA_DIR, 'trash');
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
 // 章节的写作状态：草稿 → 修改中 → 定稿（和 AI 用的 chapter.status 无关）
@@ -33,6 +34,7 @@ const CONFIG_DEFAULT = {
 
 export function ensureDirs() {
   fs.mkdirSync(NOVELS_DIR, { recursive: true });
+  fs.mkdirSync(TRASH_DIR, { recursive: true });
 }
 
 export function readJson(file, fallback) {
@@ -209,16 +211,126 @@ export function createNovel(payload) {
   return n;
 }
 
-export function deleteNovel(id) {
+export function deleteNovel(id, { keepBackup = true } = {}) {
+  if (!/^n_[a-z0-9]{6,}$/.test(String(id || ''))) return false;
   const f = novelFile(id);
   if (!fs.existsSync(f)) return false;
-  // 删除前留一份，误删可手工从 data/backups/<id>/ 里找回
-  try {
-    const n = readJson(f, null);
-    if (n && n.id) createSnapshot(n, { kind: 'before-delete', label: '删除前', force: true });
-  } catch (err) { console.warn('[store] 删除前备份失败', err.message); }
+  if (keepBackup) {
+    // 删除前留一份，误删可手工从 data/backups/<id>/ 里找回
+    try {
+      const n = readJson(f, null);
+      if (n && n.id) createSnapshot(n, { kind: 'before-delete', label: '删除前', force: true });
+    } catch (err) { console.warn('[store] 删除前备份失败', err.message); }
+  }
   fs.rmSync(f);
+  if (!keepBackup) {
+    try { fs.rmSync(path.join(DATA_DIR, 'backups', id), { recursive: true, force: true }); } catch {}
+  }
   return true;
+}
+
+/* ---------------- 回收站 ---------------- */
+
+const TRASH_ID_RE = /^t_[a-z0-9]{6,}$/;
+
+function trashEntryDir(trashId) {
+  if (!TRASH_ID_RE.test(String(trashId || ''))) return '';
+  return path.join(TRASH_DIR, trashId);
+}
+
+export function trashNovel(id) {
+  if (!/^n_[a-z0-9]{6,}$/.test(String(id || ''))) return null;
+  const src = novelFile(id);
+  if (!fs.existsSync(src)) return null;
+  const n = readJson(src, null);
+  if (!n || !n.id) return null;
+  ensureDirs();
+
+  const trashId = newId('t');
+  const dir = path.join(TRASH_DIR, trashId);
+  const novelPath = path.join(dir, 'novel.json');
+  fs.mkdirSync(dir, { recursive: true });
+  writeJson(path.join(dir, 'meta.json'), {
+    trashId,
+    originalId: n.id,
+    title: n.title || '',
+    deletedAt: Date.now(),
+  });
+  try {
+    fs.renameSync(src, novelPath);
+  } catch (err) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    throw err;
+  }
+  return { trashId, id: n.id, title: n.title || '' };
+}
+
+export function listTrash() {
+  ensureDirs();
+  const out = [];
+  for (const ent of fs.readdirSync(TRASH_DIR, { withFileTypes: true })) {
+    if (!ent.isDirectory() || !TRASH_ID_RE.test(ent.name)) continue;
+    const dir = path.join(TRASH_DIR, ent.name);
+    const meta = readJson(path.join(dir, 'meta.json'), {});
+    const n = readJson(path.join(dir, 'novel.json'), null);
+    if (!n || !n.id) continue;
+    let deletedAt = Number(meta.deletedAt) || 0;
+    if (!deletedAt) {
+      try { deletedAt = fs.statSync(dir).mtimeMs; } catch {}
+    }
+    out.push({
+      trashId: ent.name,
+      id: n.id,
+      title: n.title || '未命名作品',
+      author: n.author || '',
+      genre: n.genre || '',
+      chapterCount: (n.chapters || []).length,
+      words: (n.chapters || []).reduce((s, c) => s + (c.words || countWords(c.content || '')), 0),
+      deletedAt,
+    });
+  }
+  out.sort((a, b) => b.deletedAt - a.deletedAt);
+  return out;
+}
+
+export function restoreNovel(trashId) {
+  const dir = trashEntryDir(trashId);
+  if (!dir) return { error: '回收站条目不存在', status: 404 };
+  const novelPath = path.join(dir, 'novel.json');
+  const n = readJson(novelPath, null);
+  if (!n || !n.id || !/^n_[a-z0-9]{6,}$/.test(String(n.id))) {
+    return { error: '回收站条目已损坏', status: 404 };
+  }
+  const target = novelFile(n.id);
+  if (fs.existsSync(target)) {
+    return { error: '书架里已经有同一部作品，不能直接覆盖', status: 409 };
+  }
+  ensureDirs();
+  fs.renameSync(novelPath, target);
+  fs.rmSync(dir, { recursive: true, force: true });
+  return { novel: getNovel(n.id) || n };
+}
+
+export function purgeTrash(trashId) {
+  const dir = trashEntryDir(trashId);
+  if (!dir || !fs.existsSync(dir)) return false;
+  const n = readJson(path.join(dir, 'novel.json'), null);
+  fs.rmSync(dir, { recursive: true, force: true });
+  // 彻底删除才一起清掉版本备份；书架里仍有同 id 作品时绝不动备份
+  const id = String(n?.id || '');
+  if (/^n_[a-z0-9]{6,}$/.test(id) && !fs.existsSync(novelFile(id))) {
+    try { fs.rmSync(path.join(DATA_DIR, 'backups', id), { recursive: true, force: true }); } catch {}
+  }
+  return true;
+}
+
+export function purgeAllTrash() {
+  ensureDirs();
+  let count = 0;
+  for (const ent of fs.readdirSync(TRASH_DIR, { withFileTypes: true })) {
+    if (ent.isDirectory() && purgeTrash(ent.name)) count += 1;
+  }
+  return count;
 }
 
 /* ---------------- 版本历史（快照） ---------------- */

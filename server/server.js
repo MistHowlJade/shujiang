@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { exec } from 'node:child_process';
 import {
   ROOT, DATA_DIR, ensureDirs, loadConfig, saveConfig, maskKey,
-  listNovels, createNovel, getNovel, saveNovel, deleteNovel, newId, countWords,
+  listNovels, createNovel, getNovel, saveNovel, deleteNovel, trashNovel, listTrash, restoreNovel, purgeTrash, purgeAllTrash, newId, countWords,
   listSnapshots, createSnapshot, readSnapshot, chapterVolumeIds, volumeLabel,
   findOutlineEntry, CHAPTER_STAGES, cleanTargetWords,
 } from './store.js';
@@ -511,6 +511,23 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, searchLibrary(q, limit));
   }
 
+  /* --- 回收站 --- */
+  if (seg[1] === 'trash' && seg.length === 2) {
+    if (method === 'GET') return sendJson(res, 200, { items: listTrash() });
+    if (method === 'DELETE') return sendJson(res, 200, { ok: true, removed: purgeAllTrash() });
+  }
+
+  if (seg[1] === 'trash' && seg[2] && seg.length === 3 && method === 'DELETE') {
+    if (!purgeTrash(seg[2])) return sendJson(res, 404, { error: '回收站条目不存在' });
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (seg[1] === 'trash' && seg[2] && seg[3] === 'restore' && seg.length === 4 && method === 'POST') {
+    const result = restoreNovel(seg[2]);
+    if (result.error) return sendJson(res, result.status || 400, { error: result.error });
+    return sendJson(res, 200, { ok: true, novel: result.novel });
+  }
+
   /* --- 单部作品 --- */
   if (seg[1] === 'novels' && seg[2]) {
     const id = seg[2];
@@ -521,8 +538,13 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { novel: n });
     }
     if (method === 'DELETE' && seg.length === 3) {
-      deleteNovel(id);
-      return sendJson(res, 200, { ok: true });
+      if (url.searchParams.get('permanent') === '1') {
+        if (!deleteNovel(id, { keepBackup: false })) return sendJson(res, 404, { error: '作品不存在' });
+        return sendJson(res, 200, { ok: true, permanent: true });
+      }
+      const moved = trashNovel(id);
+      if (!moved) return sendJson(res, 404, { error: '作品不存在' });
+      return sendJson(res, 200, { ok: true, trash: moved });
     }
     if (method === 'PUT' && seg.length === 3) {
       const body = await readBody(req);
