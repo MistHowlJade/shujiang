@@ -1037,6 +1037,38 @@ kbd {
   transition: all var(--dur) var(--ease);
 }
 .sel-toolbar button:hover { background: var(--accent-bg); color: var(--accent-hover); }
+.sel-toolbar button[data-op="annotate"] { color: var(--text-2); }
+.sel-toolbar button[data-op="annotate"]:hover { background: #fff3bf; color: #5c4b00; }
+
+/* 批注/高亮侧边栏 */
+.annotation-sidebar { padding: 4px 0; }
+.annotation-list { display: flex; flex-direction: column; gap: 8px; }
+.annotation-item {
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface-2); border-left-width: 3px;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.annotation-item:hover { background: var(--surface-3); border-color: var(--border-2); }
+.annotation-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.annotation-color-dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid; flex: 0 0 auto; }
+.annotation-position { font-size: 10px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.annotation-time { margin-left: auto; font-size: 10px; color: var(--text-4); }
+.annotation-text { font-size: 12px; color: var(--text-2); line-height: 1.6; margin-bottom: 6px; font-family: var(--font-write); }
+.annotation-note { font-size: 11px; color: var(--text-3); padding: 6px 8px; background: var(--surface-3); border-radius: var(--r-sm); line-height: 1.5; }
+.annotation-actions { display: flex; gap: 6px; margin-top: 8px; }
+.annotation-actions .btn { flex: 1; justify-content: center; }
+
+/* 批注颜色选择 */
+.annotation-colors { display: flex; gap: 6px; flex-wrap: wrap; }
+.anno-color-btn {
+  width: 28px; height: 28px; border-radius: var(--r-sm); border: 2px solid transparent;
+  display: grid; place-items: center; cursor: pointer; transition: all var(--dur) var(--ease);
+}
+.anno-color-btn:hover { transform: scale(1.1); }
+.anno-color-btn.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-bg); }
+.anno-color-btn .ico { width: 14px; height: 14px; }
+
+/* 选中文本工具栏 */
 
 /* 助手栏 */
 .pane-assist {

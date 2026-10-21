@@ -2794,6 +2794,7 @@ function chapterSavePayload(ch) {
     targetWords: targetOf(ch),
     memory: ch.memory, status: ch.status, outline: ch.outline, outlineId: ch.outlineId,
     revisions: Array.isArray(ch.revisions) ? ch.revisions : undefined,
+    annotations: ch.annotations,
     counted: peekCounted(ch.id),        // 这次该给今日码字量记多少（见「码字量计数」）
   };
 }
@@ -3679,8 +3680,211 @@ $$('#selToolbar button').forEach((b) => b.addEventListener('mousedown', (e) => {
       });
     return;
   }
+  if (op === 'annotate') {
+    openAnnotationModal(text, { start, end });
+    return;
+  }
   runSegmentOp(op, text, { start, end });
 }));
+
+/* ---------- 批注/高亮功能 ---------- */
+const ANNOTATION_COLORS = [
+  { id: 'yellow', name: '黄色', bg: '#fff3bf', border: '#f0c808', text: '#5c4b00' },
+  { id: 'green', name: '绿色', bg: '#d4f6d4', border: '#52c41a', text: '#1b4d0a' },
+  { id: 'blue', name: '蓝色', bg: '#d6eaff', border: '#1890ff', text: '#00275e' },
+  { id: 'red', name: '红色', bg: '#fff1f0', border: '#ff4d4f', text: '#6b1a1a' },
+  { id: 'purple', name: '紫色', bg: '#f9f0ff', border: '#722ed1', text: '#391053' },
+  { id: 'orange', name: '橙色', bg: '#fff7e6', border: '#fa8c16', text: '#5c3400' },
+];
+
+function getChapterAnnotations(ch) {
+  if (!ch.annotations) ch.annotations = [];
+  return ch.annotations;
+}
+
+function openAnnotationModal(selectedText, range) {
+  const ch = currentChapter();
+  if (!ch) return toast('请先打开一章', 'err');
+
+  showModal(`<h3>添加批注/高亮</h3>
+    <p class="modal-sub">选中文本：<code>${esc(selectedText.slice(0, 80))}${selectedText.length > 80 ? '…' : ''}</code></p>
+    <div class="field-label">高亮颜色
+      <div class="annotation-colors" id="annoColors">
+        ${ANNOTATION_COLORS.map(c => `<button type="button" class="anno-color-btn${c.id === 'yellow' ? ' on' : ''}" data-color="${c.id}" style="background:${c.bg};border-color:${c.border};color:${c.text}" title="${c.name}"><svg class="ico"><use href="#i-highlight" /></svg></button>`).join('')}
+      </div>
+    </div>
+    <label class="field-label">批注内容
+      <textarea class="input" id="annoNote" rows="3" placeholder="可选：写下你的想法、待办、问题……"></textarea>
+    </label>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="annoCancel">取消</button>
+      <button class="btn btn-primary" id="annoOk">添加</button>
+    </div>`,
+  (box) => {
+    let selectedColor = 'yellow';
+    box.querySelectorAll('.anno-color-btn').forEach(btn => {
+      btn.onclick = () => {
+        box.querySelectorAll('.anno-color-btn').forEach(b => b.classList.remove('on'));
+        btn.classList.add('on');
+        selectedColor = btn.dataset.color;
+      };
+    });
+    box.querySelector('#annoCancel').onclick = closeModal;
+    box.querySelector('#annoOk').onclick = () => {
+      const note = box.querySelector('#annoNote').value.trim();
+      addAnnotation(ch, range.start, range.end, selectedText, selectedColor, note);
+      closeModal();
+    };
+    setTimeout(() => box.querySelector('#annoNote').focus(), 30);
+  });
+}
+
+function addAnnotation(ch, start, end, text, color, note) {
+  const annotations = getChapterAnnotations(ch);
+  const annotation = {
+    id: uid('an'),
+    start,
+    end,
+    text: text.slice(0, 200), // 存片段用于定位和显示
+    color,
+    note,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  annotations.push(annotation);
+  // 按位置排序
+  annotations.sort((a, b) => a.start - b.start);
+  markChapterDirty(ch);
+  renderAnnotationSidebar();
+  toast('已添加批注/高亮', 'ok');
+}
+
+function deleteAnnotation(ch, annotationId) {
+  const annotations = getChapterAnnotations(ch);
+  const idx = annotations.findIndex(a => a.id === annotationId);
+  if (idx >= 0) {
+    annotations.splice(idx, 1);
+    markChapterDirty(ch);
+    renderAnnotationSidebar();
+    toast('已删除批注', 'ok');
+  }
+}
+
+function updateAnnotation(ch, annotationId, updates) {
+  const annotations = getChapterAnnotations(ch);
+  const anno = annotations.find(a => a.id === annotationId);
+  if (anno) {
+    Object.assign(anno, updates, { updatedAt: Date.now() });
+    markChapterDirty(ch);
+    renderAnnotationSidebar();
+  }
+}
+
+function jumpToAnnotation(ch, annotationId) {
+  const ta = $('#chContent');
+  const annotations = getChapterAnnotations(ch);
+  const anno = annotations.find(a => a.id === annotationId);
+  if (!anno || !ta) return;
+  // 优先用存储的 start/end，兜底用文本搜索
+  let start = anno.start, end = anno.end;
+  if (typeof start !== 'number' || typeof end !== 'number' || start < 0 || end > ta.value.length) {
+    const idx = ta.value.indexOf(anno.text);
+    if (idx >= 0) { start = idx; end = idx + anno.text.length; }
+  }
+  if (typeof start === 'number' && typeof end === 'number') {
+    ta.setSelectionRange(start, end);
+    ta.focus({ preventScroll: true });
+    // 滚动到可见区域
+    const lineHeight = 28; // 大约行高
+    const charsPerLine = Math.max(1, Math.floor(ta.clientWidth / 9)); // 粗略估算
+    const line = Math.floor(start / charsPerLine);
+    ta.scrollTop = line * lineHeight;
+  }
+}
+
+function renderAnnotationSidebar() {
+  const ch = currentChapter();
+  const sidebar = $('#annotationSidebar');
+  const countEl = $('#annoCount');
+  if (!sidebar) return;
+  if (!ch) {
+    sidebar.innerHTML = '<p class="dim">请先打开一章</p>';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+  const annotations = getChapterAnnotations(ch);
+  if (countEl) countEl.textContent = annotations.length ? `${annotations.length} 条` : '';
+  if (!annotations.length) {
+    sidebar.innerHTML = '<p class="dim">这章还没有批注。选中文字点高亮图标添加。</p>';
+    return;
+  }
+  sidebar.innerHTML = `
+    <div class="annotation-list">
+      ${annotations.map(a => {
+        const color = ANNOTATION_COLORS.find(c => c.id === a.color) || ANNOTATION_COLORS[0];
+        return `<div class="annotation-item" data-id="${a.id}" style="border-left-color:${color.border}">
+          <div class="annotation-header">
+            <span class="annotation-color-dot" style="background:${color.bg};border-color:${color.border}"></span>
+            <span class="annotation-position">第 ${a.start}–${a.end} 字</span>
+            <span class="annotation-time">${fmtDate(a.createdAt)}</span>
+          </div>
+          <div class="annotation-text">${esc(a.text.slice(0, 120))}${a.text.length > 120 ? '…' : ''}</div>
+          ${a.note ? `<div class="annotation-note">${esc(a.note)}</div>` : ''}
+          <div class="annotation-actions">
+            <button class="btn btn-sm btn-text" data-act="jump">${ico('arrow-right')}跳转</button>
+            <button class="btn btn-sm btn-text" data-act="edit">${ico('edit')}编辑</button>
+            <button class="btn btn-sm btn-text" data-act="delete">${ico('trash')}删除</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  sidebar.querySelectorAll('.annotation-item').forEach(item => {
+    const id = item.dataset.id;
+    item.querySelector('[data-act="jump"]').onclick = () => jumpToAnnotation(ch, id);
+    item.querySelector('[data-act="edit"]').onclick = () => editAnnotation(ch, id);
+    item.querySelector('[data-act="delete"]').onclick = () => {
+      if (confirm('删除这条批注？')) deleteAnnotation(ch, id);
+    };
+  });
+}
+
+function editAnnotation(ch, annotationId) {
+  const annotations = getChapterAnnotations(ch);
+  const anno = annotations.find(a => a.id === annotationId);
+  if (!anno) return;
+  const color = ANNOTATION_COLORS.find(c => c.id === anno.color) || ANNOTATION_COLORS[0];
+  showModal(`<h3>编辑批注/高亮</h3>
+    <p class="modal-sub">原文：<code>${esc(anno.text.slice(0, 80))}${anno.text.length > 80 ? '…' : ''}</code></p>
+    <div class="field-label">高亮颜色
+      <div class="annotation-colors" id="annoColors">
+        ${ANNOTATION_COLORS.map(c => `<button type="button" class="anno-color-btn${c.id === anno.color ? ' on' : ''}" data-color="${c.id}" style="background:${c.bg};border-color:${c.border};color:${c.text}" title="${c.name}"><svg class="ico"><use href="#i-highlight" /></svg></button>`).join('')}
+      </div>
+    </div>
+    <label class="field-label">批注内容
+      <textarea class="input" id="annoNote" rows="3" placeholder="可选：写下你的想法、待办、问题……">${esc(anno.note || '')}</textarea>
+    </label>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="annoCancel">取消</button>
+      <button class="btn btn-primary" id="annoOk">保存</button>
+    </div>`,
+  (box) => {
+    let selectedColor = anno.color;
+    box.querySelectorAll('.anno-color-btn').forEach(btn => {
+      btn.onclick = () => {
+        box.querySelectorAll('.anno-color-btn').forEach(b => b.classList.remove('on'));
+        btn.classList.add('on');
+        selectedColor = btn.dataset.color;
+      };
+    });
+    box.querySelector('#annoCancel').onclick = closeModal;
+    box.querySelector('#annoOk').onclick = () => {
+      const note = box.querySelector('#annoNote').value.trim();
+      updateAnnotation(ch, annotationId, { color: selectedColor, note });
+      closeModal();
+    };
+    setTimeout(() => box.querySelector('#annoNote').focus(), 30);
+  });
+}
 
 /* ============================================================
  * 6. 生成
@@ -4188,6 +4392,7 @@ function showAssistTab(name) {
   $$('.assist-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === name));
   if (name === 'scenes') renderCorkboard();
   if (name === 'check') renderRevisionCard();
+  if (name === 'annotations') renderAnnotationSidebar();
 }
 
 /* ------------------------------------------------------------
