@@ -245,6 +245,18 @@
 
               <!-- 检查 -->
               <div class="assist-pane" data-pane="check">
+                <div class="card revision-card" id="revisionCard" hidden>
+                  <div class="card-head">
+                    <h3>本章修订</h3>
+                    <span class="rev-count" id="revCount"></span>
+                  </div>
+                  <div class="rev-add">
+                    <input class="input" id="revInput" maxlength="240" placeholder="记一条要改的地方，回车添加" autocomplete="off" />
+                    <button class="btn btn-sm btn-primary" id="revAdd"><svg class="ico"><use href="#i-plus" /></svg>添加</button>
+                  </div>
+                  <p class="rev-hint">先在正文里选中要改的句子，再添加；之后点引文就能跳回原处。</p>
+                  <ul class="rev-list" id="revList"></ul>
+                </div>
                 <div class="card">
                   <label class="field-label">检查范围</label>
                   <select id="checkScope" class="select">

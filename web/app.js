@@ -197,6 +197,7 @@ const S = {
   batchController: null,   // 批量补记忆：跑的时候不许关弹窗，也不许再起别的 AI 任务
   stageFilter: '',         // 章节列表筛选：'' / 'open' / 'draft' / 'revising' / 'done'
   threadFilter: 'all',     // 线索页筛选：all / unresolved / foreshadowing
+  revisionDraftChapterId: null, // 修订输入框里未提交的草稿属于哪一章
   out: '',
   reasoning: '',
   lastOp: null,
@@ -1230,7 +1231,7 @@ function openSplitChapterModal(index) {
     <label class="field-label">新章标题
       <input class="input" id="newTitle" placeholder="留空自动生成「原标题（下）」" />
     </label>
-    <p class="dim small">拆分后：原章保留前半段，新章承接后半段；分卷归属、阶段均继承原章。记忆不会自动拆分，请事后手动补全。</p>
+    <p class="dim small">拆分后：原章保留前半段，新章承接后半段；分卷归属、阶段均继承原章。记忆不会自动拆分，请事后手动补全；修订清单留在原章，落在后半段的引文可到新章重新添加。</p>
     <div class="modal-foot">
       <button class="btn btn-text" id="splitCancel">取消</button>
       <button class="btn btn-primary" id="splitOk">拆分</button>
@@ -1326,7 +1327,7 @@ function openMergeChapterModal(index) {
   const defaultTitle = `${chapterTitle} + ${nextTitle}`;
 
   showModal(`<h3>合并第 ${index + 1} 章与第 ${index + 2} 章</h3>
-    <p class="modal-sub">把两章合为一章。原标题、正文会拼接；分卷归属、阶段以当前章为准。被合并的章节会被删除（其记忆/章纲不保留）。</p>
+    <p class="modal-sub">把两章合为一章。原标题、正文会拼接；分卷归属、阶段以当前章为准。被合并的章节会被删除（其记忆/章纲不保留，修订清单会合并保留）。</p>
     <label class="field-label">合并后标题
       <input class="input" id="mergeTitle" value="${esc(defaultTitle)}" placeholder="留空自动生成" />
     </label>
@@ -1337,7 +1338,7 @@ function openMergeChapterModal(index) {
         <option value="none">直接拼接</option>
       </select>
     </label>
-    <p class="dim small">合并后：当前章保留合并后的内容与标题；下一章被删除。记忆与章纲不会自动合并，请事后手动补全。</p>
+    <p class="dim small">合并后：当前章保留合并后的内容与标题；下一章被删除。记忆与章纲不会自动合并，请事后手动补全；两边的修订清单会合并到当前章。</p>
     <div class="modal-foot">
       <button class="btn btn-text" id="mergeCancel">取消</button>
       <button class="btn btn-primary" id="mergeOk">合并</button>
@@ -1357,7 +1358,14 @@ function openMergeChapterModal(index) {
       // 2) 合并内容
       const mergedContent = (ch.content || '') + separator + (nextCh.content || '');
 
-      // 3) 更新当前章
+      // 3) 更新当前章：两边的修订清单都保留，别让被合并章节的待改项跟着蒸发
+      const nextRevs = Array.isArray(nextCh.revisions) ? nextCh.revisions : [];
+      if (nextRevs.length) {
+        // 引文锚点原来相对「下一章」正文，合并后要整体平移到合并稿里的位置
+        const offset = (ch.content || '').length + separator.length;
+        const shifted = nextRevs.map((rev) => (rev && rev.quote ? { ...rev, at: (Number(rev.at) || 0) + offset } : rev));
+        ch.revisions = [...(Array.isArray(ch.revisions) ? ch.revisions : []), ...shifted];
+      }
       ch.content = mergedContent;
       ch.title = newTitle;
       markChapterDirty(ch);
@@ -1627,6 +1635,7 @@ function renderStudio() {
     $('#chStage').className = 'stage-select';
     $('#footInfo').textContent = '';
     $('#chapterOutlineCard').hidden = true;
+    renderRevisionCard();
     setEmpty(true, '还没有打开作品', '回「书架」选一部旧作，或者新建一部开始写。', false);
     histSync();
     renderTopbarActions();
@@ -1676,7 +1685,8 @@ function renderStudio() {
     li.className = `chapter-item ${c.id === S.chapterId ? 'on' : ''}`;
     li.dataset.id = c.id;
     li.dataset.stage = stageOf(c);
-    li.title = `${STAGE_LABEL[stageOf(c)]}${c.memory ? ' · 已有章节记忆' : ''}`;
+    const openRevs = openRevisionCount(c);
+    li.title = `${STAGE_LABEL[stageOf(c)]}${c.memory ? ' · 已有章节记忆' : ''}${openRevs ? ` · ${openRevs} 项待改` : ''}`;
     const w = countWords(c.content);
     const moveButtons = filtered ? '' : `
         <button class="mini-act" data-a="up" title="上移">${ico('chev-up')}</button>
@@ -1684,7 +1694,7 @@ function renderStudio() {
     li.innerHTML = `
       <span class="ci-no">${i + 1}</span>
       <span class="ci-title">${esc(c.title || '未命名')}</span>
-      <span class="ci-words">${c.memory ? '<button type="button" class="ci-mem" data-a="memory" title="查看本章记忆" aria-label="查看本章记忆"></button>' : ''}${w || ''}</span>
+      <span class="ci-words">${openRevs ? `<span class="ci-rev" title="${openRevs} 项待改">${openRevs}</span>` : ''}${c.memory ? '<button type="button" class="ci-mem" data-a="memory" title="查看本章记忆" aria-label="查看本章记忆"></button>' : ''}${w || ''}</span>
       <span class="ci-act">${moveButtons}
         <button class="mini-act" data-a="menu" title="分卷 / 本章操作">${ico('more')}</button>
         <button class="mini-act del" data-a="del" title="删除本章">${ico('x')}</button>
@@ -1761,6 +1771,7 @@ function renderStudio() {
   $('#genModel').placeholder = S.config?.model || '默认';
   updateFoot();
   renderChapterOutlineCard();
+  renderRevisionCard();
   renderTopbarActions();
 }
 
@@ -1769,6 +1780,7 @@ function chapterSavePayload(ch) {
   return {
     title: ch.title, content: ch.content, summary: ch.summary, stage: stageOf(ch),
     memory: ch.memory, status: ch.status, outline: ch.outline, outlineId: ch.outlineId,
+    revisions: Array.isArray(ch.revisions) ? ch.revisions : undefined,
     counted: peekCounted(ch.id),        // 这次该给今日码字量记多少（见「码字量计数」）
   };
 }
@@ -2952,7 +2964,193 @@ function showAssistTab(name) {
   $$('#assistTabs button').forEach((x) => x.classList.toggle('on', x.dataset.tab === name));
   $$('.assist-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === name));
   if (name === 'scenes') renderCorkboard();
+  if (name === 'check') renderRevisionCard();
 }
+
+/* ------------------------------------------------------------
+ * 本章修订清单：作者自己的待改项，存在 chapter.revisions
+ * ------------------------------------------------------------
+ * 添加时可带一段正文引文作为锚点；引文按「离记录位置最近的一次」
+ * 定位，正文改过也能尽量找回来。全部本地，不调用模型。
+ * ------------------------------------------------------------ */
+function revisionsOf(ch) {
+  const list = ch?.revisions;
+  return Array.isArray(list) ? list.filter((r) => r && typeof r === 'object') : [];
+}
+
+function openRevisionCount(ch) {
+  return revisionsOf(ch).filter((r) => !r.done).length;
+}
+
+function syncRevisionBadge(ch) {
+  if (!ch) return;
+  const li = chapterRow(ch.id);
+  if (!li) return;
+  const n = openRevisionCount(ch);
+  const words = li.querySelector('.ci-words');
+  if (words) {
+    let badge = words.querySelector('.ci-rev');
+    if (n) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'ci-rev';
+        words.prepend(badge);
+      }
+      badge.textContent = String(n);
+      badge.title = `${n} 项待改`;
+    } else if (badge) {
+      badge.remove();
+    }
+  }
+  li.title = `${STAGE_LABEL[stageOf(ch)]}${ch.memory ? ' · 已有章节记忆' : ''}${n ? ` · ${n} 项待改` : ''}`;
+}
+
+function revisionItemHtml(rev) {
+  const rawText = String(rev.text || '').trim() || '未填写内容';
+  const quote = String(rev.quote || '').replace(/\s+/g, ' ').trim();
+  const shortQuote = quote.length > 58 ? `${quote.slice(0, 58)}…` : quote;
+  const quoteHtml = quote
+    ? `<button type="button" class="rev-quote" data-rev-act="quote" title="${esc(quote)}">${esc(shortQuote)}</button>`
+    : '';
+  return `<li class="rev-item${rev.done ? ' done' : ''}" data-rev-id="${esc(rev.id || '')}">
+    <button type="button" class="rev-check" data-rev-act="toggle" role="checkbox" aria-checked="${rev.done ? 'true' : 'false'}" title="${rev.done ? '标记为未完成' : '标记为已完成'}">${rev.done ? ico('check') : ''}</button>
+    <div class="rev-main"><span class="rev-text">${esc(rawText)}</span>${quoteHtml}</div>
+    <button type="button" class="rev-del" data-rev-act="del" title="删除这条修订" aria-label="删除这条修订">${ico('x')}</button>
+  </li>`;
+}
+
+function renderRevisionCard() {
+  const card = $('#revisionCard');
+  if (!card) return;
+  const ch = currentChapter();
+  if (!ch) {
+    card.hidden = true;
+    $('#revList').innerHTML = '';
+    $('#revCount').textContent = '';
+    S.revisionDraftChapterId = null;
+    return;
+  }
+  card.hidden = false;
+  if (S.revisionDraftChapterId !== ch.id) {
+    S.revisionDraftChapterId = ch.id;
+    const input = $('#revInput');
+    if (input) input.value = '';
+  }
+  const revs = revisionsOf(ch);
+  const open = revs.filter((r) => !r.done).length;
+  const done = revs.length - open;
+  const countEl = $('#revCount');
+  countEl.textContent = revs.length ? `${open} 项待改${done ? ` · ${done} 项完成` : ''}` : '暂无';
+  countEl.classList.toggle('done', revs.length > 0 && open === 0);
+  const ordered = revs.slice().sort((a, b) => Number(!!a.done) - Number(!!b.done) || (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+  $('#revList').innerHTML = ordered.length
+    ? ordered.map(revisionItemHtml).join('')
+    : '<li class="rev-empty">还没有修订项。选中正文里的句子，再在这里记一条，之后能一键跳回原处。</li>';
+}
+
+function addRevision() {
+  const ch = currentChapter();
+  if (!ch) return toast('先打开一章', 'err');
+  const input = $('#revInput');
+  const text = String(input?.value || '').trim();
+  if (!text) { input?.focus(); return; }
+  const ta = $('#chContent');
+  let quote = '';
+  let at = 0;
+  if (ta && ta.selectionEnd > ta.selectionStart) {
+    const start = ta.selectionStart;
+    const raw = ta.value.slice(start, ta.selectionEnd);
+    quote = raw.trim().slice(0, 120);
+    if (quote) at = start + Math.max(0, raw.indexOf(quote));
+  }
+  const revs = Array.isArray(ch.revisions) ? ch.revisions : (ch.revisions = []);
+  revs.unshift({
+    id: uid('rev'),
+    text: text.slice(0, 240),
+    quote,
+    at: quote ? at : 0,
+    done: false,
+    createdAt: Date.now(),
+  });
+  ch.revisions = revs;
+  if (input) input.value = '';
+  if (quote && ta) ta.setSelectionRange(ta.selectionEnd, ta.selectionEnd); // 别让下一条修订误用同一段引文
+  markChapterDirty(ch);
+  renderRevisionCard();
+  syncRevisionBadge(ch);
+  input?.focus();
+}
+
+function toggleRevision(id) {
+  const ch = currentChapter();
+  if (!ch) return;
+  const rev = revisionsOf(ch).find((r) => String(r.id) === String(id));
+  if (!rev) return;
+  rev.done = !rev.done;
+  markChapterDirty(ch);
+  renderRevisionCard();
+  syncRevisionBadge(ch);
+}
+
+function removeRevision(id) {
+  const ch = currentChapter();
+  if (!ch) return;
+  ch.revisions = revisionsOf(ch).filter((r) => String(r.id) !== String(id));
+  markChapterDirty(ch);
+  renderRevisionCard();
+  syncRevisionBadge(ch);
+}
+
+function nearestQuoteIndex(content, quote, prefer) {
+  if (!quote) return -1;
+  let from = 0;
+  let best = -1;
+  let bestDist = Infinity;
+  let guard = 0;
+  while (guard < 300) {
+    guard += 1;
+    const at = content.indexOf(quote, from);
+    if (at < 0) break;
+    const dist = Math.abs(at - (Number(prefer) || 0));
+    if (dist < bestDist) { best = at; bestDist = dist; }
+    from = at + Math.max(1, quote.length);
+  }
+  return best;
+}
+
+function locateRevision(id) {
+  const ch = currentChapter();
+  if (!ch) return;
+  const rev = revisionsOf(ch).find((r) => String(r.id) === String(id));
+  const quote = String(rev?.quote || '');
+  if (!quote) return;
+  const ta = $('#chContent');
+  if (!ta) return;
+  const at = nearestQuoteIndex(ta.value, quote, rev.at);
+  if (at < 0) return toast('正文里已经找不到这段引文了', 'err');
+  const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 26;
+  const line = ta.value.slice(0, at).split('\n').length - 1;
+  ta.focus({ preventScroll: true });
+  ta.setSelectionRange(at, at + quote.length);
+  ta.scrollTop = Math.max(0, line * lineHeight - ta.clientHeight * 0.32);
+}
+
+$('#revAdd')?.addEventListener('click', addRevision);
+$('#revInput')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    addRevision();
+  }
+});
+$('#revList')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-rev-act]');
+  if (!btn) return;
+  const id = btn.closest('.rev-item')?.dataset.revId;
+  if (!id) return;
+  if (btn.dataset.revAct === 'toggle') toggleRevision(id);
+  else if (btn.dataset.revAct === 'del') removeRevision(id);
+  else if (btn.dataset.revAct === 'quote') locateRevision(id);
+});
 
 function scopeForCheck() {
   const n = S.novel;
@@ -5329,6 +5527,12 @@ function cmdkSource() {
     op('重做', 'redo', () => { setView('studio'); doRedo(); }, 'Ctrl+Shift+Z');
     op('全书查找 / 替换', 'search', () => { setView('studio'); openFind(); }, 'Ctrl+F');
     op('全书体检', 'pulse', () => { setView('studio'); openHealthReport(); });
+    op('本章修订清单', 'check', () => {
+      if (!currentChapter()) return toast('先打开一章', 'err');
+      setView('studio');
+      showAssistTab('check');
+      setTimeout(() => $('#revInput')?.focus(), 80);
+    });
   }
   op('立即保存', 'check', manualSave, 'Ctrl+S');
   op('切换明暗主题', 'moon', () => $('#themeBtn').click());
