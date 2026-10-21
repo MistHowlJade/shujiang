@@ -732,7 +732,7 @@ function openChapterMenu(anchor, index) {
   const ch = S.novel?.chapters[index];
   const stage = stageOf(ch);
   showPop(anchor, [
-    { label: '查看章节记忆', disabled: !ch?.memory, run: () => ch?.memory && openMemoryModal(ch) },
+    { label: ch?.memory ? '查看章节记忆' : '新建章节记忆', disabled: !ch, run: () => ch && (ch.memory ? openMemoryModal(ch) : openMemoryEditor(ch)) },
     '-',
     { label: `并入上一卷（${label(prev)}）`, disabled: !prev, run: () => setChapterVolume(index, prev ? prev.id : '') },
     { label: `并入下一卷（${label(next)}）`, disabled: !next, run: () => setChapterVolume(index, next ? next.id : '') },
@@ -743,6 +743,9 @@ function openChapterMenu(anchor, index) {
     { label: `${stage === 'draft' ? '✓ ' : ''}标为草稿`, run: () => setChapterStage(index, 'draft') },
     { label: `${stage === 'revising' ? '✓ ' : ''}标为修改中`, run: () => setChapterStage(index, 'revising') },
     { label: `${stage === 'done' ? '✓ ' : ''}标为定稿`, run: () => setChapterStage(index, 'done') },
+    '-',
+    { label: '拆分本章…', run: () => openSplitChapterModal(index) },
+    { label: '合并本章…', disabled: index >= (S.novel?.chapters.length || 0) - 1, run: () => openMergeChapterModal(index) },
     '-',
     { label: S.stageFilter ? '上移本章（先清除筛选）' : '上移本章', disabled: !!S.stageFilter || index === 0, run: () => moveChapter(index, index - 1) },
     { label: S.stageFilter ? '下移本章（先清除筛选）' : '下移本章', disabled: !!S.stageFilter || index >= (S.novel?.chapters.length || 0) - 1, run: () => moveChapter(index, index + 1) },
@@ -777,6 +780,199 @@ function openVolumeGroupMenu(anchor, vid, group) {
     items.push({ label: '从这一段起新的一卷…', run: () => openVolumeModal(null, group.from, '') });
   }
   showPop(anchor, items);
+}
+
+/** 把当前章在光标/段落处拆成两章 */
+function openSplitChapterModal(index) {
+  const n = S.novel;
+  if (!n) return toast('先打开作品', 'err');
+  const ch = n.chapters[index];
+  if (!ch) return;
+  const content = ch.content || '';
+  if (!content.trim()) return toast('本章是空的，没法拆', 'err');
+
+  // 预先把编辑器里的光标位置记下来（如果正在编辑这一章）
+  let cursorPos = -1;
+  if (S.chapterId === ch.id) {
+    const ta = $('#chContent');
+    if (ta) cursorPos = ta.selectionStart;
+  }
+
+  // 按段落切分预览
+  const paragraphs = content.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  const paraOptions = paragraphs.map((p, i) => {
+    const preview = p.length > 60 ? p.slice(0, 60) + '…' : p;
+    return `<option value="${i}">段落 ${i + 1}：${esc(preview)}</option>`;
+  }).join('');
+
+  // 捕获关键 ID，防止后续异步过程中 S.novel 变化导致引用失效
+  const novelId = n.id;
+  const chapterId = ch.id;
+  const chapterTitle = ch.title;
+  const chapterStage = ch.stage;
+  const chapterVolId = ch.volumeId || '';
+
+  showModal(`<h3>拆分第 ${index + 1} 章</h3>
+    <p class="modal-sub">把正文从某个位置「剪」成两章。前半段留在本章，后半段自动新建下一章。</p>
+    <label class="field-label">拆分位置
+      <select class="input" id="splitMode">
+        <option value="cursor"${cursorPos >= 0 ? ' selected' : ''}>光标所在位置${cursorPos >= 0 ? `（第 ${cursorPos} 字符）` : '（当前章无光标，将在中间拆分）'}</option>
+        <option value="middle">正文中间（字符数对半）</option>
+        ${paraOptions ? `<option value="paragraph">按段落拆分…</option>` : ''}
+      </select>
+    </label>
+    <div id="paraRow" class="field-label" style="${paraOptions ? '' : 'display:none'}">
+      <label>在第几段之后拆分
+        <select class="input" id="splitPara">${paraOptions}</select>
+      </label>
+    </div>
+    <label class="field-label">新章标题
+      <input class="input" id="newTitle" placeholder="留空自动生成「原标题（下）」" />
+    </label>
+    <p class="dim small">拆分后：原章保留前半段，新章承接后半段；分卷归属、阶段均继承原章。记忆不会自动拆分，请事后手动补全。</p>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="splitCancel">取消</button>
+      <button class="btn btn-primary" id="splitOk">拆分</button>
+    </div>`, (box) => {
+    const modeEl = box.querySelector('#splitMode');
+    const paraRow = box.querySelector('#paraRow');
+    const paraEl = box.querySelector('#splitPara');
+    const titleEl = box.querySelector('#newTitle');
+
+    modeEl.onchange = () => {
+      paraRow.style.display = modeEl.value === 'paragraph' ? '' : 'none';
+    };
+
+    box.querySelector('#splitCancel').onclick = closeModal;
+    box.querySelector('#splitOk').onclick = async () => {
+      const mode = modeEl.value;
+      let splitAt = -1;
+
+      if (mode === 'cursor') {
+        splitAt = cursorPos >= 0 ? cursorPos : Math.floor(content.length / 2);
+      } else if (mode === 'middle') {
+        splitAt = Math.floor(content.length / 2);
+        // 向最近的段落边界靠拢（避免把一段拦腰斩断）
+        const before = content.slice(0, splitAt);
+        const lastBreak = before.lastIndexOf('\n\n');
+        if (lastBreak > splitAt * 0.3) splitAt = lastBreak + 2;
+      } else if (mode === 'paragraph') {
+        const pi = Number(paraEl.value);
+        // 找到第 pi 段在原文中的结束位置
+        let walked = 0;
+        for (let i = 0; i <= pi && i < paragraphs.length; i++) {
+          const p = paragraphs[i];
+          const idx = content.indexOf(p, walked);
+          if (idx >= 0) walked = idx + p.length;
+        }
+        splitAt = walked;
+      }
+
+      if (splitAt <= 0 || splitAt >= content.length) {
+        return toast('拆分位置不合法', 'err');
+      }
+
+      const first = content.slice(0, splitAt).trimEnd();
+      const second = content.slice(splitAt).trimStart();
+      if (!first && !second) return toast('拆分后两边都是空的', 'err');
+
+      const newTitle = titleEl.value.trim() || `${chapterTitle}（下）`;
+
+      // 1) 先只保存当前章的前半段（避免 flushSave 连带保存其它待存章节导致竞态）
+      const currentCh = S.novel?.chapters.find((c) => c.id === chapterId);
+      if (!currentCh) return toast('原章已不存在', 'err');
+      currentCh.content = first;
+      await saveChapterNow(chapterId);
+
+      // 2) 创建新章（插在原章之后）
+      const insertAt = (S.novel?.chapters.findIndex((c) => c.id === chapterId) ?? -1) + 1;
+      const res = await api.send(`/api/novels/${novelId}/chapters`, {
+        title: newTitle,
+        content: second,
+        volumeId: chapterVolId,
+        stage: chapterStage,
+        at: insertAt,
+      }, 'POST');
+      if (!res.chapter) return toast('新章创建失败', 'err');
+
+      // 3) 同步 novel 数据并切到新章
+      if (res.novel) S.novel = res.novel;
+      S.chapterId = res.chapter.id;
+      closeModal();
+      renderStudio();
+      toast(`已拆分为「${esc(chapterTitle)}」+「${esc(newTitle)}」`, 'ok');
+    };
+  });
+}
+
+/** 合并当前章与下一章 */
+function openMergeChapterModal(index) {
+  const n = S.novel;
+  if (!n) return toast('先打开作品', 'err');
+  const ch = n.chapters[index];
+  const nextCh = n.chapters[index + 1];
+  if (!ch || !nextCh) return toast('无法合并：没有下一章', 'err');
+
+  const novelId = n.id;
+  const chapterId = ch.id;
+  const nextChapterId = nextCh.id;
+  const chapterTitle = ch.title;
+  const nextTitle = nextCh.title;
+  const chapterVolId = ch.volumeId || '';
+  const chapterStage = ch.stage;
+
+  // 预览合并后的标题
+  const defaultTitle = `${chapterTitle} + ${nextTitle}`;
+
+  showModal(`<h3>合并第 ${index + 1} 章与第 ${index + 2} 章</h3>
+    <p class="modal-sub">把两章合为一章。原标题、正文会拼接；分卷归属、阶段以当前章为准。被合并的章节会被删除（其记忆/章纲不保留）。</p>
+    <label class="field-label">合并后标题
+      <input class="input" id="mergeTitle" value="${esc(defaultTitle)}" placeholder="留空自动生成" />
+    </label>
+    <label class="field-label">正文连接符
+      <select class="input" id="mergeSep">
+        <option value="blank">空行（\\n\\n）</option>
+        <option value="hr">分割线（---）</option>
+        <option value="none">直接拼接</option>
+      </select>
+    </label>
+    <p class="dim small">合并后：当前章保留合并后的内容与标题；下一章被删除。记忆与章纲不会自动合并，请事后手动补全。</p>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="mergeCancel">取消</button>
+      <button class="btn btn-primary" id="mergeOk">合并</button>
+    </div>`, (box) => {
+    const titleEl = box.querySelector('#mergeTitle');
+    const sepEl = box.querySelector('#mergeSep');
+
+    box.querySelector('#mergeCancel').onclick = closeModal;
+    box.querySelector('#mergeOk').onclick = async () => {
+      const newTitle = titleEl.value.trim() || defaultTitle;
+      const sepMode = sepEl.value;
+      const separator = sepMode === 'blank' ? '\n\n' : (sepMode === 'hr' ? '\n\n---\n\n' : '');
+
+      // 1) 备份一下当前章（防止后悔）
+      await snapshotNow('合并前备份');
+
+      // 2) 合并内容
+      const mergedContent = (ch.content || '') + separator + (nextCh.content || '');
+
+      // 3) 更新当前章
+      ch.content = mergedContent;
+      ch.title = newTitle;
+      markChapterDirty(ch);
+      await saveChapterNow(chapterId);
+
+      // 4) 删除下一章
+      const res = await api.del(`/api/novels/${novelId}/chapters/${nextChapterId}`);
+      if (!res.novel) return toast('删除下一章失败', 'err');
+      S.novel = res.novel;
+
+      // 5) 刷新
+      closeModal();
+      renderStudio();
+      toast(`已合并为「${esc(newTitle)}」`, 'ok');
+    };
+  });
 }
 
 function gotoSettingsVolume(vid) {
@@ -2028,10 +2224,12 @@ function openMemoryModal(ch) {
       : `${summary ? `<section class="mem-block"><h4>概要</h4><p class="mem-summary">${esc(summary)}</p></section>` : ''}${blocks}`}
     <div class="modal-foot mem-foot">
       <button class="btn btn-text" id="memOpen">打开本章</button>
+      <button class="btn btn-text" id="memEdit">编辑</button>
       <button class="btn btn-text" id="memRegen">重新生成</button>
       <button class="btn btn-primary" id="memClose">关闭</button>
     </div>`, (box) => {
     box.querySelector('#memOpen').onclick = () => { closeModal(); openChapterFromIndex(ch.id); };
+    box.querySelector('#memEdit').onclick = () => openMemoryEditor(ch);
     box.querySelector('#memClose').onclick = () => closeModal();
     box.querySelector('#memX').onclick = () => closeModal();
     box.querySelector('#memRegen').onclick = () => {
@@ -2041,6 +2239,57 @@ function openMemoryModal(ch) {
       if (S.view !== 'studio') setView('studio');
       if (S.chapterId !== chapterId) selectChapter(chapterId);
       setTimeout(() => $('[data-quick="memory"]')?.click(), 30);
+    };
+  });
+}
+
+/** 手动修正章节记忆。数组字段一行一条，留空即删除该条。 */
+function openMemoryEditor(ch) {
+  if (!ch) return toast('先选一章', 'err');
+  const mem = ch.memory || {};
+  const no = ch.no || (S.novel?.chapters.indexOf(ch) + 1) || 1;
+  // 编辑时只读 memory.summary，不拿章节概要兜底，避免清空记忆后又被章节概要“复活”
+  const summary = String(mem.summary || '').trim();
+  const listText = (key) => memoryItems(mem, key).join('\n');
+  showModal(`<div class="mem-head"><h3>${ch.memory ? '编辑章节记忆' : '新建章节记忆'}</h3><button class="icon-btn sm mem-x" id="memX" title="关闭" aria-label="关闭">${ico('x')}</button></div>
+    <p class="modal-sub">第 ${no} 章《${esc(ch.title || '未命名')}》 · 每行一条；留空会从记忆里移除。全部留空会清空本章记忆。</p>
+    <form class="mem-edit" id="memForm">
+      <label class="field-label">概要<textarea class="textarea" id="memSummary" rows="3" placeholder="用一两句话概括本章；不填则沿用章节概要">${esc(summary)}</textarea></label>
+      <label class="field-label">关键事件<textarea class="textarea" id="memEvents" rows="4" placeholder="一行一件">${esc(listText('events'))}</textarea></label>
+      <label class="field-label">出场人物<textarea class="textarea" id="memCharacters" rows="3" placeholder="一行一人">${esc(listText('characters'))}</textarea></label>
+      <label class="field-label">状态变化<textarea class="textarea" id="memStates" rows="3" placeholder="谁 / 什么发生了变化">${esc(listText('stateChanges'))}</textarea></label>
+      <label class="field-label">伏笔<textarea class="textarea" id="memForeshadow" rows="3" placeholder="一行一条">${esc(listText('foreshadowing'))}</textarea></label>
+      <label class="field-label">未决<textarea class="textarea" id="memUnresolved" rows="3" placeholder="一行一条">${esc(listText('unresolved'))}</textarea></label>
+      <p class="mem-edit-hint">修改后会同步影响后续章节的上下文和「线索」页；线索是否已回收仍以正文为准。</p>
+      <div class="modal-foot mem-foot">
+        <button type="button" class="btn btn-text" id="memCancel">取消</button>
+        <button type="submit" class="btn btn-primary">保存记忆</button>
+      </div>
+    </form>`, (box) => {
+    box.querySelector('#memX').onclick = () => closeModal();
+    box.querySelector('#memCancel').onclick = () => { if (ch.memory) openMemoryModal(ch); else closeModal(); };
+    box.querySelector('#memForm').onsubmit = (e) => {
+      e.preventDefault();
+      const readList = (id) => box.querySelector(`#${id}`).value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      const next = {
+        summary: box.querySelector('#memSummary').value.trim(),
+        events: readList('memEvents'),
+        characters: readList('memCharacters'),
+        stateChanges: readList('memStates'),
+        foreshadowing: readList('memForeshadow'),
+        unresolved: readList('memUnresolved'),
+      };
+      const empty = !next.summary && !next.events.length && !next.characters.length && !next.stateChanges.length && !next.foreshadowing.length && !next.unresolved.length;
+      const had = !!ch.memory;
+      if (empty && !had) return toast('还没有填写内容', 'err');
+      if (empty) ch.memory = null;
+      else ch.memory = { ...(ch.memory || {}), ...next };
+      if (!ch.summary && next.summary) ch.summary = next.summary;
+      markChapterDirty(ch);
+      updateFoot();
+      closeModal();
+      if (S.view === 'bible') renderBible(); else renderStudio();
+      toast(empty ? '章节记忆已清空' : had ? '章节记忆已保存' : '章节记忆已创建', 'ok');
     };
   });
 }
@@ -2296,12 +2545,12 @@ function showDiff(oldText, newText, op, range) {
  * 7. 检查
  * ============================================================ */
 $$('#assistTabs button').forEach((b) => b.addEventListener('click', () => {
-  $$('#assistTabs button').forEach((x) => x.classList.toggle('on', x === b));
-  $$('.assist-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === b.dataset.tab));
+  showAssistTab(b.dataset.tab);
 }));
 function showAssistTab(name) {
   $$('#assistTabs button').forEach((x) => x.classList.toggle('on', x.dataset.tab === name));
   $$('.assist-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === name));
+  if (name === 'scenes') renderCorkboard();
 }
 
 function scopeForCheck() {
@@ -2386,6 +2635,285 @@ $('#sendEditedBtn').addEventListener('click', async () => {
 });
 
 /* ============================================================
+ * 场景拆解 / 幕布视图
+ * ============================================================ */
+function getScenes(ch) {
+  ch.scenes = ch.scenes || [];
+  return ch.scenes;
+}
+
+function renderCorkboard() {
+  const ch = currentChapter();
+  const board = $('#corkboard');
+  if (!ch) {
+    board.innerHTML = '<div class="cork-empty">请先在左侧选择一章</div>';
+    $('#scenesInfo').textContent = '';
+    return;
+  }
+  const scenes = getScenes(ch);
+  $('#scenesInfo').textContent = `第 ${ch.no} 章《${ch.title}》 · ${scenes.length} 个场景`;
+  if (!scenes.length) {
+    board.innerHTML = '<div class="cork-empty">还没有场景卡片。点「从章纲生成场景」或「新增场景」开始。</div>';
+    return;
+  }
+  board.innerHTML = scenes.map((sc, i) => `
+    <div class="scene-card" data-index="${i}" draggable="true">
+      <div class="scene-handle" title="拖拽排序">${ico('grip')}</div>
+      <div class="scene-actions">
+        <button class="scene-gen" title="生成正文" data-index="${i}">${ico('spark')}</button>
+        <button class="scene-del" title="删除">${ico('x')}</button>
+      </div>
+      <div class="scene-header">
+        <span class="scene-num">场次 ${i + 1}</span>
+        <span class="scene-pov">${esc(sc.pov || '')}</span>
+      </div>
+      <div class="scene-field"><span class="scene-label">地点</span><span class="scene-value">${esc(sc.location || '')}</span></div>
+      <div class="scene-field"><span class="scene-label">时间</span><span class="scene-value">${esc(sc.time || '')}</span></div>
+      <div class="scene-field"><span class="scene-label">人物</span><span class="scene-value">${esc(sc.characters || '')}</span></div>
+      <div class="scene-field"><span class="scene-label">梗概</span><span class="scene-value">${esc(sc.summary || '')}</span></div>
+      <div class="scene-field"><span class="scene-label">钩子</span><span class="scene-value">${esc(sc.hook || '')}</span></div>
+      <div class="scene-field"><span class="scene-label">目标字数</span><span class="scene-value">${sc.targetWords || ''}</span></div>
+    </div>
+  `).join('');
+
+  // 双击编辑
+  $$('.scene-card', board).forEach((card) => {
+    const idx = Number(card.dataset.index);
+    card.addEventListener('dblclick', () => openSceneEditor(ch, idx));
+    card.querySelector('.scene-del').onclick = (e) => {
+      e.stopPropagation();
+      deleteScene(ch, idx);
+    };
+    card.querySelector('.scene-gen').onclick = (e) => {
+      e.stopPropagation();
+      generateSceneProse(ch, idx);
+    };
+  });
+
+  // 拖拽排序
+  let dragSrc = null;
+  board.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.scene-card');
+    if (!card) return;
+    dragSrc = card;
+    card.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  board.addEventListener('dragend', () => {
+    if (dragSrc) dragSrc.classList.remove('dragging');
+    dragSrc = null;
+  });
+  board.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    const card = e.target.closest('.scene-card');
+    if (card && card !== dragSrc) {
+      const rect = card.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      if (e.clientY < midY) card.style.borderTop = '2px solid var(--brand)';
+      else card.style.borderBottom = '2px solid var(--brand)';
+    }
+  });
+  board.addEventListener('dragleave', (e) => {
+    if (!board.contains(e.relatedTarget)) {
+      $$('.scene-card', board).forEach((c) => { c.style.borderTop = ''; c.style.borderBottom = ''; });
+    }
+  });
+  board.addEventListener('drop', (e) => {
+    e.preventDefault();
+    $$('.scene-card', board).forEach((c) => { c.style.borderTop = ''; c.style.borderBottom = ''; });
+    const target = e.target.closest('.scene-card');
+    if (dragSrc && target && dragSrc !== target) {
+      const from = Number(dragSrc.dataset.index);
+      const to = Number(target.dataset.index);
+      moveScene(ch, from, to);
+    }
+  });
+}
+
+function openSceneEditor(ch, index) {
+  const scenes = getScenes(ch);
+  const sc = scenes[index] || {};
+  const isNew = !scenes[index];
+  showModal(`<h3>${isNew ? '新增场景' : '编辑场景'}</h3>
+    <p class="modal-sub">场次 ${index + 1} / ${scenes.length + (isNew ? 1 : 0)} · 《${esc(ch.title)}》</p>
+    <label class="field-label">视角（POV）<input class="input" id="scPov" value="${esc(sc.pov || '')}" placeholder="例：林昭" /></label>
+    <label class="field-label">地点<input class="input" id="scLocation" value="${esc(sc.location || '')}" placeholder="例：宗门后山·竹林" /></label>
+    <label class="field-label">时间<input class="input" id="scTime" value="${esc(sc.time || '')}" placeholder="例：深夜·雨未停" /></label>
+    <label class="field-label">出场人物<input class="input" id="scCharacters" value="${esc(sc.characters || '')}" placeholder="例：林昭、沈鹤" /></label>
+    <label class="field-label">梗概<textarea class="textarea" id="scSummary" rows="3" placeholder="这一场要发生什么">${esc(sc.summary || '')}</textarea></label>
+    <label class="field-label">场末钩子<textarea class="textarea" id="scHook" rows="2" placeholder="留给下一场的悬念">${esc(sc.hook || '')}</textarea></label>
+    <label class="field-label">目标字数<input class="input" id="scTargetWords" type="number" value="${sc.targetWords || ''}" min="0" step="100" placeholder="留空不设目标" /></label>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="scCancel">取消</button>
+      <button class="btn btn-primary" id="scSave">保存</button>
+    </div>`, (box) => {
+    box.querySelector('#scCancel').onclick = closeModal;
+    box.querySelector('#scSave').onclick = () => {
+      const updated = {
+        pov: box.querySelector('#scPov').value.trim(),
+        location: box.querySelector('#scLocation').value.trim(),
+        time: box.querySelector('#scTime').value.trim(),
+        characters: box.querySelector('#scCharacters').value.trim(),
+        summary: box.querySelector('#scSummary').value.trim(),
+        hook: box.querySelector('#scHook').value.trim(),
+        targetWords: Number(box.querySelector('#scTargetWords').value) || 0,
+      };
+      scenes[index] = updated;
+      markChapterDirty(ch);
+      closeModal();
+      renderCorkboard();
+      toast(isNew ? '场景已新增' : '场景已更新', 'ok');
+    };
+  });
+}
+
+function deleteScene(ch, index) {
+  if (!confirm('删除这个场景？')) return;
+  const scenes = getScenes(ch);
+  scenes.splice(index, 1);
+  markChapterDirty(ch);
+  renderCorkboard();
+  toast('场景已删除', 'ok');
+}
+
+function moveScene(ch, from, to) {
+  const scenes = getScenes(ch);
+  const [moved] = scenes.splice(from, 1);
+  scenes.splice(to, 0, moved);
+  markChapterDirty(ch);
+  renderCorkboard();
+}
+
+/** 为单个场景生成正文 */
+async function generateSceneProse(ch, sceneIndex) {
+  const scenes = getScenes(ch);
+  const sc = scenes[sceneIndex];
+  if (!sc) return toast('场景不存在', 'err');
+
+  const targetWords = sc.targetWords || 1500;
+  const instruction = `请根据以下场景设定，写出这段正文。要求：
+- 视角（POV）：${sc.pov || '不限'}
+- 地点：${sc.location || '不限'}
+- 时间：${sc.time || '不限'}
+- 出场人物：${sc.characters || '不限'}
+- 梗概：${sc.summary || '按大纲推进'}
+- 场末钩子：${sc.hook || '自行设计'}
+- 目标字数：约 ${targetWords} 字
+- 风格：${S.novel?.meta?.tone || '网文风格，节奏紧凑，心理描写细腻'}
+- 只输出正文，不要包含场景标题或标记。`;
+
+  await runStream({
+    task: 'chapter',
+    novelId: S.novel.id,
+    chapterId: ch.id,
+    model: $('#genModel').value.trim() || undefined,
+    payload: {
+      instruction,
+      targetWords,
+      extraQuery: instruction,
+    },
+  });
+
+  // 生成完成后，提示用户插入
+  if (S.out) {
+    // 暂存生成的内容，让用户决定怎么用
+    const insertPos = $('#chContent').selectionStart ?? $('#chContent').value.length;
+    insertIntoContent(`\n\n=== 场次 ${sceneIndex + 1} ${sc.pov ? `· ${sc.pov}` : ''} ===\n\n${S.out}`, 'insert');
+    toast(`场次 ${sceneIndex + 1} 正文已生成并插入光标处`, 'ok');
+    S.out = '';
+    S.reasoning = '';
+    renderOut();
+  }
+}
+
+function scenesFromOutline(ch) {
+  const { outline } = effectiveChapterOutline(ch);
+  if (!outline || (!outline.scene && !outline.summary && !outline.hook)) {
+    return toast('本章还没有章纲，无法生成场景', 'err');
+  }
+  const scenes = getScenes(ch);
+  // 简单拆解：按章纲字段生成 3-5 个场景卡片
+  const newScenes = [];
+  if (outline.scene) {
+    const parts = outline.scene.split(/[；;]/).map((s) => s.trim()).filter(Boolean);
+    parts.forEach((part, i) => {
+      newScenes.push({
+        pov: '',
+        location: part,
+        time: '',
+        characters: outline.characters || '',
+        summary: outline.summary || '',
+        hook: i === parts.length - 1 ? outline.hook : '',
+        targetWords: 0,
+      });
+    });
+  } else {
+    newScenes.push({
+      pov: '',
+      location: outline.scene || '',
+      time: '',
+      characters: outline.characters || '',
+      summary: outline.summary || '',
+      hook: outline.hook || '',
+      targetWords: 0,
+    });
+  }
+  // 合并：保留已有，新增追加
+  scenes.push(...newScenes);
+  markChapterDirty(ch);
+  renderCorkboard();
+  toast(`已从章纲生成 ${newScenes.length} 个场景卡片`, 'ok');
+}
+
+$('#scenesFromOutline').addEventListener('click', () => {
+  const ch = currentChapter();
+  if (ch) scenesFromOutline(ch);
+});
+$('#addSceneBtn').addEventListener('click', () => {
+  const ch = currentChapter();
+  if (ch) openSceneEditor(ch, getScenes(ch).length);
+});
+$('#scenesClear').addEventListener('click', () => {
+  const ch = currentChapter();
+  if (!ch) return;
+  if (!confirm('清空所有场景卡片？')) return;
+  ch.scenes = [];
+  markChapterDirty(ch);
+  renderCorkboard();
+  toast('场景已清空', 'ok');
+});
+
+$('#compileScenesBtn').addEventListener('click', async () => {
+  const ch = currentChapter();
+  if (!ch) return;
+  const scenes = getScenes(ch);
+  if (!scenes.length) return toast('没有场景卡片可编译', 'err');
+  if (!confirm('将按场景顺序把梗概拼接为章节正文。这会追加到现有正文之后（不会覆盖），继续？')) return;
+
+  // 先备份当前正文
+  await snapshotNow('编译场景前备份');
+
+  // 组装内容：每个场景 = 场景标题 + 梗概 + 钩子
+  const parts = scenes.map((sc, i) => {
+    const title = `=== 场次 ${i + 1} ${sc.pov ? `· ${sc.pov}` : ''} ===`;
+    const locTime = [sc.location, sc.time].filter(Boolean).join(' · ');
+    const chars = sc.characters ? `【人物】${sc.characters}` : '';
+    const summary = sc.summary || '';
+    const hook = sc.hook ? `【钩子】${sc.hook}` : '';
+    return [title, locTime, chars, summary, hook].filter(Boolean).join('\n');
+  });
+  const compiled = parts.join('\n\n---\n\n');
+
+  // 追加到正文
+  const ta = $('#chContent');
+  const cur = ta.value.replace(/\s+$/, '');
+  ta.value = (cur ? `${cur}\n\n---\n\n` : '') + compiled;
+  ta.dispatchEvent(new Event('input'));
+  markChapterDirty(ch);
+  toast(`已编译 ${scenes.length} 个场景到正文`, 'ok');
+});
+
+/* ============================================================
  * 9. 设定库
  * ============================================================ */
 let bibleTab = 'outline';
@@ -2431,6 +2959,10 @@ function renderBible() {
   if (bibleTab === 'characters') return renderCharactersTab(host, n);
   if (bibleTab === 'world') return renderWorldTab(host, n);
   if (bibleTab === 'timeline') return renderTimelineTab(host, n);
+  if (bibleTab === 'timelineViz') return renderTimelineVizTab(host, n);
+  if (bibleTab === 'beats') return renderBeatsTab(host, n);
+  if (bibleTab === 'arcs') return renderArcsTab(host, n);
+  if (bibleTab === 'relations') return renderRelationsTab(host, n);
   if (bibleTab === 'threads') return renderThreadsTab(host, n);
   return renderStyleTab(host, n);
 }
@@ -2442,6 +2974,7 @@ function renderOutlineTab(host, n) {
       <h2>全书总纲
         <span style="flex:1"></span>
         <button class="btn btn-sm" id="aiOutline">AI 生成大纲</button>
+        <button class="btn btn-sm" id="aiFullOutline">从一句话生成全书大纲</button>
       </h2>
       <div class="grid2">
         ${field('一句话故事', 'logline', n.meta, { ph: '一个少年背着一把不能出鞘的剑，去杀他师傅。' })}
@@ -2568,6 +3101,63 @@ function renderOutlineTab(host, n) {
         closeModal();
         renderBible();
         saveNovelPart({ outline: n.outline }, `已写入 ${parsed.length} 卷`);
+      };
+    });
+  };
+
+  $('#aiFullOutline', host).onclick = async () => {
+    const logline = (n.meta?.logline || '').trim();
+    if (!logline) return toast('请先在「一句话故事」里填入核心设定', 'err');
+
+    const text = await runStream({
+      task: 'outline',
+      novelId: n.id,
+      payload: {
+        instruction: `你是一位资深网文策划。根据核心设定「${logline}」，为这部小说设计完整的分卷大纲与前 3 卷的章纲。
+
+要求：
+1. 输出 3-5 个分卷，每卷有卷名、卷纲（200-400字，包含主要冲突、人物弧光、收束点）
+2. 每卷给出 10-12 章的细纲，每章包含：章节名、场景、出场人物、核心事件、章末钩子
+3. 结构要有张力：起承转合、伏笔呼应、中点反转、高潮迭起
+4. 只输出结构化 Markdown，格式如下：
+
+## 第1卷 卷名
+> 卷纲描述…
+
+### 第1章 章节名
+场景：…
+出场人物：…
+核心事件：…
+章末钩子：…
+
+### 第2章 章节名
+...
+
+## 第2卷 卷名
+> 卷纲描述…
+
+### 第1章 章节名
+...`,
+      },
+    });
+
+    if (!text.trim()) return;
+    showModal(`<h3>全书大纲草案（基于：「${esc(logline)}」）</h3>
+      <div class="out" style="max-height:60vh">${mdLite(text)}</div>
+      <div class="modal-foot">
+        <button class="btn btn-text" id="folClose">关闭</button>
+        <button class="btn" id="folCopy">复制</button>
+        <button class="btn btn-primary" id="folApply">解析并写入大纲（覆盖现有）</button>
+      </div>`, (box) => {
+      box.querySelector('#folClose').onclick = closeModal;
+      box.querySelector('#folCopy').onclick = () => { navigator.clipboard.writeText(text); toast('已复制', 'ok'); };
+      box.querySelector('#folApply').onclick = () => {
+        const parsed = parseOutlineMarkdown(text);
+        if (!parsed.length) return toast('没解析出结构，可复制后手动粘贴', 'err');
+        n.outline.volumes = parsed;
+        closeModal();
+        renderBible();
+        saveNovelPart({ outline: n.outline }, `已写入 ${parsed.length} 卷，共 ${parsed.reduce((s,v)=>s+(v.chapters?.length||0),0)} 章`);
       };
     });
   };
@@ -2928,6 +3518,226 @@ function threadMeta(item) {
   return `第 ${nos[0]}–${nos[nos.length - 1]} 章 · 跨 ${nos.length} 章`;
 }
 
+/** 人物关系图谱：基于设定库与章节记忆自动生成人物关系网络 */
+function renderRelationsTab(host, n) {
+  // 收集所有角色（设定库 + 记忆）
+  const characters = new Map();
+  (n.bible?.characters || []).forEach((c) => {
+    characters.set(c.id, { ...c, fromBible: true });
+  });
+  const index = buildCharacterAppearances(n);
+  for (const [name] of index) {
+    const existing = [...characters.values()].find((c) => c.name === name || (c.keywords || []).includes(name));
+    if (!existing) {
+      characters.set(`mem_${name}`, { name, id: `mem_${name}`, fromMemory: true });
+    }
+  }
+
+  const charList = [...characters.values()];
+  if (charList.length < 2) {
+    host.innerHTML = `
+      <div class="bible-block">
+        <h2>人物关系图谱</h2>
+        <p class="dim">至少需要 2 个角色才能生成关系图。<br>先在「设定 → 人物」添加角色，或在章节记忆中出现更多人物。</p>
+      </div>`;
+    return;
+  }
+
+  // 从记忆中提取关系
+  const relations = new Map(); // key: "id1-id2" (sorted), value: { type, strength, evidence: [] }
+  const REL_TYPES = ['亲密', '敌对', '师徒', '亲属', '盟友', '竞争', '暗恋', '背叛', '保护', '利用'];
+
+  // 从设定库关系字段提取（新数据是 { to, type, note } 数组；老数据兼容「对象：关系」字符串）
+  (n.bible?.characters || []).forEach((c) => {
+    let entries = [];
+    if (Array.isArray(c.relations)) {
+      entries = c.relations
+        .map((r) => ({ to: String(r?.to || '').trim(), type: String(r?.type || '').trim() || '关联', note: String(r?.note || '').trim() }))
+        .filter((r) => r.to);
+    } else if (typeof c.relations === 'string' && c.relations.trim()) {
+      entries = c.relations.split(/[、,，;；\n]/).map((s) => s.trim()).filter(Boolean).map((s) => {
+        const m = s.match(/^(.+?)[：:]\s*(.+)$/);
+        return m ? { to: m[1].trim(), type: m[2].trim() || '关联', note: '' } : null;
+      }).filter(Boolean);
+    }
+    entries.forEach(({ to, type, note }) => {
+      const target = [...characters.values()].find((ch) => ch.name === to || (ch.keywords || []).includes(to));
+      if (!target || target.id === c.id) return;
+      const key = [c.id, target.id].sort().join('-');
+      if (!relations.has(key)) relations.set(key, { type, strength: 5, evidence: [] });
+      const rel = relations.get(key);
+      // 明确关系比共同出场推断更可信：更新类型，并抬到最高强度
+      if (type) rel.type = type;
+      rel.strength = Math.max(rel.strength, 5);
+      rel.evidence.push(`设定库：${c.name} → ${to} (${type})${note ? ` · ${note}` : ''}`);
+    });
+  });
+
+  // 从记忆推断关系：共同出场、状态变化提及
+  for (const [, chapters] of index) {
+    for (const ch of chapters) {
+      const mem = ch.memory || {};
+      const chars = [...new Set((mem.characters || []).map((c) => String(c)).filter(Boolean))];
+      for (let i = 0; i < chars.length; i++) {
+        for (let j = i + 1; j < chars.length; j++) {
+          const c1 = [...characters.values()].find((c) => c.name === chars[i] || (c.keywords || []).includes(chars[i]));
+          const c2 = [...characters.values()].find((c) => c.name === chars[j] || (c.keywords || []).includes(chars[j]));
+          if (c1 && c2 && c1.id !== c2.id) {
+            const key = [c1.id, c2.id].sort().join('-');
+            if (!relations.has(key)) relations.set(key, { type: '关联', strength: 1, evidence: [] });
+            const rel = relations.get(key);
+            rel.strength += 1;
+            rel.evidence.push(`第 ${ch.no} 章共同出场`);
+            if (mem.stateChanges?.some((s) => s.includes(chars[i]) && s.includes(chars[j]))) {
+              rel.strength += 2;
+              rel.evidence.push(`第 ${ch.no} 章状态变化关联`);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 生成节点和边数据
+  const nodes = [...characters.values()].map((c, i) => ({
+    id: c.id,
+    label: c.name,
+    group: c.fromBible ? 'bible' : 'memory',
+    size: 20 + Math.min(30, ([...index.values()].flat().filter((ch) => {
+      const mem = ch.memory || {};
+      return (mem.characters || []).some((cn) => cn === c.name || (c.keywords || []).includes(c.name));
+    }).length * 3)),
+    x: 200 + Math.cos((i / charList.length) * Math.PI * 2) * 180,
+    y: 200 + Math.sin((i / charList.length) * Math.PI * 2) * 180,
+  }));
+
+  const edges = [...relations.entries()].map(([key, rel]) => {
+    const [source, target] = key.split('-');
+    return { source, target, type: rel.type, strength: rel.strength, evidence: rel.evidence.slice(-3) };
+  });
+
+  // SVG 关系图
+  const svgWidth = 700;
+  const svgHeight = 500;
+
+  host.innerHTML = `
+    <div class="bible-block">
+      <h2>人物关系图谱
+        <span style="flex:1"></span>
+        <label class="find-check"><input type="checkbox" id="relShowLabels" checked /> 显示标签</label>
+        <label class="find-check"><input type="checkbox" id="relShowEvidence" /> 悬停显示证据</label>
+        <select class="input" id="relFilterType" style="width:auto;min-width:120px">
+          <option value="">全部关系</option>
+          ${REL_TYPES.map((t) => `<option value="${t}">${t}</option>`).join('')}
+          <option value="other">其他/推断</option>
+        </select>
+      </h2>
+      <p class="dim small">基于设定库关系字段 + 章节记忆共同出场/状态关联自动生成。节点大小=出场频度，边粗细=关联强度。拖拽节点可调整布局，双击节点跳转人物卡。</p>
+      <div class="relation-svg-wrap" style="position:relative;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;">
+        <svg id="relationSvg" width="${svgWidth}" height="${svgHeight}" style="display:block;"></svg>
+      </div>
+      <div class="relation-legend" style="margin-top:12px;display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--text-3)">
+        ${REL_TYPES.map((t) => `<span><span style="display:inline-block;width:12px;height:3px;background:var(--${t === '亲密' ? 'success' : t === '敌对' ? 'danger' : t === '师徒' ? 'warning' : 'accent'});vertical-align:middle;margin-right:4px;border-radius:2px;"></span>${t}</span>`).join('')}
+        <span><span style="display:inline-block;width:12px;height:3px;background:var(--text-4);vertical-align:middle;margin-right:4px;border-radius:2px;"></span>推断关联</span>
+      </div>
+    </div>`;
+
+  // 渲染 SVG
+  const svg = $('#relationSvg', host);
+  const showLabelsEl = $('#relShowLabels', host);
+  const showEvidenceEl = $('#relShowEvidence', host);
+  const filterTypeEl = $('#relFilterType', host);
+  let draggedNode = null;
+
+  function renderGraph() {
+    const filterType = filterTypeEl.value;
+    svg.innerHTML = '';
+
+    // 定义箭头标记
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    defs.innerHTML = `
+      <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="var(--text-3)" />
+      </marker>
+    `;
+    svg.appendChild(defs);
+
+    // 绘制边
+    edges.forEach((edge) => {
+      if (filterType && edge.type !== filterType && !(filterType === 'other' && !REL_TYPES.includes(edge.type))) return;
+      const sourceNode = nodes.find((n) => n.id === edge.source);
+      const targetNode = nodes.find((n) => n.id === edge.target);
+      if (!sourceNode || !targetNode) return;
+
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', sourceNode.x);
+      line.setAttribute('y1', sourceNode.y);
+      line.setAttribute('x2', targetNode.x);
+      line.setAttribute('y2', targetNode.y);
+      line.setAttribute('stroke', REL_TYPES.includes(edge.type) ? `var(--${edge.type === '亲密' ? 'success' : edge.type === '敌对' ? 'danger' : edge.type === '师徒' ? 'warning' : 'accent'})` : 'var(--text-4)');
+      line.setAttribute('stroke-width', Math.max(1, Math.min(5, edge.strength / 2)));
+      line.setAttribute('stroke-dasharray', REL_TYPES.includes(edge.type) ? 'none' : '4,4');
+      line.setAttribute('marker-end', 'url(#arrow)');
+      line.setAttribute('data-evidence', edge.evidence.join('\n'));
+      line.setAttribute('data-type', edge.type);
+      line.setAttribute('data-strength', edge.strength);
+      line.style.cursor = 'pointer';
+      if (showEvidenceEl.checked) {
+        line.addEventListener('mouseenter', (e) => {
+          const tooltip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+          tooltip.textContent = `${edge.type} (强度${edge.strength})\n${edge.evidence.join('\n')}`;
+          line.appendChild(tooltip);
+        });
+      }
+      svg.appendChild(line);
+    });
+
+    // 绘制节点
+    nodes.forEach((node) => {
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('class', 'relation-node');
+      g.style.cursor = 'move';
+      g.innerHTML = `
+        <circle cx="${node.x}" cy="${node.y}" r="${node.size}" fill="${node.group === 'bible' ? 'var(--brand)' : 'var(--accent)'}" stroke="var(--surface-1)" stroke-width="2" opacity="0.9" />
+        ${showLabelsEl.checked ? `<text x="${node.x}" y="${node.y + node.size + 14}" text-anchor="middle" font-size="11" fill="var(--text-1)" style="pointer-events:none;">${node.label}</text>` : ''}
+      `;
+      g.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        draggedNode = node;
+        g.style.cursor = 'grabbing';
+      });
+      g.addEventListener('dblclick', () => {
+        // 跳转到人物卡
+        const charId = node.id;
+        setView('bible');
+        $('#bibleTabs button[data-bible="characters"]')?.click();
+        requestAnimationFrame(() => {
+          const card = $$('.entry', $('#bibleBody')).find((el) => el.querySelector('[data-rk="name"]')?.value === node.label || el.querySelector('[data-rk="name"]')?.value === node.id);
+          if (card) { card.scrollIntoView({ block: 'center' }); card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 1400); }
+        });
+      });
+      svg.appendChild(g);
+    });
+  }
+
+  // 拖拽逻辑
+  svg.addEventListener('mousemove', (e) => {
+    if (!draggedNode) return;
+    const rect = svg.getBoundingClientRect();
+    draggedNode.x = Math.max(30, Math.min(svgWidth - 30, e.clientX - rect.left));
+    draggedNode.y = Math.max(30, Math.min(svgHeight - 30, e.clientY - rect.top));
+    renderGraph();
+  });
+  svg.addEventListener('mouseup', () => { draggedNode = null; });
+  svg.addEventListener('mouseleave', () => { draggedNode = null; });
+
+  showLabelsEl.onchange = renderGraph;
+  showEvidenceEl.onchange = renderGraph;
+  filterTypeEl.onchange = renderGraph;
+
+  renderGraph();
+}
+
 function renderThreadsTab(host, n) {
   const threads = collectThreads(n);
   const counts = {
@@ -2985,7 +3795,177 @@ function renderThreadsTab(host, n) {
   };
 }
 
-/* ---- 时间线 ---- */
+/** 人物弧光追踪：基于章节记忆自动生成每个角色的情感/状态曲线 */
+function renderArcsTab(host, n) {
+  const index = buildCharacterAppearances(n);
+  if (index.size === 0) {
+    host.innerHTML = `
+      <div class="bible-block">
+        <h2>人物弧光</h2>
+        <p class="dim">还没有足够的章节记忆来生成人物弧光。<br>先在「写作」里给章节「存章节记忆」，或去「设定 → 人物」里添加角色与关键词。</p>
+      </div>`;
+    return;
+  }
+
+  // 收集所有出场过的角色（来自设定库 + 记忆）
+  const characters = new Map();
+  // 设定库里的人物
+  (n.bible?.characters || []).forEach((c) => {
+    characters.set(c.id, { ...c, fromBible: true });
+  });
+  // 记忆里出现过的人物
+  for (const [name, chapters] of index) {
+    const existing = [...characters.values()].find((c) => c.name === name || (c.keywords || []).includes(name));
+    if (!existing) {
+      characters.set(`mem_${name}`, { name, id: `mem_${name}`, fromMemory: true });
+    }
+  }
+
+  const arcsHtml = [...characters.values()].map((char) => {
+    const appearances = appearancesForCharacter(char, index);
+    if (!appearances.length) return '';
+
+    const points = appearances.map((ch, idx) => {
+      const mem = ch.memory || {};
+      const state = mem.stateChanges?.join('；') || '';
+      const events = mem.events?.join('；') || '';
+      const unresolved = mem.unresolved?.join('；') || '';
+      return {
+        chapter: idx + 1,
+        title: ch.title,
+        chapterId: ch.id,
+        state,
+        events,
+        unresolved,
+        words: countWords(ch.content || ''),
+      };
+    });
+
+    const totalWords = points.reduce((s, p) => s + p.words, 0);
+    const latestState = points[points.length - 1]?.state || '无记录';
+
+    return `
+      <div class="arc-card" data-char-id="${char.id}">
+        <div class="arc-head">
+          <span class="arc-name">${esc(char.name)}</span>
+          <span class="arc-count">${points.length} 章 · ${totalWords} 字</span>
+          <button class="btn btn-sm btn-text arc-goto" data-ch="${points[points.length - 1].chapterId}">跳到最新</button>
+        </div>
+        <div class="arc-timeline">
+          ${points.map((p) => `
+            <div class="arc-point" data-ch="${p.chapterId}">
+              <span class="arc-ch">第 ${p.chapter} 章</span>
+              <span class="arc-title">${esc(p.title || '未命名')}</span>
+              ${p.state ? `<span class="arc-state">${esc(p.state)}</span>` : ''}
+              ${p.events ? `<span class="arc-events dim">${esc(p.events)}</span>` : ''}
+            </div>
+          `).join('')}
+        </div>
+        <div class="arc-summary">
+          <span class="arc-label">最新状态：</span>
+          <span class="arc-state">${esc(latestState)}</span>
+        </div>
+      </div>
+    `;
+  }).filter(Boolean).join('');
+
+  host.innerHTML = `
+    <div class="bible-block">
+      <h2>人物弧光</h2>
+      <p class="dim small">基于章节记忆自动提取每个角色的出场轨迹、状态变化与未决线索。点章次号可跳转正文。</p>
+      <div class="arcs-list">${arcsHtml}</div>
+    </div>`;
+
+  $$('.arc-goto', host).forEach((btn) => {
+    btn.onclick = () => openChapterFromIndex(btn.dataset.ch);
+  });
+  $$('.arc-point', host).forEach((pt) => {
+    pt.onclick = () => openChapterFromIndex(pt.dataset.ch);
+  });
+}
+
+/** Save the Cat 风格的故事节拍表 */
+function renderBeatsTab(host, n) {
+  // 标准 15 个节拍（Save the Cat）
+  const BEATS = [
+    { id: 'opening', name: 'Opening Image', zh: '开篇意象', pct: 1, desc: '故事开始时的世界面貌，主角的常态' },
+    { id: 'theme', name: 'Theme Stated', zh: '主题阐述', pct: 5, desc: '故事的核心主题被隐晦或直接地说出' },
+    { id: 'setup', name: 'Set-Up', zh: '铺垫', pct: 10, desc: '介绍主角世界、缺陷、利害关系、反派暗示' },
+    { id: 'catalyst', name: 'Catalyst', zh: '催化剂/激励事件', pct: 12, desc: '打破现状的事件，故事真正开始' },
+    { id: 'debate', name: 'Debate', zh: '犹豫/辩论', pct: 20, desc: '主角怀疑、抗拒、权衡利弊' },
+    { id: 'break2', name: 'Break into Two', zh: '跨入第二幕', pct: 25, desc: '主角主动选择踏上旅程，离开舒适区' },
+    { id: 'bstory', name: 'B Story', zh: 'B 线/副线', pct: 30, desc: '引入情感线/伙伴关系，映照主题' },
+    { id: 'fun', name: 'Fun & Games', zh: '趣味与游戏/承诺的娱乐', pct: 50, desc: '核心概念的兑现，类型片段的高潮堆砌' },
+    { id: 'midpoint', name: 'Midpoint', zh: '中点', pct: 50, desc: '假性胜利/失败，赌注升级，镜像结构' },
+    { id: 'badguys', name: 'Bad Guys Close In', zh: '反派逼近', pct: 62, desc: '内外压力加大，主角计划失效' },
+    { id: 'alllost', name: 'All Is Lost', zh: '万念俱灰/彻底失败', pct: 75, desc: '重大挫折，导师离世/背叛，象征性死亡' },
+    { id: 'darknight', name: 'Dark Night of the Soul', zh: '灵魂黑夜', pct: 80, desc: '绝望、反思、领悟主题真谛' },
+    { id: 'break3', name: 'Break into Three', zh: '跨入第三幕', pct: 85, desc: '融合 A/B 线，找到新方案，主动出击' },
+    { id: 'finale', name: 'Finale', zh: '终局/高潮', pct: 95, desc: '最终对决，主题具象化，世界改变' },
+    { id: 'finalimg', name: 'Final Image', zh: '终幕意象', pct: 100, desc: '与开篇呼应，展示主角蜕变后的新常态' },
+  ];
+
+  // 从章节/场景推算当前进度
+  const totalWords = (n.chapters || []).reduce((s, c) => s + countWords(c.content || ''), 0);
+  const targetWords = n.meta?.targetWordsPerChapter ? n.meta.targetWordsPerChapter * n.chapters.length : totalWords || 1;
+  const progress = Math.min(100, Math.round((totalWords / targetWords) * 100));
+
+  // 现有节拍数据
+  n.beats = n.beats || {};
+  BEATS.forEach((b) => { n.beats[b.id] = n.beats[b.id] || { chapterId: '', sceneIdx: -1, words: 0, note: '' }; });
+
+  const beatHtml = BEATS.map((b) => {
+    const data = n.beats[b.id];
+    const ch = data.chapterId ? n.chapters.find((c) => c.id === data.chapterId) : null;
+    const chTitle = ch ? `第 ${ch.no} 章《${ch.title}》` : '未关联';
+    const filled = !!data.chapterId;
+    return `
+      <div class="beat-row ${filled ? 'filled' : ''}" data-beat="${b.id}">
+        <div class="beat-header">
+          <span class="beat-num">${b.pct}%</span>
+          <span class="beat-name">${b.zh}</span>
+          <span class="beat-en dim">${b.name}</span>
+        </div>
+        <div class="beat-desc dim small">${b.desc}</div>
+        <div class="beat-link">
+          <input class="input" data-key="note" value="${esc(data.note || '')}" placeholder="备注：这一节拍发生了什么……" />
+          <select class="input beat-chapter" data-key="chapterId" style="max-width:220px">
+            <option value="">关联章节……</option>
+            ${(n.chapters || []).map((c) => `<option value="${c.id}" ${data.chapterId === c.id ? 'selected' : ''}>第 ${c.no} 章 ${esc(c.title || '未命名')}</option>`).join('')}
+          </select>
+          <input class="input" type="number" data-key="words" value="${data.words || ''}" placeholder="字数" min="0" step="100" style="width:80px" />
+          <button class="btn btn-sm btn-text beat-goto" data-ch="${data.chapterId}" ${!data.chapterId ? 'hidden' : ''}>跳转</button>
+        </div>
+        <div class="beat-progress">
+          <div class="beat-bar" style="width: ${b.pct}%"></div>
+          <div class="beat-marker" style="left: ${progress}%"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  host.innerHTML = `
+    <div class="bible-block">
+      <h2>结构/节拍表 <span class="dim">（Save the Cat 15 Beats）</span></h2>
+      <p class="dim small">对照《拯救大猫》15 个节拍规划故事骨架。每个节拍可关联章节、记录字数与备注；进度条显示全书完成度（${progress}%）。</p>
+      <div class="beats-list">${beatHtml}</div>
+    </div>
+  `;
+
+  // 绑定字段
+  $$('.beat-row', host).forEach((row) => {
+    const beatId = row.dataset.beat;
+    const data = n.beats[beatId];
+    bindFields(row, data, () => saveNovelPart({ beats: n.beats }));
+    row.querySelector('.beat-goto')?.addEventListener('click', () => {
+      if (data.chapterId) openChapterFromIndex(data.chapterId);
+    });
+    row.querySelector('.beat-chapter')?.addEventListener('change', () => {
+      data.chapterId = row.querySelector('.beat-chapter').value || '';
+      saveNovelPart({ beats: n.beats });
+    });
+  });
+}
 function renderTimelineTab(host, n) {
   host.innerHTML = `
     <div class="bible-block">
@@ -3021,6 +4001,200 @@ function renderTimelineTab(host, n) {
     renderBible();
     saveNovelPart({ bible: n.bible });
   };
+}
+
+/** 时间轴可视化：将时间线节点按时间顺序渲染为可交互的时间轴 */
+function renderTimelineVizTab(host, n) {
+  // 中文数字转阿拉伯数字
+  const chineseToNumber = (str) => {
+    const chineseNum = { '零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10, '百': 100, '千': 1000, '万': 10000 };
+    let result = 0, temp = 0;
+    for (const ch of str) {
+      if (chineseNum[ch] !== undefined) {
+        const val = chineseNum[ch];
+        if (val >= 10) {
+          if (temp === 0) temp = 1;
+          result += temp * val;
+          temp = 0;
+        } else {
+          temp = temp * 10 + val;
+        }
+      } else if (!isNaN(parseInt(ch))) {
+        temp = temp * 10 + parseInt(ch);
+      }
+    }
+    return result + temp;
+  };
+
+  const parseTime = (s) => {
+    const str = String(s || '');
+    const m = str.match(/(\d+)/);
+    if (m) return parseInt(m[1]);
+    const cm = str.match(/[一二三四五六七八九十百千万零两]+/);
+    if (cm) {
+      const v = chineseToNumber(cm[0]);
+      return v || null;
+    }
+    return null;
+  };
+
+  const timeline = (n.bible?.timeline || []).slice().sort((a, b) => {
+    const va = parseTime(a.time);
+    const vb = parseTime(b.time);
+    return (va ?? 999999) - (vb ?? 999999);
+  });
+
+  if (!timeline.length) {
+    host.innerHTML = `
+      <div class="bible-block">
+        <h2>时间轴</h2>
+        <p class="dim">还没有时间线节点。<br>先在「设定 → 时间线」里添加节点，或在「时间线」页签里录入。</p>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn btn-primary" id="goToTimeline">${ico('arrow-right')}去「时间线」页签添加</button>
+        </div>
+      </div>`;
+    $('#goToTimeline', host)?.addEventListener('click', () => {
+      $('#bibleTabs button[data-bible="timeline"]')?.click();
+    });
+    return;
+  }
+
+  const knownTimes = timeline.map((t) => parseTime(t.time)).filter((v) => v != null);
+  const minTime = knownTimes.length ? Math.min(...knownTimes) : 0;
+  const maxTime = knownTimes.length ? Math.max(...knownTimes) : Math.max(1, timeline.length - 1);
+  const span = maxTime - minTime || 1;
+  const sameTime = knownTimes.length > 0 && maxTime === minTime;
+
+  const svgWidth = 900;
+
+  host.innerHTML = `
+    <div class="bible-block">
+      <h2>时间轴
+        <span style="flex:1"></span>
+        <button class="btn btn-sm" id="addTlViz">${ico('plus')}新增节点</button>
+      </h2>
+      <p class="dim small">故事世界的关键时间点可视化。双击节点编辑详情；点节点跳转关联章节。</p>
+      <div class="timeline-viz-wrap" style="position:relative;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;">
+        <svg id="timelineSvg" viewBox="0 0 900 400" width="100%" style="display:block;height:auto;"></svg>
+      </div>
+      <div class="timeline-legend" style="margin-top:12px;display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--text-3)">
+        <span>● 主线事件</span>
+        <span>● 支线/背景</span>
+        <span style="border-bottom:1px dashed var(--text-4);">时间跨度：${knownTimes.length ? (minTime === maxTime ? String(minTime) : `${minTime} ~ ${maxTime}`) : '—'}</span>
+      </div>
+    </div>`;
+
+  const svg = $('#timelineSvg', host);
+
+  function renderViz() {
+    const parsed = timeline.map((t, i) => ({ ...t, index: i, timeVal: parseTime(t.time) }));
+    const groups = new Map();
+    parsed.forEach((e) => {
+      const key = e.timeVal == null ? `none-${e.index}` : `t-${e.timeVal}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(e);
+    });
+    parsed.forEach((e) => {
+      const key = e.timeVal == null ? `none-${e.index}` : `t-${e.timeVal}`;
+      const group = groups.get(key);
+      const pos = group.indexOf(e);
+      // 同一时间点有多个事件时，围绕刻度左右展开，避免叠成一个点
+      const spread = group.length > 1 ? (pos - (group.length - 1) / 2) * 26 : 0;
+      const base = e.timeVal == null
+        ? 60 + (parsed.length > 1 ? (e.index / (parsed.length - 1)) * (svgWidth - 120) : (svgWidth - 120) / 2)
+        : (sameTime ? svgWidth / 2 : 60 + ((e.timeVal - minTime) / span) * (svgWidth - 120));
+      e.x = Math.max(40, Math.min(svgWidth - 40, base + spread));
+      e.odd = e.index % 2 === 0;
+      e.y = e.odd ? 120 : 280;
+    });
+    const events = parsed;
+
+    svg.innerHTML = `
+      <defs>
+        <marker id="tlArrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L0,6 L9,3 z" fill="var(--brand)" />
+        </marker>
+      </defs>
+      <line x1="60" y1="200" x2="840" y2="200" stroke="var(--border-2)" stroke-width="2" marker-end="url(#tlArrow)" />
+    `;
+
+    events.forEach((e) => {
+      const x = e.x;
+      const y = e.y;
+      const isOdd = e.odd;
+
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', x);
+      line.setAttribute('y1', y);
+      line.setAttribute('x2', x);
+      line.setAttribute('y2', 200);
+      line.setAttribute('stroke', 'var(--border)');
+      line.setAttribute('stroke-width', '1');
+      line.setAttribute('stroke-dasharray', '4,4');
+      svg.appendChild(line);
+
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', x);
+      circle.setAttribute('cy', y);
+      circle.setAttribute('r', '10');
+      circle.setAttribute('fill', 'var(--brand)');
+      circle.setAttribute('stroke', 'var(--surface-1)');
+      circle.setAttribute('stroke-width', '3');
+      circle.setAttribute('cursor', 'pointer');
+      circle.setAttribute('data-idx', e.index);
+      circle.style.transition = 'r 0.15s, filter 0.15s';
+      circle.addEventListener('mouseenter', () => { circle.setAttribute('r', '14'); circle.style.filter = 'brightness(1.2)'; });
+      circle.addEventListener('mouseleave', () => { circle.setAttribute('r', '10'); circle.style.filter = 'none'; });
+      const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      tip.textContent = [e.time, e.title, e.desc].filter(Boolean).join('\n');
+      circle.appendChild(tip);
+      circle.addEventListener('click', () => {
+        if (e.chapterId) openChapterFromIndex(e.chapterId);
+      });
+      circle.addEventListener('dblclick', () => {
+        $('#bibleTabs button[data-bible="timeline"]')?.click();
+        setTimeout(() => {
+          const idx = (n.bible.timeline || []).findIndex((x) => x.id === e.id);
+          const entries = $$('#tlList .entry');
+          if (idx >= 0 && entries[idx]) entries[idx].querySelector('input[data-key="time"]')?.focus();
+        }, 100);
+      });
+      svg.appendChild(circle);
+
+      if (e.title) {
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', x);
+        text.setAttribute('y', isOdd ? y - 18 : y + 28);
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('font-size', '11');
+        text.setAttribute('fill', 'var(--text-1)');
+        text.setAttribute('style', 'pointer-events:none; white-space: nowrap;');
+        text.textContent = e.title.length > 12 ? e.title.slice(0, 12) + '…' : e.title;
+        svg.appendChild(text);
+      }
+
+      if (e.time) {
+        const timeText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        timeText.setAttribute('x', x);
+        timeText.setAttribute('y', isOdd ? y - 32 : y + 42);
+        timeText.setAttribute('text-anchor', 'middle');
+        timeText.setAttribute('font-size', '9');
+        timeText.setAttribute('fill', 'var(--text-3)');
+        timeText.setAttribute('style', 'pointer-events:none;');
+        timeText.textContent = e.time;
+        svg.appendChild(timeText);
+      }
+    });
+  }
+
+  renderViz();
+
+  $('#addTlViz', host)?.addEventListener('click', () => {
+    $('#bibleTabs button[data-bible="timeline"]')?.click();
+    setTimeout(() => {
+      $('#addTl', $('#bibleBody'))?.click();
+    }, 100);
+  });
 }
 
 /* ---- 文风与规则 ---- */
@@ -3704,6 +4878,11 @@ $('#findBtn').addEventListener('click', () => openFind());
 /* ---------------- 快捷键 ---------------- */
 document.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
+  if (e.altKey && String(e.key).toLowerCase() === 's') {
+    e.preventDefault();
+    sprintToggle();
+    return;
+  }
   if (e.key === 's') {
     e.preventDefault();
     manualSave();
@@ -3751,6 +4930,7 @@ function cmdkSource() {
   op('立即保存', 'check', manualSave, 'Ctrl+S');
   op('切换明暗主题', 'moon', () => $('#themeBtn').click());
   op('写作统计 / 日更目标', 'stamp', () => openStatsModal());
+  op('写作冲刺计时器', 'clock', () => sprintToggle(true), 'Ctrl+Alt+S');
   op('新建一卷（从当前章起）', 'layers', newVolumeFromCurrent);
 
   const go = (label, icon, v) => out.push({ g: '前往', label, icon, run: () => setView(v) });
@@ -3854,6 +5034,243 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ============================================================
+ * 11.6 写作冲刺计时器（番茄钟）
+ * ============================================================ */
+const sprint = {
+  phase: 'work',          // work | break
+  running: false,
+  remain: 25 * 60,
+  endAt: 0,
+  timer: null,
+  workMin: 25,
+  breakMin: 5,
+  auto: true,
+  sound: true,
+  sessions: 0,
+  focusSec: 0,
+  words: 0,
+  wordsAtStart: 0,
+  novelId: '',
+  baselineSet: false,
+};
+let sprintSaveT = null;
+
+function sprintDuration(phase = sprint.phase) {
+  const min = phase === 'work' ? sprint.workMin : sprint.breakMin;
+  return Math.max(1, Math.round(min * 60));
+}
+function sprintBookWords() {
+  return (S.novel?.chapters || []).reduce((sum, ch) => sum + countWords(ch.content || ''), 0);
+}
+function sprintFmt(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+function sprintRender() {
+  const panel = $('#sprintPanel');
+  if (!panel) return;
+  panel.classList.toggle('break', sprint.phase === 'break');
+  $('#sprintTimer').textContent = sprintFmt(sprint.remain);
+  $('#sprintPhase').textContent = sprint.phase === 'work'
+    ? (sprint.running ? '专注中 · 先别碰手机' : '专注时间')
+    : (sprint.running ? '休息中 · 站起来走走' : '休息时间');
+  $('#sprintStartText').textContent = sprint.running
+    ? '暂停'
+    : (sprint.remain < sprintDuration() ? '继续' : '开始');
+  $('#sprintStartIcon')?.setAttribute('href', sprint.running ? '#i-pause' : '#i-play');
+  const pct = Math.max(0, Math.min(100, (sprint.remain / sprintDuration()) * 100));
+  const bar = $('#sprintBar > i');
+  if (bar) bar.style.width = `${pct}%`;
+  $('#sprintTotalSessions').textContent = String(sprint.sessions);
+  $('#sprintTotalWords').textContent = fmtWords(sprint.words);
+  $('#sprintTotalTime').textContent = String(Math.round(sprint.focusSec / 60));
+}
+function sprintSave() {
+  clearTimeout(sprintSaveT);
+  sprintSaveT = setTimeout(() => {
+    api.send('/api/config', {
+      ui: {
+        sprint: {
+          workMin: Math.max(1, Math.round(sprint.workMin)),
+          breakMin: Math.max(1, Math.round(sprint.breakMin)),
+          auto: sprint.auto,
+          sound: sprint.sound,
+          sessions: sprint.sessions,
+          focusSec: sprint.focusSec,
+          words: sprint.words,
+        },
+      },
+    }).catch(() => {});
+  }, 500);
+}
+function sprintBeep() {
+  if (!sprint.sound) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const play = (freq, at, dur) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, ctx.currentTime + at);
+      gain.gain.linearRampToValueAtTime(0.16, ctx.currentTime + at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + at + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(ctx.currentTime + at);
+      osc.stop(ctx.currentTime + at + dur + 0.02);
+    };
+    play(660, 0, 0.18);
+    play(880, 0.22, 0.26);
+    setTimeout(() => { try { ctx.close(); } catch {} }, 900);
+  } catch {}
+}
+function sprintStopTimer() {
+  if (sprint.timer) clearInterval(sprint.timer);
+  sprint.timer = null;
+}
+function sprintStart() {
+  if (sprint.running) return;
+  if (sprint.remain <= 0) sprint.remain = sprintDuration();
+  sprint.running = true;
+  if (sprint.phase === 'work' && !sprint.baselineSet) {
+    sprint.wordsAtStart = sprintBookWords();
+    sprint.novelId = S.novel?.id || '';
+    sprint.baselineSet = true;
+  }
+  sprint.endAt = Date.now() + sprint.remain * 1000;
+  sprintStopTimer();
+  sprint.timer = setInterval(sprintTick, 250);
+  sprintRender();
+}
+function sprintPause() {
+  if (!sprint.running) return;
+  sprint.remain = Math.max(0, (sprint.endAt - Date.now()) / 1000);
+  sprint.running = false;
+  sprintStopTimer();
+  sprintRender();
+}
+function sprintTick() {
+  sprint.remain = Math.max(0, (sprint.endAt - Date.now()) / 1000);
+  if (sprint.remain <= 0) {
+    sprint.remain = 0;
+    sprintComplete();
+    return;
+  }
+  sprintRender();
+}
+function sprintSetPhase(phase, autoStart) {
+  sprintStopTimer();
+  sprint.running = false;
+  sprint.phase = phase;
+  sprint.remain = sprintDuration(phase);
+  if (autoStart) sprintStart();
+  else sprintRender();
+}
+function sprintComplete() {
+  sprintStopTimer();
+  sprint.running = false;
+  if (sprint.phase === 'work') {
+    sprint.sessions += 1;
+    sprint.focusSec += sprintDuration('work');
+    if (sprint.baselineSet && sprint.novelId && sprint.novelId === (S.novel?.id || '')) {
+      sprint.words += Math.max(0, sprintBookWords() - sprint.wordsAtStart);
+    }
+    sprint.baselineSet = false;
+    sprint.wordsAtStart = 0;
+    sprint.novelId = '';
+    sprintBeep();
+    toast(`专注结束：本场 ${Math.max(1, Math.round(sprint.workMin))} 分钟。${sprint.auto ? '休息一下。' : ''}`, 'ok');
+    sprintSave();
+    sprintSetPhase('break', sprint.auto);
+  } else {
+    sprintBeep();
+    toast('休息结束，回来继续写。', 'ok');
+    sprintSetPhase('work', sprint.auto);
+  }
+  sprintRender();
+}
+function sprintSkip() {
+  const next = sprint.phase === 'work' ? 'break' : 'work';
+  sprintSetPhase(next, false);
+  toast(next === 'break' ? '已跳到休息。' : '已跳到下一场专注。');
+}
+function sprintReset() {
+  sprintStopTimer();
+  sprint.running = false;
+  sprint.phase = 'work';
+  sprint.remain = sprintDuration('work');
+  sprint.baselineSet = false;
+  sprint.wordsAtStart = 0;
+  sprint.novelId = '';
+  sprintRender();
+}
+function sprintToggle(force) {
+  const panel = $('#sprintPanel');
+  if (!panel) return;
+  const show = typeof force === 'boolean' ? force : panel.hidden;
+  panel.hidden = !show;
+  document.body.classList.toggle('sprint-open', show);
+  $('#sprintBtn')?.setAttribute('aria-pressed', String(show));
+  if (show) sprintRender();
+}
+function sprintInit() {
+  const st = S.config?.ui?.sprint;
+  if (st && typeof st === 'object') {
+    if (Number.isFinite(Number(st.workMin))) sprint.workMin = Math.min(180, Math.max(1, Math.round(Number(st.workMin))));
+    if (Number.isFinite(Number(st.breakMin))) sprint.breakMin = Math.min(60, Math.max(1, Math.round(Number(st.breakMin))));
+    sprint.auto = st.auto !== false;
+    sprint.sound = st.sound !== false;
+    sprint.sessions = Math.max(0, Number(st.sessions) || 0);
+    sprint.focusSec = Math.max(0, Number(st.focusSec) || 0);
+    sprint.words = Math.max(0, Number(st.words) || 0);
+  }
+  $('#sprintWorkMin').value = String(sprint.workMin);
+  $('#sprintBreakMin').value = String(sprint.breakMin);
+  $('#sprintAutoSwitch').checked = sprint.auto;
+  $('#sprintSound').checked = sprint.sound;
+  if (!sprint.running) {
+    sprint.phase = 'work';
+    sprint.remain = sprintDuration('work');
+  }
+  sprintRender();
+}
+
+$('#sprintBtn')?.addEventListener('click', () => sprintToggle());
+$('#sprintClose')?.addEventListener('click', () => sprintToggle(false));
+$('#sprintStart')?.addEventListener('click', () => (sprint.running ? sprintPause() : sprintStart()));
+$('#sprintReset')?.addEventListener('click', sprintReset);
+$('#sprintSkip')?.addEventListener('click', sprintSkip);
+$('#sprintWorkMin')?.addEventListener('change', (e) => {
+  const v = Math.min(180, Math.max(1, Math.round(Number(e.target.value) || 25)));
+  e.target.value = String(v);
+  sprint.workMin = v;
+  if (!sprint.running && sprint.phase === 'work') sprint.remain = sprintDuration('work');
+  sprintRender();
+  sprintSave();
+});
+$('#sprintBreakMin')?.addEventListener('change', (e) => {
+  const v = Math.min(60, Math.max(1, Math.round(Number(e.target.value) || 5)));
+  e.target.value = String(v);
+  sprint.breakMin = v;
+  if (!sprint.running && sprint.phase === 'break') sprint.remain = sprintDuration('break');
+  sprintRender();
+  sprintSave();
+});
+$('#sprintAutoSwitch')?.addEventListener('change', (e) => {
+  sprint.auto = !!e.target.checked;
+  sprintSave();
+});
+$('#sprintSound')?.addEventListener('change', (e) => {
+  sprint.sound = !!e.target.checked;
+  sprintSave();
+});
+sprintRender();
+
+/* ============================================================
  * 12. 启动
  * ============================================================ */
 async function boot() {
@@ -3863,6 +5280,7 @@ async function boot() {
   } catch (err) {
     toast(`无法读取配置：${err.message}`, 'err');
   }
+  sprintInit();
   renderThemeIcon();
   try { await loadNovels(); } catch { S.novels = []; }
   setView('shelf');
@@ -3872,5 +5290,5 @@ async function boot() {
   }
 }
 
-window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk };
+window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle };
 boot();

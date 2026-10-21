@@ -159,7 +159,11 @@ export function getNovel(id) {
   });
   n.chapters ||= [];
   // 老作品没有 stage 字段：读出来统一按草稿处理，下一次保存就会写回磁盘
-  for (const c of n.chapters) if (!CHAPTER_STAGES.has(c.stage)) c.stage = 'draft';
+  // 章节序号也从数组顺序补一遍，避免旧文件里缺 no 时界面显示「第 undefined 章」
+  n.chapters.forEach((c, i) => {
+    c.no = i + 1;
+    if (!CHAPTER_STAGES.has(c.stage)) c.stage = 'draft';
+  });
   n.meta = { ...blankNovel().meta, ...(n.meta || {}) };
   // 记下磁盘上的字数，saveNovel 用它判断这次落盘是不是「骤降」
   lastWrittenWords.set(n.id, (n.chapters || []).reduce((s, c) => s + (c.words || countWords(c.content || '')), 0));

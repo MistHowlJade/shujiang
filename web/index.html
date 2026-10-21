@@ -42,9 +42,13 @@
   <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h13"/><path d="m13 6 6 6-6 6"/></symbol>
   <symbol id="i-book-open" viewBox="0 0 24 24"><path d="M12 6.5C10.5 5 8.3 4.3 4.5 4.3v13.4c3.8 0 6 .7 7.5 2.3 1.5-1.6 3.7-2.3 7.5-2.3V4.3c-3.8 0-6 .7-7.5 2.2Z"/><path d="M12 6.5V20"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.2V12l3.2 1.9"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></symbol>
   <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 3.8V9h-5.2"/></symbol>
   <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 7H5V3"/><path d="M5.2 7.3A8 8 0 1 1 6.5 17"/></symbol>
   <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 7h4V3"/><path d="M18.8 7.3A8 8 0 1 0 17.5 17"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21h-3.4a1 1 0 0 1-.9-1.3l-1-3a1 1 0 0 1 1.7-1.3h.2"/></symbol>
+  <symbol id="i-forward" viewBox="0 0 24 24"><path d="m5 5 9 7-9 7z"/><path d="M19 5v14"/></symbol>
 </svg>
 
 <div class="app">
@@ -149,6 +153,7 @@
                 <button class="icon-btn sm" id="redoBtn" title="重做（Ctrl+Shift+Z）" disabled><svg class="ico"><use href="#i-redo" /></svg></button>
                 <button class="icon-btn sm" id="formatBtn" title="一键排版：段落首行缩进两格"><svg class="ico"><use href="#i-indent" /></svg></button>
                 <button class="icon-btn sm" id="previewBtn" title="预览本章"><svg class="ico"><use href="#i-eye" /></svg></button>
+                <button class="icon-btn sm" id="sprintBtn" title="写作冲刺计时器（Ctrl+Alt+S）" aria-pressed="false"><svg class="ico"><use href="#i-clock" /></svg></button>
               </div>
             </div>
             <div class="editor-wrap">
@@ -184,6 +189,7 @@
               <button data-tab="write" class="on">写作</button>
               <button data-tab="check">检查</button>
               <button data-tab="context">资料</button>
+              <button data-tab="scenes">场景</button>
             </div>
 
             <div class="assist-body">
@@ -271,6 +277,24 @@
                 <div class="ctx-stats" id="ctxStats"></div>
                 <pre class="ctx-preview" id="ctxPreview"></pre>
               </div>
+
+              <!-- 场景拆解 / 幕布 -->
+              <div class="assist-pane" data-pane="scenes">
+                <div class="card">
+                  <div class="card-head">
+                    <h3>场景卡片</h3>
+                    <span class="dim small" id="scenesInfo"></span>
+                  </div>
+                  <div class="btn-row wrap">
+                    <button class="btn btn-sm btn-primary" id="scenesFromOutline">从章纲生成场景</button>
+                    <button class="btn btn-sm" id="addSceneBtn"><svg class="ico"><use href="#i-plus" /></svg>新增场景</button>
+                    <button class="btn btn-sm btn-primary" id="compileScenesBtn"><svg class="ico"><use href="#i-download" /></svg>编译成正文</button>
+                    <button class="btn btn-sm btn-text" id="scenesClear">清空</button>
+                  </div>
+                  <p class="dim small">拖拽卡片调整顺序；双击卡片编辑；点「编译成正文」将场景梗概按顺序拼接为章节内容（保留原有正文前的内容）。</p>
+                </div>
+                <div class="corkboard" id="corkboard"></div>
+              </div>
             </div>
           </aside>
         </div>
@@ -284,6 +308,10 @@
             <button data-bible="characters">人物</button>
             <button data-bible="world">世界观</button>
             <button data-bible="timeline">时间线</button>
+            <button data-bible="timelineViz">时间轴</button>
+            <button data-bible="beats">结构/节拍</button>
+            <button data-bible="arcs">人物弧光</button>
+            <button data-bible="relations">关系图谱</button>
             <button data-bible="threads">线索</button>
             <button data-bible="style">文风与规则</button>
           </div>
@@ -391,6 +419,33 @@
 </div>
 
 <div class="toast-wrap" id="toastWrap"></div>
+
+<!-- 写作冲刺计时器 -->
+<div class="sprint-panel" id="sprintPanel" hidden>
+  <div class="sprint-head">
+    <span class="sprint-title">写作冲刺</span>
+    <button class="icon-btn sm" id="sprintClose" title="关闭"><svg class="ico"><use href="#i-x" /></svg></button>
+  </div>
+  <div class="sprint-timer" id="sprintTimer">25:00</div>
+  <div class="sprint-phase" id="sprintPhase">专注时间</div>
+  <div class="sprint-bar" id="sprintBar"><i></i></div>
+  <div class="sprint-controls">
+    <button class="btn btn-primary" id="sprintStart"><svg class="ico"><use id="sprintStartIcon" href="#i-play" /></svg><span id="sprintStartText">开始</span></button>
+    <button class="btn btn-text" id="sprintReset"><svg class="ico"><use href="#i-rotate" /></svg>重置</button>
+    <button class="btn btn-text" id="sprintSkip"><svg class="ico"><use href="#i-forward" /></svg>跳过</button>
+  </div>
+  <div class="sprint-settings">
+    <label>专注 <input type="number" id="sprintWorkMin" min="1" max="180" value="25" /> 分</label>
+    <label>休息 <input type="number" id="sprintBreakMin" min="1" max="60" value="5" /> 分</label>
+    <label class="check"><input type="checkbox" id="sprintAutoSwitch" checked /> 自动切换</label>
+    <label class="check"><input type="checkbox" id="sprintSound" checked /> 提示音</label>
+  </div>
+  <div class="sprint-stats">
+    <div class="stat"><span id="sprintTotalSessions">0</span> 场</div>
+    <div class="stat"><span id="sprintTotalWords">0</span> 字</div>
+    <div class="stat"><span id="sprintTotalTime">0</span> 分钟</div>
+  </div>
+</div>
 
 <div class="diff-panel" id="diffPanel" hidden>
   <div class="diff-head">
