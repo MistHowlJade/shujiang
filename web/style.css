@@ -859,6 +859,55 @@ kbd {
 
 /* 编辑区 */
 .pane-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--paper); }
+
+/* 专注写作：收起导航、章节栏和助手栏，只留稿纸 */
+.focus-bar {
+  display: none; flex: 0 0 52px; min-height: 52px;
+  align-items: center; justify-content: space-between; gap: 18px;
+  padding: 0 22px; background: var(--surface-1); border-bottom: 1px solid var(--border);
+}
+.app.focus-mode .focus-bar { display: flex; }
+.focus-bar-id { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.focus-bar-kicker {
+  flex: 0 0 auto; color: var(--accent-hover); font-size: 10px;
+  font-weight: 600; letter-spacing: .1em;
+}
+.focus-bar-title {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-1); font-size: 13px; font-weight: 600; letter-spacing: -.01em;
+}
+.focus-bar-meta { flex: 0 0 auto; color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.focus-bar-end { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.focus-goal {
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 3px 9px; border: 1px solid var(--border); border-radius: var(--r-full);
+  background: var(--surface-2); color: var(--text-3); font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.focus-goal.done { color: var(--success); border-color: var(--success); background: var(--success-bg); }
+.app.focus-mode .rail,
+.app.focus-mode .topbar,
+.app.focus-mode .pane-chapters,
+.app.focus-mode .pane-assist { display: none; }
+.app.focus-mode .shell { width: 100%; }
+.app.focus-mode .studio { grid-template-columns: minmax(0, 1fr); }
+.app.focus-mode .pane-editor {
+  width: 100%; max-width: 980px; margin: 0 auto;
+  border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+}
+.app.focus-mode .editor-head { display: none; }
+.app.focus-mode .editor { max-width: 780px; padding-top: 34px; }
+.app.focus-mode .editor-foot { padding: 0 32px; }
+.app.focus-mode .editor-foot .keyhints { display: none; }
+@media (max-width: 760px) {
+  .focus-bar { padding: 0 14px; gap: 10px; }
+  .focus-bar-kicker { display: none; }
+  .focus-bar-meta { display: none; }
+  .focus-goal { max-width: 150px; }
+  .app.focus-mode .pane-editor { border-left: 0; border-right: 0; }
+  .app.focus-mode .editor { padding-left: 24px; padding-right: 24px; }
+  .app.focus-mode .editor-foot { padding: 0 24px; }
+}
 .editor-head {
   flex: 0 0 auto; height: 44px; display: flex; align-items: center; gap: 12px;
   padding: 0 20px 0 28px; border-bottom: 1px solid var(--border);

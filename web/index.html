@@ -29,6 +29,7 @@
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5.5A1.5 1.5 0 0 0 13.5 4H6a2 2 0 0 0-2 2v7.5A1.5 1.5 0 0 0 5.5 15"/></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-focus" viewBox="0 0 24 24"><path d="M9 4H4v5M15 4h5v5M20 15v5h-5M4 15v5h5"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-indent" viewBox="0 0 24 24"><path d="M4 6h16M9 12h11M9 18h11"/><path d="m4 10 3 2-3 2z" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-13.7-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 13.7 4.9L20 16"/><path d="M20 20v-4h-4"/></symbol>
@@ -80,6 +81,7 @@
       <div class="topbar-mid" id="topbarMid"></div>
       <div class="topbar-right">
         <span class="save-pill" id="savePill">已保存</span>
+        <button class="icon-btn" id="focusBtn" title="专注写作（Ctrl+Alt+F）" aria-label="专注写作" aria-pressed="false"><svg class="ico"><use href="#i-focus" /></svg></button>
         <button class="icon-btn" id="themeBtn" title="切换明暗主题"></button>
       </div>
     </header>
@@ -147,6 +149,17 @@
 
           <!-- 编辑区 -->
           <section class="pane-editor">
+            <div class="focus-bar" id="focusBar" hidden>
+              <div class="focus-bar-id">
+                <span class="focus-bar-kicker">专注写作</span>
+                <span class="focus-bar-title" id="focusTitle"></span>
+                <span class="focus-bar-meta" id="focusMeta"></span>
+              </div>
+              <div class="focus-bar-end">
+                <span class="focus-goal" id="focusGoal"></span>
+                <button class="btn btn-sm btn-text" id="focusExit" title="退出专注（Esc）">退出专注 <kbd>Esc</kbd></button>
+              </div>
+            </div>
             <div class="editor-head">
               <input id="chTitle" class="ch-title" placeholder="章节标题" />
               <div class="pane-tools">

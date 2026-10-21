@@ -74,7 +74,15 @@ $('#modalMask').addEventListener('mousedown', (e) => {
   if (e.target.id === 'modalMask' && !S.batchController) closeModal();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !$('#modalMask').hidden && !S.batchController) closeModal();
+  if (e.key !== 'Escape') return;
+  // 弹窗、命令面板、阅读器、浮层和选中工具条优先处理 Esc，避免误退出专注模式
+  if (!$('#modalMask').hidden && !S.batchController) { closeModal(); return; }
+  if (S.batchController) return;
+  if ($('#cmdkMask') && !$('#cmdkMask').hidden) return;
+  if ($('#readerMask')) return;
+  if (document.querySelector('.popmenu')) return;
+  if ($('#selToolbar') && !$('#selToolbar').hidden) return;
+  if (S.focusMode) exitFocus();
 });
 
 /* ============================================================
@@ -196,6 +204,7 @@ const S = {
   controller: null,
   batchController: null,   // 批量补记忆：跑的时候不许关弹窗，也不许再起别的 AI 任务
   stageFilter: '',         // 章节列表筛选：'' / 'open' / 'draft' / 'revising' / 'done'
+  focusMode: false,        // 专注写作模式：只留稿纸
   threadFilter: 'all',     // 线索页筛选：all / unresolved / foreshadowing
   revisionDraftChapterId: null, // 修订输入框里未提交的草稿属于哪一章
   out: '',
@@ -234,6 +243,7 @@ function refreshSavePill() {
  * 3. 视图
  * ============================================================ */
 function setView(v) {
+  if (v !== 'studio' && S.focusMode) exitFocus();
   S.view = v;
   $$('.view').forEach((el) => el.classList.toggle('on', el.id === `view-${v}`));
   $$('#topnav .tab').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
@@ -2334,9 +2344,67 @@ function renderWordChip() {
       ? `目标 ${fmtWords(target)} 字 · 已完成 ${pct}%（点击修改）`
       : '点击设置本章目标字数';
   el.setAttribute('aria-label', el.title);
+  renderFocusBar();
+}
+
+/** 专注模式顶部细栏：当前章节、字数与目标进度 */
+function renderFocusBar() {
+  const title = $('#focusTitle');
+  const meta = $('#focusMeta');
+  const goal = $('#focusGoal');
+  if (!title || !meta || !goal) return;
+  const ch = currentChapter();
+  if (!ch || !S.novel) {
+    title.textContent = '未选择章节';
+    meta.textContent = '';
+    goal.textContent = '';
+    goal.classList.remove('done');
+    return;
+  }
+  const i = S.novel.chapters.indexOf(ch);
+  const words = countWords(ch.content);
+  const target = targetOf(ch);
+  const pct = progressOf(ch);
+  title.textContent = ch.title || '未命名';
+  meta.textContent = `第 ${i + 1} / ${S.novel.chapters.length} 章 · ${fmtWords(words)} 字`;
+  goal.textContent = target ? `目标 ${fmtWords(target)} · ${pct}%` : '未设目标';
+  goal.classList.toggle('done', !!target && words >= target);
+  goal.title = target
+    ? `本章目标 ${fmtWords(target)} 字，已完成 ${pct}%`
+    : '退出专注后可在字数胶囊里设置目标';
+}
+
+/** 进入专注写作：只留稿纸，Esc 退出 */
+function enterFocus() {
+  if (!S.novel) return toast('先打开一部作品', 'err');
+  if (!currentChapter()) return toast('先打开一章再专注', 'err');
+  if (S.view !== 'studio') setView('studio');
+  S.focusMode = true;
+  document.querySelector('.app')?.classList.add('focus-mode');
+  const bar = $('#focusBar');
+  if (bar) bar.hidden = false;
+  $('#focusBtn')?.setAttribute('aria-pressed', 'true');
+  renderFocusBar();
+  const ta = $('#chContent');
+  if (ta && !ta.disabled) ta.focus({ preventScroll: true });
+}
+
+function exitFocus() {
+  if (!S.focusMode) return;
+  S.focusMode = false;
+  document.querySelector('.app')?.classList.remove('focus-mode');
+  const bar = $('#focusBar');
+  if (bar) bar.hidden = true;
+  $('#focusBtn')?.setAttribute('aria-pressed', 'false');
+}
+
+function toggleFocus() {
+  if (S.focusMode) exitFocus();
+  else enterFocus();
 }
 
 function renderStudio() {
+  if (!S.novel && S.focusMode) exitFocus();
   const wrap = $('.editor-wrap');
   const empty = $('#editorEmpty');
   const setEmpty = (on, title, text, cta) => {
@@ -3040,6 +3108,8 @@ $('#chWords').addEventListener('click', () => {
   if (!ch) return;
   openChapterTargetModal(S.novel.chapters.indexOf(ch));
 });
+$('#focusBtn').addEventListener('click', toggleFocus);
+$('#focusExit').addEventListener('click', exitFocus);
 
 $('#coEdit').addEventListener('click', openChapterOutlineModal);
 $('#coLocate').addEventListener('click', () => {
@@ -6652,6 +6722,11 @@ document.addEventListener('keydown', (e) => {
     openChapterBoard();
     return;
   }
+  if (e.altKey && String(e.key).toLowerCase() === 'f') {
+    e.preventDefault();
+    toggleFocus();
+    return;
+  }
   if (e.key === 's') {
     e.preventDefault();
     manualSave();
@@ -6686,6 +6761,7 @@ function cmdkSource() {
   if (S.novel) {
     op('生成本章', 'spark', () => { setView('studio'); showAssistTab('write'); generateChapter(); }, 'Ctrl+Shift+↵');
     op('阅读模式', 'book-open', () => { setView('studio'); openReader(); });
+    op(S.focusMode ? '退出专注写作' : '进入专注写作', 'focus', toggleFocus, 'Ctrl+Alt+F');
     op('续写当前章', 'pen', () => { setView('studio'); showAssistTab('write'); continueWriting(); }, 'Ctrl+↵');
     op('一致性检查', 'shield', () => { setView('studio'); showAssistTab('check'); $('#consistencyBtn').click(); });
     op('责编评审', 'stamp', () => { setView('studio'); showAssistTab('check'); $('#reviewBtn').click(); });
@@ -7076,5 +7152,5 @@ async function boot() {
   }
 }
 
-window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, openChapterTargetModal, restoreNovelBackup };
+window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, openChapterTargetModal, toggleFocus, restoreNovelBackup };
 boot();
