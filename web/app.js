@@ -901,6 +901,338 @@ function openHealthReport() {
 $('#healthBtn')?.addEventListener('click', openHealthReport);
 
 /* ============================================================
+ * 4.8 文字校对（本地规则）
+ * ------------------------------------------------------------
+ * 只查“排版上明显不对劲”的地方：连续标点、标点前后空格、
+ * 中文里的半角标点、段首标点、常见叠字、英文直引号、
+ * 引号/括号数量、段落收尾。全部在浏览器里跑，不调模型。
+ * ============================================================ */
+const PROOF_KINDS = {
+  punct: '标点',
+  quote: '引号/括号',
+  typo: '叠字',
+  ending: '收尾',
+};
+const PROOF_MAX_CHAPTER_ISSUES = 60;
+const PROOF_PAGE = 120;
+
+function proofText(text) {
+  return String(text || '').replace(/\r\n?/g, '\n');
+}
+
+function proofParagraphs(content) {
+  const out = [];
+  let at = 0;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const text = line.trim();
+    if (text) {
+      const start = at + line.indexOf(text);
+      out.push({ text, start, end: start + text.length });
+    }
+    at += line.length + 1;
+  }
+  return out;
+}
+
+function proofSnippet(content, start, end) {
+  const left = Math.max(0, start - 22);
+  const right = Math.min(content.length, end + 22);
+  const prefix = left > 0 ? '…' : '';
+  const suffix = right < content.length ? '…' : '';
+  const raw = content.slice(left, right).replace(/\n/g, ' ');
+  return {
+    snippet: `${prefix}${raw}${suffix}`,
+    markStart: prefix.length + Math.max(0, start - left),
+    markEnd: prefix.length + Math.max(0, Math.min(end, right) - left),
+  };
+}
+
+function proofIssue(info, content, paras, type, message, start, end, opt = {}) {
+  const s = Math.max(0, Math.min(content.length, Number(start) || 0));
+  const rawEnd = Number.isFinite(Number(end)) ? Number(end) : s;
+  const e = Math.max(s, Math.min(content.length, rawEnd));
+  let snippet = opt.snippet;
+  let markStart = 0;
+  let markEnd = 0;
+  if (snippet !== undefined) {
+    snippet = String(snippet).replace(/\n/g, ' ');
+  } else {
+    const part = proofSnippet(content, s, e);
+    snippet = part.snippet;
+    markStart = part.markStart;
+    markEnd = part.markEnd;
+  }
+  let loc = opt.loc;
+  if (!loc) {
+    const i = paras.findIndex((p) => s >= p.start && s <= p.end);
+    loc = i >= 0 ? `第 ${i + 1} 段` : '全章';
+  }
+  return {
+    chId: info.id,
+    no: info.no,
+    title: info.title,
+    type,
+    message,
+    snippet,
+    markStart,
+    markEnd,
+    start: s,
+    end: e,
+    loc,
+  };
+}
+
+function scanProofChapter(ch, index) {
+  const content = proofText(ch.content);
+  const info = {
+    id: ch.id,
+    no: Number(ch.no) || (index >= 0 ? index + 1 : 1),
+    title: ch.title || '未命名',
+  };
+  const paras = proofParagraphs(content);
+  const issues = [];
+  const seen = new Set();
+  const add = (type, message, start, end, opt = {}) => {
+    if (issues.length >= 1000) return; // 病理级重复文本的保险丝
+    const item = proofIssue(info, content, paras, type, message, start, end, opt);
+    const key = `${type}|${item.start}|${item.end}|${message}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    issues.push(item);
+  };
+
+  // 常见叠字误写。只列高频虚词，避免把“看看”“慢慢”这类正常叠词误报。
+  for (const m of content.matchAll(/(的的|了了|地地|得得|着着|是是|在在|我我|你你|他他|她她|它它|们们|和和|与与|就就|都都|也也|又又|很很|不不|这这|那那|么么)/g)) {
+    add('typo', `疑似叠字「${m[0]}」`, m.index, m.index + m[0].length);
+  }
+
+  // 连续标点（省略号、破折号不在此列）
+  for (const m of content.matchAll(/([，。；：、])\1+/g)) {
+    add('punct', `连续标点「${m[0]}」`, m.index, m.index + m[0].length);
+  }
+
+  // 标点前后的空格 / 全角空格
+  for (const m of content.matchAll(/[ \t\u3000]+([，。！？；：、])/g)) {
+    add('punct', `标点「${m[1]}」前多了空格`, m.index, m.index + m[0].length);
+  }
+  for (const m of content.matchAll(/([，。！？；：、])([ \t\u3000]+)/g)) {
+    add('punct', `标点「${m[1]}」后多了空格`, m.index + 1, m.index + m[0].length);
+  }
+
+  // 中文正文里的半角标点
+  const asciiNames = { ',': '逗号', ';': '分号', ':': '冒号', '.': '句号', '!': '感叹号', '?': '问号' };
+  for (const m of content.matchAll(/([\u4e00-\u9fff])([,.;:!?])/g)) {
+    add('punct', `中文里用了半角${asciiNames[m[2]] || '标点'}「${m[2]}」`, m.index + 1, m.index + 2);
+  }
+
+  // 英文直引号：中文稿里常见，统一成中文引号通常更好
+  const straightQuotes = [...content.matchAll(/"/g)];
+  if (straightQuotes.length && /[\u4e00-\u9fff]/.test(content)) {
+    add('quote', `本章有 ${straightQuotes.length} 个英文直引号（"）`, straightQuotes[0].index, straightQuotes[0].index + 1, { loc: '全章' });
+  }
+
+  // 引号 / 括号数量：不配对时至少值得回头确认
+  const pairs = [
+    ['“', '”', '中文双引号'],
+    ['‘', '’', '中文单引号'],
+    ['（', '）', '圆括号'],
+    ['【', '】', '方括号'],
+    ['《', '》', '书名号'],
+    ['「', '」', '直角引号'],
+    ['『', '』', '直角单引号'],
+  ];
+  for (const [open, close, label] of pairs) {
+    const a = content.split(open).length - 1;
+    const b = content.split(close).length - 1;
+    if (a === b) continue;
+    const at = [content.indexOf(open), content.indexOf(close)].filter((n) => n >= 0).sort((x, y) => x - y)[0] ?? 0;
+    add('quote', `${label}数量不配对：${open} ${a} / ${close} ${b}`, at, at + 1, {
+      loc: '全章',
+      snippet: `${open} ${a} 个 · ${close} ${b} 个`,
+    });
+  }
+
+  for (const p of paras) {
+    // 段首标点
+    if (/^[，。！？；：、]/.test(p.text)) {
+      add('punct', `段落以标点「${p.text[0]}」开头`, p.start, p.start + 1);
+    }
+
+    // 段落收尾：太短的段落可能是有意为之，不报
+    if (p.text.length >= 24) {
+      const last = p.text[p.text.length - 1];
+      if (/[，,、；;]$/.test(p.text)) {
+        add('ending', `段落以「${last}」结尾，可能没写完`, p.end - 1, p.end);
+      } else if (!/[。！？…—!?.”’」』）】》："]$/.test(p.text)) {
+        add('ending', '段落末尾缺少句号或收束标点', p.end - 1, p.end);
+      }
+    }
+  }
+
+  issues.sort((a, b) => a.start - b.start || a.type.localeCompare(b.type));
+  return {
+    ...info,
+    words: countWords(content),
+    chars: content.length,
+    issues: issues.slice(0, PROOF_MAX_CHAPTER_ISSUES),
+    capped: issues.length > PROOF_MAX_CHAPTER_ISSUES,
+  };
+}
+
+function buildProofReport(scope) {
+  const all = S.novel?.chapters || [];
+  const targets = scope === 'book' ? all : all.filter((ch) => ch.id === S.chapterId);
+  const chapters = targets.map((ch) => scanProofChapter(ch, all.indexOf(ch)));
+  const issues = chapters.flatMap((ch) => ch.issues);
+  return {
+    scope,
+    chapters,
+    issues,
+    words: chapters.reduce((sum, ch) => sum + ch.words, 0),
+  };
+}
+
+function proofSnippetHtml(issue) {
+  const text = issue.snippet || '';
+  if (!(issue.markEnd > issue.markStart)) return esc(text);
+  return `${esc(text.slice(0, issue.markStart))}<mark>${esc(text.slice(issue.markStart, issue.markEnd))}</mark>${esc(text.slice(issue.markEnd))}`;
+}
+
+async function openProof() {
+  if (!S.novel) return toast('先打开作品', 'err');
+  await saveChapterNow().catch(() => {});
+  const hasChapter = !!currentChapter();
+  let scope = hasChapter ? 'chapter' : 'book';
+  let report = buildProofReport(scope);
+  let filter = 'all';
+  let limit = PROOF_PAGE;
+  let groupScroll = 0;
+
+  const box = showModal(`
+    <h3>文字校对</h3>
+    <p class="modal-sub">检查标点、引号、括号、常见叠字和段落收尾。全部在本机用规则扫描，不调用模型，不消耗 token；只提示，不改正文。点任意问题可直接跳到对应位置。</p>
+    <div class="proof-top">
+      <div class="segmented proof-scope" id="proofScope">
+        <button type="button" data-proof-scope="chapter" class="${scope === 'chapter' ? 'on' : ''}" ${hasChapter ? '' : 'disabled'}>当前章</button>
+        <button type="button" data-proof-scope="book" class="${scope === 'book' ? 'on' : ''}">全书</button>
+      </div>
+      <div class="proof-sum" id="proofSum"></div>
+    </div>
+    <div id="proofBody"></div>
+    <div class="modal-foot">
+      <span class="proof-note">本地规则 · 不会自动修改正文</span>
+      <button class="btn btn-primary" id="proofClose">关闭</button>
+    </div>`, (b) => {
+    b.querySelector('#proofClose').onclick = closeModal;
+    b.querySelectorAll('[data-proof-scope]').forEach((btn) => {
+      btn.onclick = () => {
+        if (btn.disabled) return;
+        scope = btn.dataset.proofScope;
+        filter = 'all';
+        limit = PROOF_PAGE;
+        groupScroll = 0;
+        report = buildProofReport(scope);
+        b.querySelectorAll('[data-proof-scope]').forEach((x) => x.classList.toggle('on', x === btn));
+        render();
+      };
+    });
+  }, { wide: true });
+
+  const sumEl = box.querySelector('#proofSum');
+  const bodyEl = box.querySelector('#proofBody');
+  const chapterMap = () => new Map(report.chapters.map((ch) => [ch.id, ch]));
+
+  const render = () => {
+    const allIssues = report.issues;
+    const total = allIssues.length;
+    const counts = { punct: 0, quote: 0, typo: 0, ending: 0 };
+    for (const issue of allIssues) counts[issue.type] = (counts[issue.type] || 0) + 1;
+    const filtered = filter === 'all' ? allIssues : allIssues.filter((issue) => issue.type === filter);
+    const shown = filtered.map((issue, idx) => ({ issue, idx })).slice(0, limit);
+    const groupCounts = new Map();
+    for (const issue of filtered) groupCounts.set(issue.chId, (groupCounts.get(issue.chId) || 0) + 1);
+    const chapters = chapterMap();
+
+    sumEl.innerHTML = `扫描 <b>${report.chapters.length}</b> 章 · ${fmtWords(report.words)} 字 · 发现 <b>${total}</b> 处`;
+
+    if (!total) {
+      bodyEl.innerHTML = `<div class="proof-empty"><b>${report.words ? '没有发现明显问题' : '没有可校对的正文'}</b><span>${report.words ? '标点、引号和段落收尾都在规则范围内。' : '先写一点正文，再回来校对。'}</span></div>`;
+      return;
+    }
+
+    const filterDefs = [
+      { key: 'all', label: '全部', count: total },
+      ...Object.entries(PROOF_KINDS)
+        .map(([key, label]) => ({ key, label, count: counts[key] || 0 }))
+        .filter((item) => item.count > 0),
+    ];
+    const filters = filterDefs.map((item) => `<button type="button" class="proof-filter${filter === item.key ? ' on' : ''}" data-proof-filter="${item.key}">${item.label}<b>${item.count}</b></button>`).join('');
+
+    const groups = new Map();
+    for (const item of shown) {
+      let group = groups.get(item.issue.chId);
+      if (!group) {
+        group = { chId: item.issue.chId, no: item.issue.no, title: item.issue.title, rows: [] };
+        groups.set(item.issue.chId, group);
+      }
+      group.rows.push(item);
+    }
+
+    let html = `<div class="proof-filters">${filters}</div><div class="proof-groups">`;
+    for (const group of groups.values()) {
+      const ch = chapters.get(group.chId);
+      const capped = ch?.capped ? ` · 仅显示前 ${PROOF_MAX_CHAPTER_ISSUES} 条` : '';
+      html += `<section class="proof-group">
+        <div class="proof-group-head"><span>第 ${group.no} 章 · ${esc(group.title)}</span><em>${groupCounts.get(group.chId) || 0} 处${capped}</em></div>`;
+      html += group.rows.map(({ issue, idx }) => `<button type="button" class="proof-row" data-proof-row="${idx}" title="跳到正文并选中">
+        <span class="proof-kind k-${esc(issue.type)}">${esc(PROOF_KINDS[issue.type] || '问题')}</span>
+        <span class="proof-main">
+          <span class="proof-msg">${esc(issue.message)}</span>
+          ${issue.snippet ? `<span class="proof-snippet">${proofSnippetHtml(issue)}</span>` : ''}
+        </span>
+        <span class="proof-loc">${esc(issue.loc || '全章')}</span>
+      </button>`).join('');
+      html += '</section>';
+    }
+    html += '</div>';
+    if (filtered.length > limit) {
+      html += `<button type="button" class="btn btn-sm proof-more" id="proofMore">再显示 ${Math.min(PROOF_PAGE, filtered.length - limit)} 处</button>`;
+    }
+    bodyEl.innerHTML = html;
+    const groupsEl = bodyEl.querySelector('.proof-groups');
+    if (groupsEl) groupsEl.scrollTop = groupScroll;
+
+    bodyEl.querySelectorAll('[data-proof-filter]').forEach((btn) => {
+      btn.onclick = () => {
+        filter = btn.dataset.proofFilter;
+        limit = PROOF_PAGE;
+        groupScroll = 0;
+        render();
+      };
+    });
+    bodyEl.querySelectorAll('[data-proof-row]').forEach((btn) => {
+      btn.onclick = () => {
+        const issue = filtered[Number(btn.dataset.proofRow)];
+        if (issue) jumpToHit(issue.chId, issue.start, Math.max(0, issue.end - issue.start));
+      };
+    });
+    const more = bodyEl.querySelector('#proofMore');
+    if (more) more.onclick = () => {
+      const groupsEl2 = bodyEl.querySelector('.proof-groups');
+      groupScroll = groupsEl2 ? groupsEl2.scrollTop : 0;
+      limit += PROOF_PAGE;
+      render();
+    };
+  };
+
+  render();
+}
+
+$('#proofBtn')?.addEventListener('click', openProof);
+
+/* ============================================================
  * 4.6 分卷：章节目录按卷归组
  * ------------------------------------------------------------
  * 卷本身存在「设定 → 分卷与章纲」里（novel.outline.volumes），这里负责
@@ -5884,6 +6216,11 @@ document.addEventListener('keydown', (e) => {
     sprintToggle();
     return;
   }
+  if (e.altKey && String(e.key).toLowerCase() === 'p') {
+    e.preventDefault();
+    openProof();
+    return;
+  }
   if (e.key === 's') {
     e.preventDefault();
     manualSave();
@@ -5929,6 +6266,7 @@ function cmdkSource() {
     op('重做', 'redo', () => { setView('studio'); doRedo(); }, 'Ctrl+Shift+Z');
     op('全书查找 / 替换', 'search', () => { setView('studio'); openFind(); }, 'Ctrl+F');
     op('全书体检', 'pulse', () => { setView('studio'); openHealthReport(); });
+    op('文字校对', 'proof', () => { setView('studio'); openProof(); }, 'Ctrl+Alt+P');
     op('本章修订清单', 'check', () => {
       if (!currentChapter()) return toast('先打开一章', 'err');
       setView('studio');
@@ -6301,5 +6639,5 @@ async function boot() {
   }
 }
 
-window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport };
+window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof };
 boot();

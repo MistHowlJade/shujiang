@@ -1715,6 +1715,78 @@ body.sprint-open .toast-wrap { bottom: 302px; }
 .health-disclaimer { margin: 12px 0 0; font-size: 10.5px; line-height: 1.7; color: var(--text-3); }
 .health-note { margin-right: auto; font-size: 10.5px; color: var(--text-4); }
 
+/* ==========================================================================
+   文字校对（本地规则）
+   ========================================================================== */
+.pane-chapters .pane-tools { gap: 4px; }
+.proof-top { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.proof-scope { width: 196px; flex: 0 0 auto; }
+.proof-scope button[disabled] { opacity: .42; cursor: default; }
+.proof-sum { min-width: 0; font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.proof-sum b { color: var(--text-1); font-weight: 600; }
+.proof-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.proof-filter {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 25px; padding: 0 9px; font: inherit; font-size: 11.5px;
+  color: var(--text-3); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: var(--r-full);
+  cursor: pointer; transition: all var(--dur) var(--ease);
+}
+.proof-filter:hover { color: var(--text-1); border-color: var(--border-2); }
+.proof-filter.on {
+  color: var(--text-1); background: var(--surface-1);
+  border-color: var(--border-2); box-shadow: var(--sh-1);
+}
+.proof-filter b { font-size: 10px; font-weight: 500; color: var(--text-4); font-variant-numeric: tabular-nums; }
+.proof-filter.on b { color: var(--accent); }
+.proof-filter:focus-visible, .proof-row:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-bg); }
+.proof-groups {
+  display: flex; flex-direction: column; gap: 14px;
+  max-height: 42vh; overflow: auto; padding: 1px 3px 1px 0;
+}
+.proof-group { min-width: 0; }
+.proof-group-head {
+  display: flex; align-items: center; gap: 8px; padding: 0 4px 6px;
+  font-size: 11.5px; color: var(--text-2); border-bottom: 1px solid var(--border);
+}
+.proof-group-head span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proof-group-head em { flex: none; margin-left: auto; font-style: normal; font-size: 10px; color: var(--text-3); }
+.proof-row {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%; margin-top: 5px;
+  padding: 9px 10px; font: inherit; text-align: left; cursor: pointer;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-md); transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.proof-row:hover { background: var(--surface-3); border-color: var(--border-2); }
+.proof-kind {
+  flex: 0 0 auto; min-width: 30px; padding: 2px 6px; text-align: center;
+  font-size: 10px; line-height: 1.45; border-radius: var(--r-full);
+}
+.proof-kind.k-punct { color: var(--accent-hover); background: var(--accent-bg); }
+.proof-kind.k-quote { color: var(--warning); background: var(--warning-bg); }
+.proof-kind.k-typo { color: var(--danger); background: var(--danger-bg); }
+.proof-kind.k-ending { color: var(--text-3); background: var(--surface-3); }
+.proof-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.proof-msg { display: block; font-size: 12px; line-height: 1.5; color: var(--text-1); }
+.proof-snippet {
+  display: block; font-family: var(--font-write); font-size: 12px;
+  line-height: 1.75; color: var(--text-3); overflow-wrap: anywhere;
+}
+.proof-snippet mark {
+  padding: 0 2px; color: var(--text-1); background: var(--warning-bg);
+  border-radius: 3px; box-shadow: inset 0 -1px 0 var(--warning);
+}
+.proof-loc { flex: none; padding-top: 2px; font-size: 10px; color: var(--text-4); white-space: nowrap; }
+.proof-empty { padding: 46px 16px; text-align: center; font-size: 12.5px; line-height: 1.9; color: var(--text-3); }
+.proof-empty b { display: block; margin-bottom: 4px; font-size: 14px; color: var(--text-1); }
+.proof-empty span { display: block; }
+.proof-more { display: block; margin: 12px auto 0; }
+.proof-note { margin-right: auto; font-size: 10.5px; color: var(--text-4); }
+@media (max-width: 720px) {
+  .proof-top { flex-wrap: wrap; }
+  .proof-scope { width: 100%; }
+}
+
 /* 阅读模式 */
 .reader-mask {
   position: fixed; inset: 0; z-index: 140;
