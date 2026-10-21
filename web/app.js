@@ -4894,6 +4894,354 @@ $$('#bibleTabs button').forEach((b) => b.addEventListener('click', () => {
   renderBible();
 }));
 
+/* ---- 设定库导出/导入 ---- */
+function collectBibleData() {
+  const n = S.novel;
+  if (!n) return null;
+  return {
+    meta: n.meta || {},
+    bible: n.bible || { characters: [], world: [], timeline: [] },
+    outline: n.outline || { volumes: [], notes: '' },
+    beats: n.beats || { items: [] },
+    arcs: n.arcs || { items: [] },
+    relations: n.relations || [],
+    threads: n.threads || { items: [] },
+    style: n.style || { guide: '', banned: '', tone: '' },
+    version: 1,
+    exportedAt: Date.now(),
+    sourceTitle: n.title,
+    sourceId: n.id,
+  };
+}
+
+function exportBibleAsJson() {
+  const data = collectBibleData();
+  if (!data) return toast('先打开一部作品', 'err');
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${(S.novel.title || '设定库').replace(/[\\/:*?"<>|]/g, '_')}_设定库_${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('设定库已导出为 JSON', 'ok');
+}
+
+function exportBibleAsMarkdown() {
+  const data = collectBibleData();
+  if (!data) return toast('先打开一部作品', 'err');
+  let md = `# ${esc(data.sourceTitle || '设定库')} - 设定库导出\n\n`;
+  md += `> 导出时间：${new Date(data.exportedAt).toLocaleString()}  \n`;
+  md += `> 源作品 ID：${data.sourceId}  \n\n`;
+
+  // 元数据
+  if (data.meta && Object.keys(data.meta).length) {
+    md += `## 元数据\n\n`;
+    for (const [k, v] of Object.entries(data.meta)) {
+      if (v !== undefined && v !== '' && v !== null) {
+        md += `- **${k}**：${esc(String(v))}\n`;
+      }
+    }
+    md += '\n';
+  }
+
+  // 人物
+  if (data.bible?.characters?.length) {
+    md += `## 人物\n\n`;
+    for (const c of data.bible.characters) {
+      md += `### ${esc(c.name || '未命名')}\n\n`;
+      if (c.role) md += `- **角色**：${esc(c.role)}\n`;
+      if (c.brief) md += `- **简介**：${esc(c.brief)}\n`;
+      if (c.personality) md += `- **性格**：${esc(c.personality)}\n`;
+      if (c.appearance) md += `- **外貌**：${esc(c.appearance)}\n`;
+      if (c.speech) md += `- **口吻/话症**：${esc(c.speech)}\n`;
+      if (c.relations?.length) md += `- **关系**：${c.relations.map(r => `${esc(r.target || '')}（${esc(r.type || '')}）`).join('；')}\n`;
+      if (c.keywords?.length) md += `- **检索词**：${c.keywords.map(esc).join('、')}\n`;
+      md += '\n';
+    }
+  }
+
+  // 世界观
+  if (data.bible?.world?.length) {
+    md += `## 世界观\n\n`;
+    for (const w of data.bible.world) {
+      md += `### ${esc(w.name || '未命名')}\n\n`;
+      if (w.type) md += `- **类型**：${esc(w.type)}\n`;
+      if (w.desc) md += `- **描述**：${esc(w.desc)}\n`;
+      md += '\n';
+    }
+  }
+
+  // 时间线
+  if (data.bible?.timeline?.length) {
+    md += `## 时间线\n\n`;
+    for (const t of data.bible.timeline) {
+      const timeStr = t.time ? `${esc(t.time)}：` : '';
+      md += `- ${timeStr}${esc(t.title || '')}`;
+      if (t.desc) md += ` — ${esc(t.desc)}`;
+      md += '\n';
+    }
+    md += '\n';
+  }
+
+  // 大纲
+  if (data.outline?.volumes?.length) {
+    md += `## 大纲\n\n`;
+    if (data.outline.notes) {
+      md += `> ${esc(data.outline.notes)}\n\n`;
+    }
+    for (const vol of data.outline.volumes) {
+      md += `### ${esc(vol.name || '未命名卷')}\n\n`;
+      if (vol.desc) md += `> ${esc(vol.desc)}\n\n`;
+      for (const ch of vol.chapters || []) {
+        md += `- **第 ${ch.title || '章'}**：${esc(ch.summary || '')}`;
+        if (ch.scene) md += ` *场景：${esc(ch.scene)}*`;
+        if (ch.characters) md += ` *人物：${esc(ch.characters)}*`;
+        if (ch.hook) md += ` *钩子：${esc(ch.hook)}*`;
+        md += '\n';
+      }
+      md += '\n';
+    }
+  }
+
+  // 结构/节拍
+  if (data.beats?.items?.length) {
+    md += `## 结构/节拍 (Save the Cat)\n\n`;
+    for (const b of data.beats.items) {
+      const chRef = b.chapterId ? `（关联章节：${b.chapterId}）` : '';
+      md += `- **${esc(b.name || '节拍')}** ${chRef}`;
+      if (b.words) md += ` *目标字数：${b.words}*`;
+      if (b.note) md += ` — ${esc(b.note)}`;
+      md += '\n';
+    }
+    md += '\n';
+  }
+
+  // 人物弧光
+  if (data.arcs?.items?.length) {
+    md += `## 人物弧光\n\n`;
+    for (const a of data.arcs.items) {
+      md += `### ${esc(a.character || '未命名')}\n\n`;
+      if (a.start) md += `- **起点**：${esc(a.start)}\n`;
+      if (a.end) md += `- **终点**：${esc(a.end)}\n`;
+      if (a.turningPoints?.length) {
+        md += `- **关键转折**：\n`;
+        for (const tp of a.turningPoints) {
+          md += `  - ${esc(tp.chapter || '')}：${esc(tp.event || '')}\n`;
+        }
+      }
+      md += '\n';
+    }
+  }
+
+  // 关系
+  if (data.relations?.length) {
+    md += `## 关系图谱\n\n`;
+    for (const r of data.relations) {
+      md += `- ${esc(r.source || '')} → ${esc(r.target || '')}：${esc(r.type || '')}`;
+      if (r.chapterId) md += ` *（出自章节 ${r.chapterId}）*`;
+      if (r.evidence) md += ` *证据：${esc(r.evidence)}*`;
+      md += '\n';
+    }
+    md += '\n';
+  }
+
+  // 线索
+  if (data.threads?.items?.length) {
+    md += `## 线索/伏笔\n\n`;
+    for (const t of data.threads.items) {
+      md += `- **${esc(t.title || '未命名')}**`;
+      if (t.type) md += ` *${esc(t.type)}*`;
+      if (t.chapters?.length) md += ` *（涉及章节：${t.chapters.join('、')})*`;
+      if (t.status) md += ` *状态：${esc(t.status)}*`;
+      if (t.note) md += ` — ${esc(t.note)}`;
+      md += '\n';
+    }
+    md += '\n';
+  }
+
+  // 文风与规则
+  if (data.style && (data.style.guide || data.style.banned || data.style.tone)) {
+    md += `## 文风与规则\n\n`;
+    if (data.style.guide) md += `**文风指南**：\n${esc(data.style.guide)}\n\n`;
+    if (data.style.banned) md += `**禁用词/表达**：\n${esc(data.style.banned)}\n\n`;
+    if (data.style.tone) md += `**基调**：\n${esc(data.style.tone)}\n\n`;
+  }
+
+  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${(S.novel.title || '设定库').replace(/[\\/:*?"<>|]/g, '_')}_设定库_${new Date().toISOString().slice(0, 10)}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('设定库已导出为 Markdown', 'ok');
+}
+
+function importBible(jsonText) {
+  try {
+    const data = JSON.parse(jsonText);
+    if (!data || typeof data !== 'object') throw new Error('不是有效的 JSON');
+    if (data.version !== 1) throw new Error('不支持的版本格式');
+    return data;
+  } catch (e) {
+    throw new Error('JSON 解析失败：' + e.message);
+  }
+}
+
+function importBibleMarkdown(mdText) {
+  // 简单的 Markdown 导入：只支持提取基本字段，不完整
+  // 这里只做简单演示，实际建议用 JSON 导入
+  throw new Error('Markdown 导入暂不支持完整还原，请使用 JSON 格式');
+}
+
+async function applyBibleData(data, opts = {}) {
+  const n = S.novel;
+  if (!n) return toast('先打开一部作品', 'err');
+
+  const merge = opts.merge !== false; // 默认合并
+  const overwrite = opts.overwrite === true;
+
+  // 备份当前设定（用于撤销）
+  const backup = {
+    meta: { ...n.meta },
+    bible: JSON.parse(JSON.stringify(n.bible || { characters: [], world: [], timeline: [] })),
+    outline: JSON.parse(JSON.stringify(n.outline || { volumes: [], notes: '' })),
+    beats: JSON.parse(JSON.stringify(n.beats || { items: [] })),
+    arcs: JSON.parse(JSON.stringify(n.arcs || { items: [] })),
+    relations: JSON.parse(JSON.stringify(n.relations || [])),
+    threads: JSON.parse(JSON.stringify(n.threads || { items: [] })),
+    style: JSON.parse(JSON.stringify(n.style || { guide: '', banned: '', tone: '' })),
+  };
+
+  // 应用数据
+  if (data.meta) {
+    if (overwrite) n.meta = { ...data.meta };
+    else n.meta = { ...n.meta, ...data.meta };
+  }
+  if (data.bible) {
+    if (overwrite) n.bible = { ...data.bible };
+    else {
+      n.bible.characters = merge ? mergeById(n.bible.characters || [], data.bible.characters || []) : (data.bible.characters || []);
+      n.bible.world = merge ? mergeById(n.bible.world || [], data.bible.world || []) : (data.bible.world || []);
+      n.bible.timeline = merge ? mergeById(n.bible.timeline || [], data.bible.timeline || []) : (data.bible.timeline || []);
+    }
+  }
+  if (data.outline) {
+    if (overwrite) n.outline = { ...data.outline };
+    else n.outline = { ...n.outline, ...data.outline, volumes: data.outline.volumes || n.outline.volumes || [] };
+  }
+  if (data.beats) {
+    if (overwrite) n.beats = { ...data.beats };
+    else n.beats = { ...n.beats, ...data.beats, items: merge ? mergeById(n.beats?.items || [], data.beats.items || []) : (data.beats.items || []) };
+  }
+  if (data.arcs) {
+    if (overwrite) n.arcs = { ...data.arcs };
+    else n.arcs = { ...n.arcs, ...data.arcs, items: merge ? mergeById(n.arcs?.items || [], data.arcs.items || []) : (data.arcs.items || []) };
+  }
+  if (data.relations) {
+    if (overwrite) n.relations = [...data.relations];
+    else n.relations = [...new Set([...(n.relations || []).map(JSON.stringify), ...data.relations.map(JSON.stringify)])].map(JSON.parse);
+  }
+  if (data.threads) {
+    if (overwrite) n.threads = { ...data.threads };
+    else n.threads = { ...n.threads, ...data.threads, items: merge ? mergeById(n.threads?.items || [], data.threads.items || []) : (data.threads.items || []) };
+  }
+  if (data.style) {
+    if (overwrite) n.style = { ...data.style };
+    else n.style = { ...n.style, ...data.style };
+  }
+
+  // 保存
+  await saveNovelPart({
+    meta: n.meta,
+    bible: n.bible,
+    outline: n.outline,
+    beats: n.beats,
+    arcs: n.arcs,
+    relations: n.relations,
+    threads: n.threads,
+    style: n.style,
+  });
+
+  renderBible();
+  renderStudio();
+  toast('设定库已导入' + (overwrite ? '（覆盖）' : '（合并）'), 'ok');
+
+  return backup;
+}
+
+function mergeById(existing, incoming) {
+  const map = new Map();
+  for (const item of existing) {
+    if (item.id) map.set(item.id, { ...item });
+  }
+  for (const item of incoming) {
+    if (item.id && map.has(item.id)) {
+      map.set(item.id, { ...map.get(item.id), ...item });
+    } else {
+      const id = item.id || uid('b');
+      map.set(id, { ...item, id });
+    }
+  }
+  return Array.from(map.values());
+}
+
+// 事件绑定
+$('#bibleExportBtn')?.addEventListener('click', () => {
+  showModal(`<h3>导出设定库</h3>
+    <p class="modal-sub">选择导出格式。JSON 可完整还原导入；Markdown 适合阅读和人工编辑，但无法完整导入还原。</p>
+    <div class="field-row" style="margin-top:12px">
+      <button class="btn btn-primary" id="expJson">${ico('download')} 导出为 JSON（推荐）</button>
+      <button class="btn btn-sm btn-text" id="expMd">${ico('file-text')} 导出为 Markdown</button>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="expCancel">取消</button>
+    </div>`,
+  (box) => {
+    box.querySelector('#expJson').onclick = () => { closeModal(); exportBibleAsJson(); };
+    box.querySelector('#expMd').onclick = () => { closeModal(); exportBibleAsMarkdown(); };
+    box.querySelector('#expCancel').onclick = closeModal;
+  });
+});
+
+$('#bibleImportBtn')?.addEventListener('click', () => {
+  showModal(`<h3>导入设定库</h3>
+    <p class="modal-sub">选择 JSON 文件导入。导入前会自动备份当前设定，导入后可在版本历史里撤回。</p>
+    <div class="field-label">导入模式
+      <select class="select" id="impMode" style="margin-top:5px">
+        <option value="merge">合并（保留现有，新增/更新同 ID 项）</option>
+        <option value="overwrite">覆盖（完全替换对应板块）</option>
+      </select>
+    </div>
+    <div class="field-label" style="margin-top:10px">选择文件
+      <input type="file" id="impFile" accept=".json" style="margin-top:5px" />
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-primary" id="impOk">导入</button>
+      <button class="btn btn-text" id="impCancel">取消</button>
+    </div>`,
+  (box) => {
+    const fileInput = box.querySelector('#impFile');
+    const modeSelect = box.querySelector('#impMode');
+    box.querySelector('#impCancel').onclick = closeModal;
+    box.querySelector('#impOk').onclick = async () => {
+      const file = fileInput.files?.[0];
+      if (!file) return toast('请选择文件', 'err');
+      const text = await file.text();
+      let data;
+      try {
+        data = importBible(text);
+      } catch (e) {
+        return toast(`导入失败：${e.message}`, 'err');
+      }
+      closeModal();
+      await applyBibleData(data, { merge: modeSelect.value === 'merge', overwrite: modeSelect.value === 'overwrite' });
+    };
+  });
+});
+
 const saveNovelPart = debounce(async (part, msg) => {
   if (!S.novel) return;
   setSave('saving');
@@ -7237,6 +7585,8 @@ function cmdkSource() {
   op('写作统计 / 日更目标', 'stamp', () => openStatsModal());
   op('写作冲刺计时器', 'clock', () => sprintToggle(true), 'Ctrl+Alt+S');
   op('新建一卷（从当前章起）', 'layers', newVolumeFromCurrent);
+  op('导出设定库', 'download', () => { if (!S.novel) return toast('先打开一部作品', 'err'); setView('studio'); setView('bible'); document.querySelector('#bibleExportBtn')?.click(); });
+  op('导入设定库', 'upload', () => { if (!S.novel) return toast('先打开一部作品', 'err'); setView('studio'); setView('bible'); document.querySelector('#bibleImportBtn')?.click(); });
 
   const go = (label, icon, v) => out.push({ g: '前往', label, icon, run: () => setView(v) });
   go('书架', 'book', 'shelf');
