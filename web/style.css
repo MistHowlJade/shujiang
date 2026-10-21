@@ -675,6 +675,15 @@ kbd {
 .trash-empty .ico { width: 22px; height: 22px; margin-bottom: 6px; color: var(--text-4); }
 .trash-empty b { display: block; margin-bottom: 3px; color: var(--text-2); font-size: 13px; }
 
+/* 片段导出/导入 */
+.fragment-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 8px; }
+.frag-card { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); text-align: center; transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.frag-card:hover { background: var(--surface-3); border-color: var(--border-2); }
+.frag-card .ico { width: 28px; height: 28px; color: var(--accent); }
+.frag-label { font-size: 11px; color: var(--text-2); margin: 6px 0 8px; font-weight: 500; }
+.frag-actions { display: flex; flex-direction: column; gap: 4px; }
+.frag-actions .btn { font-size: 10px; padding: 4px 8px; }
+
 /* ==========================================================================
    工作台
    ========================================================================== */

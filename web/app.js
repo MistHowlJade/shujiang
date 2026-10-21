@@ -5447,6 +5447,332 @@ $('#bibleImportBtn')?.addEventListener('click', () => {
   });
 });
 
+// ============================================================
+// 片段导出/导入（大纲、场景、记忆、人物、世界观等单独导出）
+// ============================================================
+
+const FRAGMENT_TYPES = [
+  { key: 'outline', label: '大纲与分卷', icon: 'layers', get: (n) => ({ outline: n.outline, meta: n.meta }), single: true },
+  { key: 'scenes', label: '场景卡片', icon: 'columns', get: (n) => ({ scenes: n.chapters.flatMap((c, i) => (c.scenes || []).map(s => ({ ...s, chapterIndex: i, chapterId: c.id, chapterTitle: c.title }))) }), single: true },
+  { key: 'memories', label: '章节记忆', icon: 'book-open', get: (n) => ({ memories: n.chapters.filter(c => c.memory).map(c => ({ chapterId: c.id, chapterTitle: c.title, chapterNo: c.no, memory: c.memory })) }), single: true },
+  { key: 'characters', label: '人物卡', icon: 'user', get: (n) => n.bible?.characters || [], single: false },
+  { key: 'world', label: '世界观', icon: 'globe', get: (n) => n.bible?.world || [], single: false },
+  { key: 'timeline', label: '时间线', icon: 'clock', get: (n) => n.bible?.timeline || [], single: false },
+  { key: 'beats', label: '结构/节拍', icon: 'pulse', get: (n) => n.beats?.items || [], single: false },
+  { key: 'arcs', label: '人物弧光', icon: 'arrow-right', get: (n) => n.arcs?.items || [], single: false },
+  { key: 'relations', label: '关系图谱', icon: 'arrow-right', get: (n) => n.relations || [], single: false },
+  { key: 'threads', label: '线索/伏笔', icon: 'search', get: (n) => n.threads?.items || [], single: false },
+  { key: 'style', label: '文风与规则', icon: 'pen', get: (n) => ({ style: n.style || { guide: '', banned: '', tone: '' } }), single: true },
+  { key: 'annotations', label: '批注/高亮', icon: 'highlighter', get: (n) => ({ annotations: n.chapters.flatMap(c => (c.annotations || []).map(a => ({ ...a, chapterId: c.id, chapterTitle: c.title }))) }), single: true },
+];
+
+function collectFragmentData(typeKey) {
+  const n = S.novel;
+  if (!n) return null;
+  const type = FRAGMENT_TYPES.find(t => t.key === typeKey);
+  if (!type) return null;
+  const data = type.get(n);
+  return {
+    type: typeKey,
+    label: type.label,
+    icon: type.icon,
+    single: type.single,
+    data,
+    version: 1,
+    exportedAt: Date.now(),
+    sourceTitle: n.title,
+    sourceId: n.id,
+  };
+}
+
+function exportFragmentAsJson(typeKey) {
+  const pkg = collectFragmentData(typeKey);
+  if (!pkg) return toast('先打开一部作品', 'err');
+  const json = JSON.stringify(pkg, null, 2);
+  const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const type = FRAGMENT_TYPES.find(t => t.key === typeKey);
+  a.href = url;
+  a.download = `${(S.novel.title || '片段').replace(/[\\/:*?"<>|]/g, '_')}_${type.label}_${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast(`已导出 ${type.label} 为 JSON`, 'ok');
+}
+
+function exportFragmentAsMarkdown(typeKey) {
+  const pkg = collectFragmentData(typeKey);
+  if (!pkg) return toast('先打开一部作品', 'err');
+  const type = FRAGMENT_TYPES.find(t => t.key === typeKey);
+  let md = `# ${esc(pkg.sourceTitle)} - ${esc(type.label)}导出\n\n`;
+  md += `> 导出时间：${new Date(pkg.exportedAt).toLocaleString()}  \n`;
+  md += `> 源作品 ID：${pkg.sourceId}  \n\n`;
+
+  const data = pkg.data;
+  if (type.single) {
+    md += jsonToMarkdown(data, 2);
+  } else {
+    if (Array.isArray(data) && data.length) {
+      md += `## ${esc(type.label)}（共 ${data.length} 条）\n\n`;
+      data.forEach((item, i) => {
+        md += `### ${i + 1}. ${esc(item.name || item.title || item.id || `条目 ${i + 1}`)}\n\n`;
+        md += jsonToMarkdown(item, 3);
+        md += '\n';
+      });
+    } else {
+      md += `> 暂无数据\n\n`;
+    }
+  }
+
+  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${(S.novel.title || '片段').replace(/[\\/:*?"<>|]/g, '_')}_${type.label}_${new Date().toISOString().slice(0, 10)}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast(`已导出 ${type.label} 为 Markdown`, 'ok');
+}
+
+function jsonToMarkdown(obj, level = 1) {
+  if (!obj || typeof obj !== 'object') return '';
+  const prefix = '#'.repeat(level);
+  let md = '';
+  if (Array.isArray(obj)) {
+    obj.forEach((item, i) => {
+      md += `${prefix} ${i + 1}. ${esc(item.name || item.title || item.id || `项 ${i + 1}`)}\n\n`;
+      md += jsonToMarkdown(item, level + 1);
+      md += '\n';
+    });
+  } else {
+    for (const [k, v] of Object.entries(obj)) {
+      if (v === undefined || v === null || v === '') continue;
+      if (typeof v === 'object') {
+        md += `${prefix} ${esc(k)}\n\n`;
+        md += jsonToMarkdown(v, level + 1);
+        md += '\n';
+      } else {
+        md += `- **${esc(k)}**：${esc(String(v))}\n`;
+      }
+    }
+  }
+  return md;
+}
+
+function importFragment(jsonText) {
+  try {
+    const pkg = JSON.parse(jsonText);
+    if (!pkg || typeof pkg !== 'object') throw new Error('不是有效的 JSON');
+    if (pkg.version !== 1) throw new Error('不支持的版本格式');
+    if (!FRAGMENT_TYPES.some(t => t.key === pkg.type)) throw new Error('未知的片段类型：' + pkg.type);
+    return pkg;
+  } catch (e) {
+    throw new Error('JSON 解析失败：' + e.message);
+  }
+}
+
+async function applyFragmentData(pkg, opts = {}) {
+  const n = S.novel;
+  if (!n) return toast('先打开一部作品', 'err');
+  const type = FRAGMENT_TYPES.find(t => t.key === pkg.type);
+  if (!type) return toast('未知的片段类型', 'err');
+
+  const merge = opts.merge !== false;
+  const overwrite = opts.overwrite === true;
+
+  // 备份
+  const backup = {};
+  if (type.key === 'outline') backup.outline = JSON.parse(JSON.stringify(n.outline || { volumes: [], notes: '' }));
+  else if (type.key === 'scenes') {
+    n.chapters.forEach(c => { if (c.scenes) backup[c.id] = JSON.parse(JSON.stringify(c.scenes)); });
+  } else if (type.key === 'memories') {
+    n.chapters.forEach(c => { if (c.memory) backup[c.id] = JSON.parse(JSON.stringify(c.memory)); });
+  } else if (type.key === 'characters') backup.bible = JSON.parse(JSON.stringify(n.bible || { characters: [], world: [], timeline: [] }));
+  else if (type.key === 'world') backup.bible = JSON.parse(JSON.stringify(n.bible || { characters: [], world: [], timeline: [] }));
+  else if (type.key === 'timeline') backup.bible = JSON.parse(JSON.stringify(n.bible || { characters: [], world: [], timeline: [] }));
+  else if (type.key === 'beats') backup.beats = JSON.parse(JSON.stringify(n.beats || { items: [] }));
+  else if (type.key === 'arcs') backup.arcs = JSON.parse(JSON.stringify(n.arcs || { items: [] }));
+  else if (type.key === 'relations') backup.relations = JSON.parse(JSON.stringify(n.relations || []));
+  else if (type.key === 'threads') backup.threads = JSON.parse(JSON.stringify(n.threads || { items: [] }));
+  else if (type.key === 'style') backup.style = JSON.parse(JSON.stringify(n.style || { guide: '', banned: '', tone: '' }));
+  else if (type.key === 'annotations') {
+    n.chapters.forEach(c => { if (c.annotations) backup[c.id] = JSON.parse(JSON.stringify(c.annotations)); });
+  }
+
+  // 应用数据
+  const data = pkg.data;
+  let savePart = {};
+
+  if (type.key === 'outline') {
+    if (overwrite) n.outline = { ...data };
+    else n.outline = { ...n.outline, ...data, volumes: data.volumes || n.outline.volumes || [] };
+    savePart.outline = n.outline;
+  } else if (type.key === 'scenes') {
+    if (overwrite) {
+      n.chapters.forEach(c => { c.scenes = []; });
+    }
+    const scenesByChapter = {};
+    (data || []).forEach(s => {
+      if (!scenesByChapter[s.chapterId]) scenesByChapter[s.chapterId] = [];
+      scenesByChapter[s.chapterId].push(s);
+    });
+    n.chapters.forEach(c => {
+      if (scenesByChapter[c.id]) {
+        if (overwrite || !c.scenes) c.scenes = scenesByChapter[c.id];
+        else c.scenes = [...(c.scenes || []), ...scenesByChapter[c.id]];
+      }
+    });
+    savePart = { chapters: n.chapters };
+  } else if (type.key === 'memories') {
+    if (overwrite) {
+      n.chapters.forEach(c => { delete c.memory; });
+    }
+    (data || []).forEach(m => {
+      const ch = n.chapters.find(c => c.id === m.chapterId);
+      if (ch) ch.memory = m.memory;
+    });
+    savePart = { chapters: n.chapters };
+  } else if (type.key === 'characters') {
+    if (overwrite) n.bible.characters = data;
+    else n.bible.characters = merge ? mergeById(n.bible.characters || [], data) : data;
+    savePart.bible = n.bible;
+  } else if (type.key === 'world') {
+    if (overwrite) n.bible.world = data;
+    else n.bible.world = merge ? mergeById(n.bible.world || [], data) : data;
+    savePart.bible = n.bible;
+  } else if (type.key === 'timeline') {
+    if (overwrite) n.bible.timeline = data;
+    else n.bible.timeline = merge ? mergeById(n.bible.timeline || [], data) : data;
+    savePart.bible = n.bible;
+  } else if (type.key === 'beats') {
+    if (overwrite) n.beats = { items: data };
+    else n.beats = { items: merge ? mergeById(n.beats?.items || [], data) : data };
+    savePart.beats = n.beats;
+  } else if (type.key === 'arcs') {
+    if (overwrite) n.arcs = { items: data };
+    else n.arcs = { items: merge ? mergeById(n.arcs?.items || [], data) : data };
+    savePart.arcs = n.arcs;
+  } else if (type.key === 'relations') {
+    if (overwrite) n.relations = data;
+    else n.relations = [...new Set([...(n.relations || []).map(JSON.stringify), ...data.map(JSON.stringify)])].map(JSON.parse);
+    savePart.relations = n.relations;
+  } else if (type.key === 'threads') {
+    if (overwrite) n.threads = { items: data };
+    else n.threads = { items: merge ? mergeById(n.threads?.items || [], data) : data };
+    savePart.threads = n.threads;
+  } else if (type.key === 'style') {
+    if (overwrite) n.style = { ...data };
+    else n.style = { ...n.style, ...data };
+    savePart.style = n.style;
+  } else if (type.key === 'annotations') {
+    if (overwrite) {
+      n.chapters.forEach(c => { delete c.annotations; });
+    }
+    const annosByChapter = {};
+    (data || []).forEach(a => {
+      if (!annosByChapter[a.chapterId]) annosByChapter[a.chapterId] = [];
+      annosByChapter[a.chapterId].push(a);
+    });
+    n.chapters.forEach(c => {
+      if (annosByChapter[c.id]) {
+        if (overwrite || !c.annotations) c.annotations = annosByChapter[c.id];
+        else c.annotations = [...(c.annotations || []), ...annosByChapter[c.id]];
+      }
+    });
+    savePart = { chapters: n.chapters };
+  }
+
+  await saveNovelPart(savePart);
+  renderBible();
+  renderStudio();
+  toast(`已导入 ${FRAGMENT_TYPES.find(t => t.key === pkg.type).label}` + (overwrite ? '（覆盖）' : '（合并）'), 'ok');
+  return { backup, type: pkg.type };
+}
+
+// 片段导出/导入 UI 绑定
+$('#bibleExportBtn')?.addEventListener('click', () => {
+  showModal(`<h3>导出设定库 / 片段</h3>
+    <p class="modal-sub">完整导出：包含所有板块。片段导出：单独导出某个板块（大纲、人物、场景等），适合跨项目复用或版本控制。</p>
+    <div class="field-label" style="margin-top:8px"><strong>完整导出</strong></div>
+    <div class="field-row" style="margin-top:8px">
+      <button class="btn btn-primary" id="expJson">${ico('download')} 导出完整 JSON</button>
+      <button class="btn btn-sm btn-text" id="expMd">${ico('file-text')} 导出完整 Markdown</button>
+    </div>
+    <div class="field-label" style="margin-top:16px"><strong>片段导出</strong></div>
+    <div class="fragment-grid" id="fragExportGrid"></div>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="expCancel">取消</button>
+    </div>`,
+  (box) => {
+    const grid = box.querySelector('#fragExportGrid');
+    grid.innerHTML = FRAGMENT_TYPES.map(t => `
+      <div class="frag-card">
+        <svg class="ico" style="margin-bottom:4px"><use href="#i-${t.icon}" /></svg>
+        <div class="frag-label">${t.label}</div>
+        <div class="frag-actions">
+          <button class="btn btn-sm btn-text" data-type="${t.key}" data-fmt="json">${ico('download')} JSON</button>
+          <button class="btn btn-sm btn-text" data-type="${t.key}" data-fmt="md">${ico('file-text')} MD</button>
+        </div>
+      </div>`).join('');
+    grid.querySelectorAll('button[data-type]').forEach(btn => {
+      btn.onclick = () => {
+        closeModal();
+        const fmt = btn.dataset.fmt;
+        const type = btn.dataset.type;
+        if (fmt === 'json') exportFragmentAsJson(type);
+        else exportFragmentAsMarkdown(type);
+      };
+    });
+    box.querySelector('#expJson').onclick = () => { closeModal(); exportBibleAsJson(); };
+    box.querySelector('#expMd').onclick = () => { closeModal(); exportBibleAsMarkdown(); };
+    box.querySelector('#expCancel').onclick = closeModal;
+  });
+});
+
+$('#bibleImportBtn')?.addEventListener('click', () => {
+  showModal(`<h3>导入设定库 / 片段</h3>
+    <p class="modal-sub">选择 JSON 文件导入。完整导入会按板块合并/覆盖；片段导入仅影响对应板块。导入前会自动备份，可在版本历史里撤回。</p>
+    <div class="field-label">导入模式
+      <select class="select" id="impMode" style="margin-top:5px">
+        <option value="merge">合并（保留现有，新增/更新同 ID 项）</option>
+        <option value="overwrite">覆盖（完全替换对应板块）</option>
+      </select>
+    </div>
+    <div class="field-label" style="margin-top:10px">选择文件
+      <input type="file" id="impFile" accept=".json" style="margin-top:5px" />
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-primary" id="impOk">导入</button>
+      <button class="btn btn-text" id="impCancel">取消</button>
+    </div>`,
+  (box) => {
+    const fileInput = box.querySelector('#impFile');
+    const modeSelect = box.querySelector('#impMode');
+    box.querySelector('#impCancel').onclick = closeModal;
+    box.querySelector('#impOk').onclick = async () => {
+      const file = fileInput.files?.[0];
+      if (!file) return toast('请选择文件', 'err');
+      const text = await file.text();
+      let pkg;
+      try {
+        pkg = importFragment(text);
+      } catch (e) {
+        // 兼容旧版完整设定库格式
+        try {
+          const data = importBible(text);
+          await applyBibleData(data, { merge: modeSelect.value === 'merge', overwrite: modeSelect.value === 'overwrite' });
+        } catch (e2) {
+          return toast(`导入失败：${e.message || e2.message}`, 'err');
+        }
+        closeModal();
+        return;
+      }
+      closeModal();
+      await applyFragmentData(pkg, { merge: modeSelect.value === 'merge', overwrite: modeSelect.value === 'overwrite' });
+    };
+  });
+});
+
 const saveNovelPart = debounce(async (part, msg) => {
   if (!S.novel) return;
   setSave('saving');
