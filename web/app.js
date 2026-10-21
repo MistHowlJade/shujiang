@@ -2040,6 +2040,172 @@ function stageCountsOf(novel) {
   for (const c of novel?.chapters || []) counts[stageOf(c)] += 1;
   return counts;
 }
+
+/* 章节看板：把整本书铺成三列，拖动卡片就能改状态。
+ * 状态仍然只写章节的 stage 字段，复用现有的自动保存，不新增接口。 */
+const BOARD_STAGES = ['draft', 'revising', 'done'];
+const BOARD_EMPTY = {
+  draft: '还没有草稿章节',
+  revising: '还没有修改中的章节',
+  done: '还没有定稿章节',
+};
+
+function openChapterBoard() {
+  const n = S.novel;
+  if (!n) return toast('先打开作品', 'err');
+  if (!n.chapters.length) return toast('还没有章节', 'err');
+  showModal(`
+    <div class="kb-head">
+      <div class="kb-head-main">
+        <h3>章节看板</h3>
+        <p class="kb-sub" id="kbSub"></p>
+      </div>
+      <span class="kb-tip">拖到其他列改状态 · 点卡片跳到章节</span>
+    </div>
+    <div class="kb-overview">
+      <div class="kb-bar" id="kbBar" aria-hidden="true"></div>
+      <div class="kb-legend" id="kbLegend"></div>
+    </div>
+    <div class="kb-board" id="kbBoard"></div>
+    <div class="modal-foot">
+      <span class="dim small kb-foot-note">状态改动会自动保存</span>
+      <button class="btn" id="kbClose">关闭</button>
+    </div>`, (box) => {
+    const board = box.querySelector('#kbBoard');
+    const sub = box.querySelector('#kbSub');
+    const bar = box.querySelector('#kbBar');
+    const legend = box.querySelector('#kbLegend');
+    let dragging = false;
+    let dragEndedAt = 0;
+
+    const openCard = (id) => {
+      closeModal();
+      setView('studio');
+      selectChapter(id);
+    };
+
+    const render = () => {
+      const scrolls = {};
+      $$('.kb-list', board).forEach((el) => { scrolls[el.dataset.stage] = el.scrollTop; });
+      const counts = stageCountsOf(n);
+      const totalWords = n.chapters.reduce((sum, c) => sum + countWords(c.content), 0);
+      sub.textContent = `共 ${n.chapters.length} 章 · ${fmtWords(totalWords)} 字 · 定稿 ${counts.done}/${n.chapters.length}`;
+      bar.innerHTML = BOARD_STAGES.map((stage) => {
+        const pct = (counts[stage] / n.chapters.length) * 100;
+        return pct ? `<span class="kb-seg ${stage}" style="width:${pct}%"></span>` : '';
+      }).join('');
+      legend.innerHTML = BOARD_STAGES.map((stage) => `
+        <span class="kb-legend-item"><i class="kb-dot ${stage}"></i>${STAGE_LABEL[stage]} <b>${counts[stage]}</b></span>`).join('');
+
+      board.innerHTML = BOARD_STAGES.map((stage) => {
+        const rows = n.chapters.map((c, i) => ({ c, i })).filter(({ c }) => stageOf(c) === stage);
+        const words = rows.reduce((sum, { c }) => sum + countWords(c.content), 0);
+        const cards = rows.map(({ c, i }) => {
+          const w = countWords(c.content);
+          const revs = openRevisionCount(c);
+          const vol = volumeTitle(effVolumeIds()[i] || '');
+          return `<article class="kb-card ${c.id === S.chapterId ? 'on' : ''}" draggable="true" data-id="${esc(c.id)}" data-index="${i}" tabindex="0" role="button" aria-label="第 ${i + 1} 章 ${esc(c.title || '未命名')}">
+            <div class="kb-card-top">
+              <span class="kb-no">${i + 1}</span>
+              <span class="kb-card-title">${esc(c.title || '未命名')}</span>
+            </div>
+            <div class="kb-card-meta">
+              <span>${w ? `${fmtWords(w)} 字` : '空章'}</span>
+              ${revs ? `<span class="kb-rev">${revs} 项待改</span>` : ''}
+              ${c.memory ? '<span class="kb-mem">有记忆</span>' : ''}
+            </div>
+            <div class="kb-card-foot">
+              <span class="kb-vol">${vol ? esc(vol) : ''}</span>
+              <select class="kb-stage" aria-label="修改第 ${i + 1} 章状态">
+                ${BOARD_STAGES.map((s) => `<option value="${s}"${stageOf(c) === s ? ' selected' : ''}>${STAGE_LABEL[s]}</option>`).join('')}
+              </select>
+            </div>
+          </article>`;
+        }).join('');
+        return `<section class="kb-col" data-stage="${stage}">
+          <div class="kb-col-head">
+            <span class="kb-dot ${stage}"></span>
+            <span class="kb-col-title">${STAGE_LABEL[stage]}</span>
+            <span class="kb-col-count">${rows.length}</span>
+            <span class="kb-col-words">${rows.length ? `${fmtWords(words)} 字` : ''}</span>
+          </div>
+          <div class="kb-list" data-stage="${stage}">
+            ${rows.length ? cards : `<div class="kb-empty">${BOARD_EMPTY[stage]}<br>把卡片拖到这里</div>`}
+          </div>
+        </section>`;
+      }).join('');
+
+      const applyStage = (index, stage, focusSelect = false) => {
+        const ch = n.chapters[index];
+        if (!ch || !STAGE_LABEL[stage] || stageOf(ch) === stage) return false;
+        setChapterStage(index, stage);
+        render();
+        if (focusSelect) board.querySelector(`.kb-card[data-index="${index}"] .kb-stage`)?.focus();
+        return true;
+      };
+
+      $$('.kb-card', board).forEach((card) => {
+        const id = card.dataset.id;
+        const index = Number(card.dataset.index);
+        const stageSelect = $('.kb-stage', card);
+        card.addEventListener('dragstart', (e) => {
+          dragging = true;
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', id);
+          card.classList.add('dragging');
+        });
+        card.addEventListener('dragend', () => {
+          dragging = false;
+          dragEndedAt = Date.now();
+          card.classList.remove('dragging');
+          $$('.kb-col.drop', board).forEach((el) => el.classList.remove('drop'));
+        });
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('select')) return;
+          if (dragging || Date.now() - dragEndedAt < 220) return;
+          openCard(id);
+        });
+        card.addEventListener('keydown', (e) => {
+          if (e.target.closest('select')) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openCard(id);
+          }
+        });
+        stageSelect?.addEventListener('change', () => applyStage(index, stageSelect.value, true));
+      });
+
+      $$('.kb-col', board).forEach((col) => {
+        const stage = col.dataset.stage;
+        col.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          col.classList.add('drop');
+        });
+        col.addEventListener('dragleave', (e) => {
+          if (!col.contains(e.relatedTarget)) col.classList.remove('drop');
+        });
+        col.addEventListener('drop', (e) => {
+          e.preventDefault();
+          col.classList.remove('drop');
+          dragging = false;
+          dragEndedAt = Date.now();
+          const id = e.dataTransfer.getData('text/plain');
+          const index = n.chapters.findIndex((c) => c.id === id);
+          if (index >= 0) applyStage(index, stage);
+        });
+      });
+
+      $$('.kb-list', board).forEach((el) => {
+        if (scrolls[el.dataset.stage]) el.scrollTop = scrolls[el.dataset.stage];
+      });
+    };
+
+    render();
+    box.querySelector('#kbClose').onclick = closeModal;
+  }, { wide: true });
+}
+
 /** 按 id 找章节行：筛选后列表下标和全书下标不再一致，不能再用数组位置取行 */
 const chapterRow = (id) => $$('#chapterList .chapter-item').find((el) => el.dataset.id === id) || null;
 
@@ -2737,6 +2903,7 @@ $('#stageFilter').addEventListener('change', () => {
   S.stageFilter = $('#stageFilter').value;
   renderStudio();
 });
+$('#boardBtn').addEventListener('click', openChapterBoard);
 
 $('#coEdit').addEventListener('click', openChapterOutlineModal);
 $('#coLocate').addEventListener('click', () => {
@@ -6344,6 +6511,11 @@ document.addEventListener('keydown', (e) => {
     openProof();
     return;
   }
+  if (e.altKey && String(e.key).toLowerCase() === 'b') {
+    e.preventDefault();
+    openChapterBoard();
+    return;
+  }
   if (e.key === 's') {
     e.preventDefault();
     manualSave();
@@ -6389,6 +6561,7 @@ function cmdkSource() {
     op('重做', 'redo', () => { setView('studio'); doRedo(); }, 'Ctrl+Shift+Z');
     op('全书查找 / 替换', 'search', () => { setView('studio'); openFind(); }, 'Ctrl+F');
     op('全书体检', 'pulse', () => { setView('studio'); openHealthReport(); });
+    op('章节看板', 'columns', () => { setView('studio'); openChapterBoard(); }, 'Ctrl+Alt+B');
     op('文字校对', 'proof', () => { setView('studio'); openProof(); }, 'Ctrl+Alt+P');
     op('本章修订清单', 'check', () => {
       if (!currentChapter()) return toast('先打开一章', 'err');
@@ -6762,5 +6935,5 @@ async function boot() {
   }
 }
 
-window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, restoreNovelBackup };
+window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, restoreNovelBackup };
 boot();
