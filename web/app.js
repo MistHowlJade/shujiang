@@ -2406,14 +2406,136 @@ $('#formatBtn').addEventListener('click', () => {
   toast('已统一段落格式 · 按 Ctrl+Z 可撤销', 'ok');
 });
 
-$('#previewBtn').addEventListener('click', () => {
-  const ch = currentChapter();
-  if (!ch) return;
-  showModal(`<h3>${esc(ch.title || '未命名')}</h3>
-    <div style="font-family:var(--font-write);font-size:15.5px;line-height:2;white-space:pre-wrap;max-height:64vh;overflow:auto">${esc(ch.content || '（空）')}</div>
-    <div class="modal-foot"><span class="dim small">${countWords(ch.content)} 字</span><button class="btn" id="pvClose">关闭</button></div>`,
-    (box) => { box.querySelector('#pvClose').onclick = closeModal; });
-});
+/** 阅读模式：整章排版阅读，可左右翻章与调字号，不改动正文 */
+function openReader(startId = S.chapterId) {
+  if (!S.novel) return toast('先打开作品', 'err');
+  const chapters = S.novel.chapters;
+  if (!chapters.length) return toast('还没有章节', 'err');
+  if ($('#readerMask')) return;
+  let idx = chapters.findIndex((c) => c.id === startId);
+  if (idx < 0) idx = 0;
+  let size = 18;
+  const prevFocus = document.activeElement;
+
+  const mask = document.createElement('div');
+  mask.className = 'reader-mask';
+  mask.id = 'readerMask';
+  mask.setAttribute('role', 'dialog');
+  mask.setAttribute('aria-modal', 'true');
+  mask.setAttribute('aria-label', '阅读模式');
+  mask.innerHTML = `
+    <header class="reader-top">
+      <div class="reader-brand">${ico('book')}<span>${esc(S.novel.title)}</span></div>
+      <div class="reader-tools">
+        <button type="button" class="btn btn-sm btn-text" id="readerPrev" title="上一章（←）">上一章</button>
+        <select class="select reader-select" id="readerSelect" aria-label="选择章节"></select>
+        <button type="button" class="btn btn-sm btn-text" id="readerNext" title="下一章（→）">下一章</button>
+        <span class="reader-divider"></span>
+        <button type="button" class="btn btn-sm btn-text" id="readerMinus" title="缩小字号">A−</button>
+        <button type="button" class="btn btn-sm btn-text" id="readerPlus" title="放大字号">A＋</button>
+        <button type="button" class="btn btn-sm" id="readerClose">关闭</button>
+      </div>
+    </header>
+    <main class="reader-scroll" id="readerScroll">
+      <article class="reader-page" id="readerPage" tabindex="-1">
+        <div class="reader-kicker" id="readerKicker"></div>
+        <h1 id="readerTitle"></h1>
+        <div class="reader-meta" id="readerMeta"></div>
+        <div class="reader-content" id="readerContent"></div>
+        <div class="reader-end" id="readerEnd">本章完</div>
+        <div class="reader-nav">
+          <button type="button" class="btn" id="readerPrev2">上一章</button>
+          <button type="button" class="btn" id="readerNext2">下一章</button>
+        </div>
+      </article>
+    </main>`;
+  document.body.appendChild(mask);
+
+  const $r = (sel) => mask.querySelector(sel);
+  const scroll = $r('#readerScroll');
+  const page = $r('#readerPage');
+  const select = $r('#readerSelect');
+  const prev = $r('#readerPrev');
+  const next = $r('#readerNext');
+  const prev2 = $r('#readerPrev2');
+  const next2 = $r('#readerNext2');
+  const minus = $r('#readerMinus');
+  const plus = $r('#readerPlus');
+
+  const close = () => {
+    document.removeEventListener('keydown', onKey);
+    mask.remove();
+    const canRestore = prevFocus && prevFocus !== document.body && prevFocus.isConnected
+      && !prevFocus.closest('[hidden]') && prevFocus.getClientRects().length > 0;
+    if (canRestore) prevFocus.focus({ preventScroll: true });
+    else $('#previewBtn')?.focus({ preventScroll: true });
+  };
+
+  const setSize = () => {
+    page.style.setProperty('--reader-size', `${size}px`);
+    minus.disabled = size <= 15;
+    plus.disabled = size >= 24;
+  };
+
+  const paragraphHtml = (content) => {
+    const lines = String(content || '').replace(/\r\n?/g, '\n').split('\n').map((line) => line.trim()).filter(Boolean);
+    return lines.map((line) => {
+      if (/^[-—–*]{3,}$/.test(line)) return '<hr class="reader-hr" />';
+      return `<p>${esc(line.replace(/^[　\s]+/, ''))}</p>`;
+    }).join('');
+  };
+
+  const render = () => {
+    const ch = chapters[idx];
+    const openRevs = openRevisionCount(ch);
+    const stage = STAGE_LABEL[stageOf(ch)];
+    $r('#readerKicker').textContent = `第 ${idx + 1} 章`;
+    $r('#readerTitle').textContent = ch.title || '未命名';
+    $r('#readerMeta').textContent = `${stage} · ${fmtWords(countWords(ch.content))} 字${openRevs ? ` · ${openRevs} 项待改` : ''}`;
+    const html = paragraphHtml(ch.content);
+    $r('#readerContent').innerHTML = html || '<p class="reader-empty">本章还没有正文。</p>';
+    $r('#readerEnd').hidden = !html;
+    select.value = ch.id;
+    prev.disabled = prev2.disabled = idx <= 0;
+    next.disabled = next2.disabled = idx >= chapters.length - 1;
+    scroll.scrollTop = 0;
+  };
+
+  const go = (nextIdx) => {
+    if (nextIdx < 0 || nextIdx >= chapters.length) return;
+    idx = nextIdx;
+    render();
+  };
+
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    if (e.target?.closest?.('input, textarea, select')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    if (window.getSelection() && !window.getSelection().isCollapsed) return;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); go(idx - 1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); go(idx + 1); }
+  };
+
+  select.innerHTML = chapters.map((c, i) => `<option value="${esc(c.id)}">第 ${i + 1} 章 · ${esc(c.title || '未命名')}</option>`).join('');
+  select.addEventListener('change', () => {
+    const nextIdx = chapters.findIndex((c) => c.id === select.value);
+    if (nextIdx >= 0) { idx = nextIdx; render(); page.focus({ preventScroll: true }); }
+  });
+  prev.addEventListener('click', () => go(idx - 1));
+  next.addEventListener('click', () => go(idx + 1));
+  prev2.addEventListener('click', () => go(idx - 1));
+  next2.addEventListener('click', () => go(idx + 1));
+  minus.addEventListener('click', () => { size = Math.max(15, size - 1); setSize(); });
+  plus.addEventListener('click', () => { size = Math.min(24, size + 1); setSize(); });
+  $r('#readerClose').addEventListener('click', close);
+  document.addEventListener('keydown', onKey);
+
+  setSize();
+  render();
+  page.focus({ preventScroll: true });
+}
+
+$('#previewBtn').addEventListener('click', () => openReader());
 
 /* ---------- 选中文本工具栏 ---------- */
 const selToolbar = $('#selToolbar');
@@ -5626,6 +5748,7 @@ $('#findBtn').addEventListener('click', () => openFind());
 
 /* ---------------- 快捷键 ---------------- */
 document.addEventListener('keydown', (e) => {
+  if ($('#readerMask')) return;
   if (!(e.ctrlKey || e.metaKey)) return;
   if (e.altKey && String(e.key).toLowerCase() === 's') {
     e.preventDefault();
@@ -5665,6 +5788,7 @@ function cmdkSource() {
   op('新建作品', 'plus', () => openNewNovelModal(), 'N');
   if (S.novel) {
     op('生成本章', 'spark', () => { setView('studio'); showAssistTab('write'); generateChapter(); }, 'Ctrl+Shift+↵');
+    op('阅读模式', 'book-open', () => { setView('studio'); openReader(); });
     op('续写当前章', 'pen', () => { setView('studio'); showAssistTab('write'); continueWriting(); }, 'Ctrl+↵');
     op('一致性检查', 'shield', () => { setView('studio'); showAssistTab('check'); $('#consistencyBtn').click(); });
     op('责编评审', 'stamp', () => { setView('studio'); showAssistTab('check'); $('#reviewBtn').click(); });
@@ -5786,6 +5910,7 @@ $('#cmdkList').addEventListener('click', (e) => {
 $('#cmdkMask').addEventListener('mousedown', (e) => { if (e.target.id === 'cmdkMask') closeCmdk(); });
 $('#cmdkBtn').addEventListener('click', openCmdk);
 document.addEventListener('keydown', (e) => {
+  if ($('#readerMask')) return;
   if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === 'k') { e.preventDefault(); openCmdk(); }
   else if (e.key === 'Escape' && !$('#cmdkMask').hidden) closeCmdk();
 });
