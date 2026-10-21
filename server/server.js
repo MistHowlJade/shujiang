@@ -695,7 +695,20 @@ async function handleApi(req, res, url) {
       const n = getNovel(id);
       if (!n) return sendJson(res, 404, { error: '作品不存在' });
       const raw = url.searchParams.get('format');
-      const format = raw === 'md' ? 'md' : raw === 'epub' ? 'epub' : 'txt';
+      const format = raw === 'md' ? 'md' : raw === 'epub' ? 'epub' : raw === 'json' ? 'json' : 'txt';
+      // 整本作品备份：原样导出作品 JSON，保留正文、设定、大纲、记忆和修订；
+      // 恢复时由前端新建一部作品，不覆盖现有稿件。
+      if (format === 'json') {
+        const body = JSON.stringify(n, null, 2);
+        const name = `${safeName(n.title)}_备份.json`;
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+          'Content-Length': Buffer.byteLength(body),
+          'Cache-Control': 'no-store',
+        });
+        return res.end(body);
+      }
       const cid = url.searchParams.get('chapterId');
       // 只导出定稿只作用于「全书」；当前章导出是作者明确指定的，不受状态限制
       const onlyDone = !cid && url.searchParams.get('only') === 'done';

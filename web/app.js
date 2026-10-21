@@ -327,6 +327,119 @@ function renderShelf() {
 }
 $('#shelfSearch').addEventListener('input', debounce(renderShelf, 150));
 
+/* ============================================================
+ * 作品备份与恢复（JSON）
+ * ------------------------------------------------------------
+ * 备份是原样的作品 JSON，正文 / 设定 / 大纲 / 记忆 / 修订都在里面。
+ * 恢复时先新建一部作品，再把内容灌进去：即使选错文件，也不会
+ * 覆盖现有稿件。章节 id 会重新生成，避免和旧作品纠缠。
+ * ============================================================ */
+function readBackupFile(file) {
+  if (file.size > 40 * 1024 * 1024) return Promise.reject(new Error('备份文件超过 40 MB'));
+  if (typeof file.text === 'function') return file.text();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('读取备份文件失败'));
+    reader.readAsText(file, 'utf-8');
+  });
+}
+
+function parseBackupNovel(text) {
+  let data;
+  try {
+    data = JSON.parse(String(text || '').replace(/^\uFEFF/, ''));
+  } catch {
+    throw new Error('这不是有效的 JSON 文件');
+  }
+  if (data && typeof data === 'object' && data.novel && typeof data.novel === 'object') data = data.novel;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('这不是书匠的作品备份');
+  if (!Array.isArray(data.chapters)) throw new Error('备份里没有章节列表');
+  return data;
+}
+
+function backupImportPayload(data) {
+  const ids = new Set();
+  const chapters = data.chapters
+    .filter((ch) => ch && typeof ch === 'object' && !Array.isArray(ch))
+    .map((ch, i) => {
+      let id = uid('c');
+      while (ids.has(id)) id = uid('c');
+      ids.add(id);
+      return {
+        ...ch,
+        id,
+        no: i + 1,
+        title: typeof ch.title === 'string' && ch.title.trim() ? ch.title.trim() : `第 ${i + 1} 章`,
+        content: typeof ch.content === 'string' ? ch.content : '',
+        summary: typeof ch.summary === 'string' ? ch.summary : '',
+        stage: ['draft', 'revising', 'done'].includes(ch.stage) ? ch.stage : 'draft',
+        outline: ch.outline && typeof ch.outline === 'object' && !Array.isArray(ch.outline) ? ch.outline : null,
+        memory: ch.memory && typeof ch.memory === 'object' && !Array.isArray(ch.memory) ? ch.memory : null,
+        revisions: Array.isArray(ch.revisions) ? ch.revisions : undefined,
+      };
+    });
+  return {
+    title: typeof data.title === 'string' && data.title.trim() ? data.title.trim() : '恢复的作品',
+    author: typeof data.author === 'string' ? data.author : '',
+    genre: typeof data.genre === 'string' ? data.genre : '',
+    tags: Array.isArray(data.tags) ? data.tags.filter((tag) => typeof tag === 'string') : [],
+    meta: data.meta && typeof data.meta === 'object' && !Array.isArray(data.meta) ? data.meta : {},
+    bible: data.bible && typeof data.bible === 'object' && !Array.isArray(data.bible) ? data.bible : {},
+    outline: data.outline && typeof data.outline === 'object' && !Array.isArray(data.outline) ? data.outline : {},
+    chapters,
+  };
+}
+
+async function restoreNovelBackup(file) {
+  if (!file) return;
+  const btn = $('#restoreBackupBtn');
+  const original = btn?.innerHTML;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '恢复中…';
+  }
+  let created = null;
+  let restoredId = '';
+  try {
+    const data = parseBackupNovel(await readBackupFile(file));
+    const payload = backupImportPayload(data);
+    await flushSave().catch(() => {});
+    const made = await api.send('/api/novels', {
+      title: payload.title,
+      author: payload.author,
+      genre: payload.genre,
+      tags: payload.tags,
+    });
+    created = made.novel;
+    const res = await api.put(`/api/novels/${created.id}`, payload);
+    restoredId = res.novel?.id || created.id;
+    await loadNovels();
+    renderShelf();
+    toast(`已恢复《${res.novel?.title || payload.title}》为新的作品`, 'ok');
+  } catch (err) {
+    if (created && !restoredId) {
+      try { await api.del(`/api/novels/${created.id}`); } catch {}
+      try { await loadNovels(); renderShelf(); } catch {}
+    }
+    toast(`恢复失败：${err.message || '未知错误'}`, 'err');
+    return;
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      if (original != null) btn.innerHTML = original;
+    }
+  }
+  if (restoredId) await openNovel(restoredId).catch(() => {});
+}
+
+$('#restoreBackupBtn')?.addEventListener('click', () => $('#restoreBackupInput')?.click());
+$('#restoreBackupInput')?.addEventListener('change', (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (file) restoreNovelBackup(file);
+});
+
 function openNewNovelModal() {
   showModal(`
     <h3>新建作品</h3>
@@ -5813,10 +5926,10 @@ window.addEventListener('drop', (e) => {
 
 function exportBook() {
   if (!S.novel) return toast('先打开作品', 'err');
-  showModal(`<h3>导出《${esc(S.novel.title)}》</h3>
+  showModal(`<h3>导出 / 备份《${esc(S.novel.title)}》</h3>
     <div class="grid2">
       <label class="field-label">格式
-        <select id="exFmt" class="input"><option value="txt">TXT（纯文本）</option><option value="md">Markdown</option><option value="epub">EPUB（电子书）</option></select>
+        <select id="exFmt" class="input"><option value="txt">TXT（纯文本）</option><option value="md">Markdown</option><option value="epub">EPUB（电子书）</option><option value="json">作品备份（JSON，可恢复）</option></select>
       </label>
       <label class="field-label">范围
         <select id="exScope" class="input"><option value="all">全书</option><option value="chapter">当前章</option></select>
@@ -5841,12 +5954,17 @@ function exportBook() {
       const total = S.novel.chapters.length;
       const doneCount = S.novel.chapters.filter((c) => stageOf(c) === 'done').length;
       const sync = () => {
+        const backup = fmtEl.value === 'json';
         const epub = fmtEl.value === 'epub';
-        scopeEl.disabled = epub;
-        if (epub) scopeEl.value = 'all';
-        hintEl.hidden = !epub;
-        // 单章导出是作者明确指定的，不受「只导出定稿」影响
-        const showDone = scopeEl.value === 'all';
+        const whole = epub || backup;
+        scopeEl.disabled = whole;
+        if (whole) scopeEl.value = 'all';
+        hintEl.hidden = !whole;
+        hintEl.textContent = backup
+          ? '备份是当前作品的完整 JSON：正文、设定、大纲、章节记忆和修订都会保留。恢复时会在书架新建一部作品，不会覆盖现有稿件。'
+          : 'EPUB 会导出全书，自动生成标题页、目录和分卷结构，适合放进手机 / 阅读器。';
+        // 单章导出是作者明确指定的，不受「只导出定稿」影响；备份总是整本
+        const showDone = !backup && scopeEl.value === 'all';
         doneRow.hidden = !showDone;
         doneEl.disabled = doneCount === 0;
         doneRow.classList.toggle('disabled', doneCount === 0);
@@ -5864,6 +5982,11 @@ function exportBook() {
         const scope = scopeEl.value;
         const onlyDone = !doneRow.hidden && doneEl.checked;
         if (onlyDone && doneCount === 0) return toast('还没有已定稿的章节', 'err');
+        if (fmt === 'json') {
+          window.location.href = `/api/novels/${S.novel.id}/export?format=json`;
+          closeModal();
+          return;
+        }
         const q = `${fmt !== 'epub' && scope === 'chapter' && S.chapterId ? `&chapterId=${S.chapterId}` : ''}${onlyDone ? '&only=done' : ''}`;
         window.location.href = `/api/novels/${S.novel.id}/export?format=${fmt}${q}`;
         closeModal();
@@ -6639,5 +6762,5 @@ async function boot() {
   }
 }
 
-window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof };
+window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, restoreNovelBackup };
 boot();
