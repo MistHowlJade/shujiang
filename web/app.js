@@ -336,6 +336,7 @@ function renderShelf() {
   }
 }
 $('#shelfSearch').addEventListener('input', debounce(renderShelf, 150));
+$('#globalSearchBtn').addEventListener('click', () => openGlobalSearch());
 
 /* ============================================================
  * 作品备份与恢复（JSON）
@@ -6614,6 +6615,162 @@ function jumpToHit(chapterId, start, len) {
   }, 60);
 }
 
+async function jumpToGlobalHit(novelId, chapterId, start, len) {
+  if (S.focusMode) exitFocus();
+  closeModal();
+  try {
+    if (!S.novel || S.novel.id !== novelId) {
+      await openNovel(novelId, { chapterId });
+    } else {
+      setView('studio');
+      selectChapter(chapterId);
+    }
+    setTimeout(() => {
+      if (S.novel?.id !== novelId || S.chapterId !== chapterId) return;
+      const ta = $('#chContent');
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(start, Math.min(start + len, ta.value.length));
+    }, 80);
+  } catch (err) {
+    toast(`打开失败：${err.message || '未知错误'}`, 'err');
+  }
+}
+
+async function jumpToGlobalTitle(novelId, chapterId) {
+  if (S.focusMode) exitFocus();
+  closeModal();
+  try {
+    if (!S.novel || S.novel.id !== novelId) {
+      await openNovel(novelId, { chapterId });
+    } else {
+      setView('studio');
+      selectChapter(chapterId);
+    }
+    setTimeout(() => {
+      if (S.novel?.id !== novelId || S.chapterId !== chapterId) return;
+      const title = $('#chTitle');
+      if (!title) return;
+      title.focus();
+      title.select();
+    }, 80);
+  } catch (err) {
+    toast(`打开失败：${err.message || '未知错误'}`, 'err');
+  }
+}
+
+async function openGlobalSearch(presetWord = '') {
+  if (S.novel && S.chapterId) await saveChapterNow().catch(() => {});
+  if (!S.novels?.length) await loadNovels().catch(() => {});
+  const ta = $('#chContent');
+  const picked = String(presetWord || '').trim()
+    || (ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd).trim() : '');
+  const preset = picked && picked.length <= 80 && !picked.includes('\n') ? picked : '';
+  const workCount = S.novels?.length || 0;
+
+  showModal(`<h3>全局检索</h3>
+    <p class="modal-sub">在书架里 ${workCount} 部作品的正文和章节标题中查找。结果按作品分组，点命中处直接跳过去。</p>
+    <div class="find-bar">
+      <input class="input" id="gFindQ" placeholder="输入关键词，回车检索" autocomplete="off" />
+      <button class="btn btn-primary" id="gFindGo">${ico('search')}检索</button>
+    </div>
+    <div class="find-sum" id="gFindSum"></div>
+    <div class="find-list global-find-list" id="gFindList"><div class="find-empty">输入关键词，检索整个书架。</div></div>
+    <div class="modal-foot"><button class="btn btn-text" id="gFindClose">关闭</button></div>`,
+  (box) => {
+    const qEl = box.querySelector('#gFindQ');
+    const listEl = box.querySelector('#gFindList');
+    const sumEl = box.querySelector('#gFindSum');
+    let seq = 0;
+    let timer = null;
+    box.querySelector('#gFindClose').onclick = () => { clearTimeout(timer); closeModal(); };
+    if (preset) qEl.value = preset;
+    qEl.focus();
+    qEl.select();
+
+    const render = (j) => {
+      if (!j.total) {
+        sumEl.textContent = '';
+        listEl.innerHTML = `<div class="find-empty">所有作品里都没有找到「${esc(j.q)}」。<br>可以试试更短的关键词。</div>`;
+        return;
+      }
+      sumEl.innerHTML = `共 <b>${j.total}</b> 处 · <b>${j.works}</b> 部作品 / <b>${j.chapters}</b> 章${j.truncated ? '（下方只列出部分结果）' : ''}`;
+      const groups = [];
+      const byId = new Map();
+      for (const r of j.results) {
+        let g = byId.get(r.novelId);
+        if (!g) {
+          g = { id: r.novelId, title: r.novelTitle, author: r.author, rows: [] };
+          byId.set(r.novelId, g);
+          groups.push(g);
+        }
+        g.rows.push(r);
+      }
+      listEl.innerHTML = groups.map((g) => `
+        <section class="gfind-work">
+          <div class="gfind-work-head">
+            <b>《${esc(g.title)}》</b>
+            <span>${g.author ? `${esc(g.author)} · ` : ''}${g.rows.length} 章</span>
+          </div>
+          ${g.rows.map((r) => {
+            const status = [r.count ? `${r.count} 处` : '', r.titleHit ? '标题命中' : ''].filter(Boolean).join(' · ');
+            return `<div class="find-row">
+              <div class="find-head"><b>第 ${r.no} 章 · ${esc(r.chapterTitle)}</b><span>${status}</span></div>
+              ${r.titleHit ? `<div class="find-hit gfind-hit gfind-title-hit" data-hit="1" data-kind="title" data-novel="${esc(r.novelId)}" data-cid="${esc(r.chapterId)}">标题：${esc(r.titleHit.before)}<mark>${esc(r.titleHit.match)}</mark>${esc(r.titleHit.after)}</div>` : ''}
+              ${r.hits.map((h) => `<div class="find-hit gfind-hit" data-hit="1" data-kind="content" data-novel="${esc(r.novelId)}" data-cid="${esc(r.chapterId)}" data-start="${h.start}" data-len="${h.match.length}">${esc(h.before)}<mark>${esc(h.match)}</mark>${esc(h.after)}</div>`).join('')}
+            </div>`;
+          }).join('')}
+        </section>`).join('');
+      listEl.querySelectorAll('.gfind-hit').forEach((el) => {
+        el.onclick = () => {
+          if (el.dataset.kind === 'title') jumpToGlobalTitle(el.dataset.novel, el.dataset.cid);
+          else jumpToGlobalHit(el.dataset.novel, el.dataset.cid, Number(el.dataset.start), Number(el.dataset.len));
+        };
+      });
+    };
+
+    const run = async () => {
+      clearTimeout(timer);
+      const q = qEl.value.trim();
+      if (!q) {
+        seq += 1;
+        sumEl.textContent = '';
+        listEl.innerHTML = '<div class="find-empty">输入关键词，检索整个书架。</div>';
+        return;
+      }
+      const mine = ++seq;
+      sumEl.textContent = '检索中…';
+      try {
+        const j = await api.get(`/api/library-search?q=${encodeURIComponent(q)}`);
+        if (mine !== seq || !listEl.isConnected) return;
+        render(j);
+      } catch (err) {
+        if (mine !== seq || !listEl.isConnected) return;
+        sumEl.textContent = '';
+        listEl.innerHTML = `<div class="find-empty">检索失败：${esc(err.message || '未知错误')}</div>`;
+      }
+    };
+
+    box.querySelector('#gFindGo').onclick = run;
+    qEl.addEventListener('input', () => {
+      clearTimeout(timer);
+      if (!qEl.value.trim()) {
+        seq += 1;
+        sumEl.textContent = '';
+        listEl.innerHTML = '<div class="find-empty">输入关键词，检索整个书架。</div>';
+        return;
+      }
+      timer = setTimeout(() => {
+        if (qEl.value.trim()) run();
+      }, 320);
+    });
+    qEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); run(); }
+    });
+    if (preset) run();
+  }, { wide: true });
+}
+
 async function openFind(presetWord = '') {
   if (!S.novel) return toast('先打开作品', 'err');
   await saveChapterNow().catch(() => {});
@@ -6744,6 +6901,8 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault(); continueWriting();
   } else if (e.key === 'E' && e.shiftKey) {
     e.preventDefault(); exportBook();
+  } else if (String(e.key).toLowerCase() === 'f' && e.shiftKey && $('#modalMask').hidden) {
+    e.preventDefault(); openGlobalSearch();
   } else if (e.key === 'f' && !e.shiftKey && S.novel) {
     e.preventDefault(); openFind();
   }
@@ -6758,6 +6917,7 @@ function cmdkSource() {
   const out = [];
   const op = (label, icon, run, hint) => out.push({ g: '操作', label, icon, run, hint });
   op('新建作品', 'plus', () => openNewNovelModal(), 'N');
+  op('全局检索', 'search', () => openGlobalSearch(), 'Ctrl+Shift+F');
   if (S.novel) {
     op('生成本章', 'spark', () => { setView('studio'); showAssistTab('write'); generateChapter(); }, 'Ctrl+Shift+↵');
     op('阅读模式', 'book-open', () => { setView('studio'); openReader(); });
@@ -7152,5 +7312,5 @@ async function boot() {
   }
 }
 
-window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, openChapterTargetModal, toggleFocus, restoreNovelBackup };
+window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, openChapterTargetModal, toggleFocus, openGlobalSearch, restoreNovelBackup };
 boot();

@@ -503,6 +503,14 @@ async function handleApi(req, res, url) {
     }
   }
 
+  /* --- 全局检索：在所有作品正文与章节标题中查找 --- */
+  if (seg[1] === 'library-search' && seg.length === 2 && method === 'GET') {
+    const q = (url.searchParams.get('q') || '').trim().slice(0, 80);
+    if (!q) return sendJson(res, 200, { q: '', total: 0, works: 0, chapters: 0, truncated: false, results: [] });
+    const limit = Math.min(120, Math.max(10, Number(url.searchParams.get('limit')) || 60));
+    return sendJson(res, 200, searchLibrary(q, limit));
+  }
+
   /* --- 单部作品 --- */
   if (seg[1] === 'novels' && seg[2]) {
     const id = seg[2];
@@ -966,6 +974,7 @@ function volumePlan(n) {
 /* ------------------------------------------------------------------ */
 
 const HITS_PER_CHAPTER = 20;
+const LIBRARY_HITS_PER_CHAPTER = 5;
 
 function hitSnippet(text, start, end, pad = 26) {
   const from = Math.max(0, start - pad);
@@ -1016,6 +1025,79 @@ function searchNovel(novel, q, limit) {
     });
   }
   return { q, total, chapters: matchedChapters, truncated: results.length < matchedChapters, results };
+}
+
+/** 跨作品检索：正文和章节标题都查，结果按作品分组展示 */
+function searchLibrary(q, limit) {
+  const needle = q.toLowerCase();
+  if (!needle) return { q, total: 0, works: 0, chapters: 0, truncated: false, results: [] };
+  const results = [];
+  const workIds = new Set();
+  let total = 0;
+  let chapterCount = 0;
+  let truncated = false;
+  const allNovels = listNovels();
+  if (allNovels.length > 300) truncated = true;
+
+  for (const meta of allNovels.slice(0, 300)) {
+    const n = getNovel(meta.id);
+    if (!n) continue;
+    let workMatched = false;
+
+    (n.chapters || []).forEach((ch, i) => {
+      const title = String(ch.title || '');
+      const titleAt = title.toLowerCase().indexOf(needle);
+      const text = String(ch.content || '');
+      const hay = text.toLowerCase();
+      let contentCount = 0;
+      let from = 0;
+      const hitStarts = [];
+
+      while (contentCount < 999) {
+        const at = hay.indexOf(needle, from);
+        if (at < 0) break;
+        contentCount += 1;
+        if (hitStarts.length < LIBRARY_HITS_PER_CHAPTER) hitStarts.push(at);
+        from = at + needle.length; // 不重复计入重叠命中
+      }
+
+      if (titleAt < 0 && !contentCount) return;
+      chapterCount += 1;
+      workMatched = true;
+      total += contentCount + (titleAt >= 0 ? 1 : 0);
+      if (results.length >= limit) { truncated = true; return; }
+
+      results.push({
+        novelId: n.id,
+        novelTitle: n.title || '未命名作品',
+        author: n.author || '',
+        chapterId: ch.id,
+        no: ch.no || i + 1,
+        chapterTitle: title || '未命名',
+        count: contentCount,
+        titleHit: titleAt >= 0
+          ? {
+              start: titleAt,
+              before: title.slice(0, titleAt),
+              match: title.slice(titleAt, titleAt + needle.length),
+              after: title.slice(titleAt + needle.length),
+            }
+          : null,
+        hits: hitStarts.map((at) => hitSnippet(text, at, at + needle.length)),
+      });
+    });
+
+    if (workMatched) workIds.add(n.id);
+  }
+
+  return {
+    q,
+    total,
+    works: workIds.size,
+    chapters: chapterCount,
+    truncated: truncated || results.length < chapterCount,
+    results,
+  };
 }
 
 /* ------------------------------------------------------------------ */

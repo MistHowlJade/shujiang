@@ -1591,6 +1591,21 @@ kbd {
 .find-hit:hover { background: var(--surface-3); color: var(--text-1); }
 .find-hit mark { padding: 0 2px; color: var(--accent-hover); background: var(--accent-bg); border-radius: var(--r-xs); }
 
+/* 全局检索：按作品分组 */
+.global-find-list { max-height: 48vh; }
+.gfind-work { display: flex; flex-direction: column; gap: 6px; }
+.gfind-work + .gfind-work { margin-top: 4px; }
+.gfind-work-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 2px 4px; color: var(--text-3); font-size: 11px;
+}
+.gfind-work-head b {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-1); font-size: 12.5px; font-weight: 600;
+}
+.gfind-work-head span { flex: 0 0 auto; }
+.gfind-title-hit { background: var(--surface-3); color: var(--text-3); }
+
 .toast-wrap {
   position: fixed; right: 20px; bottom: 20px; z-index: 200;
   display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
@@ -2067,6 +2082,8 @@ body.sprint-open .toast-wrap { bottom: 302px; }
 @media (max-width: 720px) {
   .cmdk-btn span, .cmdk-btn kbd { display: none; }
   .cmdk-btn { width: 30px; justify-content: center; padding: 0; }
+  #globalSearchBtn span { display: none; }
+  #globalSearchBtn { width: 32px; padding: 0; justify-content: center; }
   .field-row, .field-grid, .field-grid.three, .provider .grid2 { grid-template-columns: 1fr; }
   .keyhints span:nth-child(n + 2) { display: none; }
   .shelf-grid { grid-template-columns: 1fr; }
