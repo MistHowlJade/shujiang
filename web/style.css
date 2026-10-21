@@ -633,6 +633,16 @@ kbd {
 .book .bk-del:hover { background: var(--danger-bg); color: var(--danger); }
 .book .bk-del .ico { width: 14px; height: 14px; }
 
+.book .bk-read {
+  position: absolute; top: 9px; right: 41px; width: 26px; height: 26px;
+  display: grid; place-items: center; cursor: pointer; opacity: 0;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--accent);
+  transition: all var(--dur) var(--ease);
+}
+.book:hover .bk-read { opacity: 1; }
+.book .bk-read:hover { background: var(--accent-bg); color: var(--accent-hover); }
+.book .bk-read .ico { width: 14px; height: 14px; }
+
 /* 回收站 */
 .trash-list { display: flex; flex-direction: column; gap: 8px; max-height: 48vh; overflow: auto; padding: 2px; }
 .trash-item {
