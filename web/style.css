@@ -1104,6 +1104,7 @@ kbd {
   border: 1px solid var(--border-2); border-radius: var(--r-xl);
   box-shadow: var(--sh-3); animation: sheetIn 200ms var(--ease);
 }
+.modal.modal-wide { width: min(900px, 100%); }
 @keyframes sheetIn { from { opacity: 0; transform: translateY(8px) scale(.985); } }
 .modal h3 { margin: 0 0 16px; font-size: 15px; font-weight: 600; }
 .modal .modal-foot {
@@ -1497,6 +1498,120 @@ body.sprint-open .toast-wrap { bottom: 302px; }
 .modal-foot .goal-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
 
 .bk-today { font-style: normal; color: var(--success); }
+
+/* ==========================================================================
+   全书体检
+   ========================================================================== */
+.health-metrics {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px; margin-bottom: 12px;
+}
+.health-metric {
+  min-width: 0; padding: 10px 12px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.health-metric b {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 20px; line-height: 1.2; font-weight: 600;
+  letter-spacing: -.02em; font-variant-numeric: tabular-nums;
+}
+.health-metric span { display: block; margin-top: 3px; font-size: 10.5px; color: var(--text-3); }
+.health-metric em { display: block; margin-top: 2px; font-style: normal; font-size: 10px; color: var(--text-4); }
+.health-verdict {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin-bottom: 14px; padding: 10px 12px;
+  font-size: 12px; line-height: 1.75; color: var(--text-2);
+  background: var(--warning-bg); border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.health-verdict.ok { background: var(--success-bg); border-color: var(--border); }
+.health-verdict .ico { flex: 0 0 auto; width: 15px; height: 15px; margin-top: 2px; color: var(--warning); }
+.health-verdict.ok .ico { color: var(--success); }
+.health-verdict em { display: block; margin-top: 2px; font-style: normal; color: var(--text-3); }
+.health-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.health-card {
+  min-width: 0; padding: 12px 14px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.health-card.wide { grid-column: span 2; }
+.health-card h4 {
+  display: flex; align-items: center; gap: 6px;
+  margin: 0 0 6px; font-size: 12.5px; font-weight: 600;
+}
+.health-card h4 .health-count {
+  margin-left: auto; font-size: 10.5px; font-weight: 400;
+  color: var(--text-3); font-variant-numeric: tabular-nums;
+}
+.health-card > p { margin: 0; font-size: 11.5px; line-height: 1.7; color: var(--text-3); }
+.health-ok {
+  margin: 8px 0 0 !important; padding-left: 15px; position: relative;
+  color: var(--success) !important;
+}
+.health-ok::before {
+  content: ""; position: absolute; left: 1px; top: 7px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--success);
+}
+.health-rows { display: flex; flex-direction: column; margin-top: 7px; }
+.health-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; padding: 7px 0; font: inherit; font-size: 11.5px; text-align: left;
+  color: var(--text-2); background: none; border: 0; border-top: 1px solid var(--border);
+  cursor: pointer;
+}
+.health-row:hover { color: var(--accent-hover); }
+.health-row[disabled] { cursor: default; opacity: .65; }
+.health-row[disabled]:hover { color: var(--text-2); }
+.health-row > span {
+  display: flex; align-items: center; gap: 5px; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.health-row > span i { flex: 0 0 auto; font-style: normal; font-size: 10px; color: var(--text-4); }
+.health-row > em { flex: 0 0 auto; font-style: normal; font-size: 10.5px; color: var(--text-3); }
+.health-sub { margin-top: 8px; font-size: 10px; color: var(--text-4); }
+.health-chip-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.health-chip {
+  height: 22px; padding: 0 8px; font: inherit; font-size: 10.5px;
+  color: var(--text-2); background: var(--surface-3);
+  border: 1px solid var(--border); border-radius: var(--r-full);
+  cursor: pointer;
+}
+.health-chip:hover { color: var(--accent-hover); border-color: var(--accent-line); background: var(--accent-bg); }
+.health-dups { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.health-dup { min-width: 0; }
+.health-quote {
+  padding: 7px 10px; font-size: 11.5px; line-height: 1.7; color: var(--text-2);
+  background: var(--surface-3); border-left: 2px solid var(--border-2);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  overflow-wrap: anywhere;
+}
+.health-dup-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 5px; }
+.health-dup-meta > span { margin-right: 2px; font-size: 10px; color: var(--warning); }
+.health-phrases { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.health-phrase {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 9px; font: inherit; font-size: 11.5px;
+  color: var(--text-2); background: var(--surface-3);
+  border: 1px solid var(--border); border-radius: var(--r-full);
+  cursor: pointer;
+}
+.health-phrase:hover { color: var(--accent-hover); border-color: var(--accent-line); background: var(--accent-bg); }
+.health-phrase b { font-size: 10.5px; font-weight: 600; color: var(--warning); font-variant-numeric: tabular-nums; }
+.health-thread-kind {
+  flex: 0 0 auto; padding: 1px 5px; font-size: 9.5px; font-weight: 500;
+  color: var(--warning); background: var(--warning-bg); border-radius: var(--r-xs);
+}
+.health-disclaimer { margin: 12px 0 0; font-size: 10.5px; line-height: 1.7; color: var(--text-3); }
+.health-note { margin-right: auto; font-size: 10.5px; color: var(--text-4); }
+
+@media (max-width: 720px) {
+  .health-metrics { grid-template-columns: 1fr 1fr; }
+  .health-grid { grid-template-columns: 1fr; }
+  .health-card.wide { grid-column: auto; }
+  .health-row > span { white-space: normal; }
+  .health-row > em { display: none; }
+}
 
 /* ==========================================================================
    响应式

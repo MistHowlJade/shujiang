@@ -60,9 +60,10 @@ function mdLite(text) {
   return out.join('');
 }
 
-function showModal(html, onMount) {
+function showModal(html, onMount, opts = {}) {
   const mask = $('#modalMask');
   const box = $('#modal');
+  box.classList.toggle('modal-wide', !!opts.wide);
   box.innerHTML = html;
   mask.hidden = false;
   onMount?.(box);
@@ -497,6 +498,406 @@ async function openStatsModal() {
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') box.querySelector('#goalSave').click(); });
   });
 }
+
+/* ============================================================
+ * 4.7 全书体检（纯本地统计）
+ * ------------------------------------------------------------
+ * 不调用模型，只扫一遍现有正文与章节记忆，把长篇最容易失控的
+ * 几件事摆出来：章节长度、重复段落、口头禅、超长段落、对话密度、
+ * 人物断档、未回收线索。所有条目都能直接跳到对应章节。
+ * ============================================================ */
+const HEALTH_PHRASES = [
+  '不由得', '仿佛', '似乎', '一丝', '一抹', '眼中闪过', '嘴角勾起', '深吸一口气',
+  '缓缓', '微微', '淡淡', '沉默片刻', '空气仿佛凝固', '心中一震', '瞳孔骤缩',
+  '不易察觉', '意味深长', '若有所思', '与此同时', '顿时', '瞬间', '下意识',
+  '忍不住', '轻轻地', '不知为何', '眼神复杂', '目光一凝', '神色一僵', '嘴角泛起',
+  '倏然', '蓦地', '刹那间', '心中一凛', '头皮发麻', '脊背发凉',
+];
+const HEALTH_NORM_RE = /[\s，。！？；：、…—·“”‘’"'（）()《》【】\[\]{}<>]/g;
+
+function healthChip(ch, text) {
+  if (!ch?.id) return '';
+  return `<button type="button" class="health-chip" data-health-chapter="${esc(ch.id)}" title="打开第 ${ch.no} 章">${text || `第 ${ch.no} 章`}</button>`;
+}
+
+function healthOk(text) {
+  return `<p class="health-ok">${text}</p>`;
+}
+
+function buildHealthReport(novel) {
+  const chapters = (novel?.chapters || []).map((ch, i) => {
+    const content = String(ch.content || '');
+    return {
+      id: ch.id,
+      ch,
+      no: Number(ch.no) || i + 1,
+      title: ch.title || '未命名',
+      content,
+      words: countWords(content),
+      chars: content.length,
+      stage: ch.stage || 'draft',
+    };
+  });
+  const written = chapters.filter((c) => c.words > 0);
+  const totalWords = chapters.reduce((s, c) => s + c.words, 0);
+  const avg = written.length ? Math.round(totalWords / written.length) : 0;
+  const longest = written.slice().sort((a, b) => b.words - a.words)[0] || null;
+  const shortest = written.slice().sort((a, b) => a.words - b.words)[0] || null;
+  const doneCount = chapters.filter((c) => c.stage === 'done').length;
+  const memCount = chapters.filter((c) => c.ch.memory).length;
+
+  // 章节长度：偏离平均线 45% 以下或 2.2 倍以上才提示，避免正常起伏被当成问题
+  const outliers = [];
+  if (written.length >= 4 && avg >= 300) {
+    for (const c of written) {
+      const ratio = c.words / avg;
+      if (ratio < 0.45 || ratio > 2.2) outliers.push({ ...c, ratio });
+    }
+    outliers.sort((a, b) => Math.abs(b.ratio - 1) - Math.abs(a.ratio - 1));
+  }
+  const outlierTotal = outliers.length;
+
+  // 重复段落：去空白和标点后比对，长段落才有意义
+  const paraMap = new Map();
+  for (const c of written) {
+    for (const raw of c.content.split(/\n+/)) {
+      const text = raw.trim();
+      const norm = text.replace(HEALTH_NORM_RE, '');
+      if (norm.length < 40) continue;
+      let item = paraMap.get(norm);
+      if (!item) {
+        item = {
+          count: 0,
+          chapters: new Map(),
+          sample: text.length > 96 ? `${text.slice(0, 96)}…` : text,
+        };
+        paraMap.set(norm, item);
+      }
+      item.count += 1;
+      item.chapters.set(c.id, { id: c.id, no: c.no, title: c.title });
+    }
+  }
+  const duplicateGroups = [...paraMap.values()]
+    .filter((x) => x.count >= 2)
+    .sort((a, b) => b.count - a.count || b.sample.length - a.sample.length);
+  const duplicateTotal = duplicateGroups.length;
+  const duplicates = duplicateGroups.slice(0, 6)
+    .map((x) => ({ ...x, chapters: [...x.chapters.values()].sort((a, b) => a.no - b.no) }));
+
+  // 口头禅 / AI 高频词：给的是线索，不是判决
+  const phrases = HEALTH_PHRASES.map((text) => {
+    const hits = [];
+    let count = 0;
+    for (const c of written) {
+      let n = 0, at = 0;
+      while ((at = c.content.indexOf(text, at)) !== -1) {
+        n += 1;
+        at += text.length;
+      }
+      if (n) {
+        count += n;
+        hits.push({ id: c.id, no: c.no, title: c.title, count: n });
+      }
+    }
+    return { text, count, chapters: hits };
+  }).filter((x) => x.count >= 3).sort((a, b) => b.count - a.count).slice(0, 10);
+
+  // 超长段落
+  const longParagraphs = [];
+  let longParagraphTotal = 0;
+  for (const c of written) {
+    const lens = c.content.split(/\n+/)
+      .map((p) => p.trim())
+      .filter((p) => p.length >= 320)
+      .map((p) => p.length);
+    if (lens.length) {
+      longParagraphTotal += lens.length;
+      longParagraphs.push({ id: c.id, no: c.no, title: c.title, count: lens.length, max: Math.max(...lens) });
+    }
+  }
+  longParagraphs.sort((a, b) => b.count - a.count || b.max - a.max);
+
+  // 对话密度：只统计成对引号里的文字（“”、「」、""）
+  let quotedTotal = 0, charTotal = 0;
+  for (const c of written) {
+    let quoted = 0;
+    c.content.replace(/“[^”]*”|「[^」]*」|"[^"]*"/g, (m) => {
+      quoted += m.length;
+      return m;
+    });
+    c.dialogue = c.chars ? quoted / c.chars : 0;
+    quotedTotal += quoted;
+    charTotal += c.chars;
+  }
+  const dialogueAvg = charTotal ? quotedTotal / charTotal : 0;
+  const lowDialogue = written
+    .filter((c) => c.chars >= 500 && c.dialogue < 0.08)
+    .sort((a, b) => a.dialogue - b.dialogue)
+    .slice(0, 4);
+  const highDialogue = written
+    .filter((c) => c.chars >= 500 && c.dialogue > 0.75)
+    .sort((a, b) => b.dialogue - a.dialogue)
+    .slice(0, 4);
+
+  // 人物断档：依据章节记忆，设定库里的人最近一次出场距今 ≥ 5 章就提示
+  const charIndex = buildCharacterAppearances(novel);
+  const lastNo = written.length ? Math.max(...written.map((c) => c.no)) : 0;
+  const gaps = [];
+  for (const c of (novel?.bible?.characters || [])) {
+    const name = String(c.name || '').trim();
+    if (!name) continue;
+    const appear = appearancesForCharacter(c, charIndex);
+    if (!appear.length) {
+      if (lastNo >= 5) gaps.push({ name, role: c.role || '', lastNo: 0, gap: lastNo, id: '' });
+      continue;
+    }
+    const last = appear[appear.length - 1];
+    const lastN = Number(last.no) || 0;
+    const gap = lastNo - lastN;
+    if (gap >= 5 && lastN > 0) gaps.push({ name, role: c.role || '', lastNo: lastN, gap, id: last.id });
+  }
+  gaps.sort((a, b) => b.gap - a.gap);
+  const gapTotal = gaps.length;
+
+  // 未回收线索：从章节记忆汇总，是否真的回收仍以正文为准
+  const threads = collectThreads(novel);
+  const unresolved = threads.filter((t) => t.kind === 'unresolved');
+  const foreshadowing = threads.filter((t) => t.kind === 'foreshadowing');
+  const staleThreads = unresolved.slice()
+    .sort((a, b) => (a.latest?.no || 0) - (b.latest?.no || 0))
+    .slice(0, 5);
+
+  const issueKinds = [
+    outliers.length,
+    duplicates.length,
+    longParagraphs.length,
+    lowDialogue.length + highDialogue.length,
+    gaps.length,
+    staleThreads.length,
+  ].filter((n) => n > 0).length;
+
+  return {
+    title: novel?.title || '',
+    chapters, written, totalWords, avg, longest, shortest,
+    doneCount, memCount, outliers: outliers.slice(0, 6), outlierTotal,
+    duplicates, duplicateTotal, phrases,
+    longParagraphs: longParagraphs.slice(0, 6), longParagraphTotal,
+    dialogueAvg, lowDialogue, highDialogue,
+    gaps: gaps.slice(0, 6), gapTotal,
+    unresolved, foreshadowing, staleThreads,
+    lastNo, issueKinds,
+  };
+}
+
+function healthMarkdown(r) {
+  const out = [];
+  const push = (s = '') => out.push(s);
+  push(`# 《${r.title}》全书体检`);
+  push('');
+  push(`> ${new Date().toLocaleString('zh-CN')} · 本地统计，不调用模型`);
+  push('');
+  push(`- 总字数：${r.totalWords} 字`);
+  push(`- 章节：${r.chapters.length} 章（${r.written.length} 章有正文）`);
+  push(`- 平均章长：${r.avg} 字`);
+  push(`- 完稿：${r.doneCount}/${r.chapters.length}`);
+  push(`- 章节记忆：${r.memCount}/${r.chapters.length}`);
+  if (r.outliers.length) {
+    push('', '## 章节长度');
+    r.outliers.forEach((c) => {
+      const delta = c.ratio >= 1 ? `偏长 ${Math.round((c.ratio - 1) * 100)}%` : `偏短 ${Math.round((1 - c.ratio) * 100)}%`;
+      push(`- 第 ${c.no} 章《${c.title}》：${c.words} 字（${delta}）`);
+    });
+  }
+  if (r.duplicates.length) {
+    push('', '## 重复段落');
+    r.duplicates.forEach((d, i) => {
+      push(`${i + 1}. ${d.sample.replace(/\s+/g, ' ')}（出现 ${d.count} 次，第 ${d.chapters.map((c) => c.no).join('、')} 章）`);
+    });
+  }
+  if (r.phrases.length) {
+    push('', '## 高频表达');
+    r.phrases.forEach((p) => push(`- ${p.text}：${p.count} 次（${p.chapters.length} 章）`));
+  }
+  if (r.longParagraphs.length) {
+    push('', '## 超长段落');
+    r.longParagraphs.forEach((c) => push(`- 第 ${c.no} 章《${c.title}》：${c.count} 段，最长 ${c.max} 字`));
+  }
+  push('', '## 对话密度');
+  push(`全书约 ${(r.dialogueAvg * 100).toFixed(1)}%（成对引号内文字占比）。`);
+  if (r.lowDialogue.length) push(`- 低于 8%：第 ${r.lowDialogue.map((c) => c.no).join('、')} 章`);
+  if (r.highDialogue.length) push(`- 高于 75%：第 ${r.highDialogue.map((c) => c.no).join('、')} 章`);
+  if (r.gaps.length) {
+    push('', '## 人物断档');
+    r.gaps.forEach((g) => {
+      push(`- ${g.name}${g.role ? `（${g.role}）` : ''}：${g.lastNo ? `第 ${g.lastNo} 章后未再出现，已隔 ${g.gap} 章` : '尚未在章节记忆中出现'}`);
+    });
+  }
+  if (r.unresolved.length || r.foreshadowing.length) {
+    push('', '## 线索');
+    push(`- 未决 ${r.unresolved.length} 条，伏笔 ${r.foreshadowing.length} 条`);
+    r.staleThreads.forEach((t) => push(`- ${t.text}（最近提到：第 ${t.latest?.no || '?'} 章）`));
+  }
+  return out.join('\n');
+}
+
+async function copyHealthReport(r) {
+  const text = healthMarkdown(r);
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('体检报告已复制为 Markdown', 'ok');
+    return;
+  } catch {}
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    toast('体检报告已复制为 Markdown', 'ok');
+  } catch {
+    toast('复制失败，可以手动选中报告文字', 'err');
+  }
+  ta.remove();
+}
+
+function openHealthReport() {
+  if (!S.novel) return toast('先打开一部作品', 'err');
+  const r = buildHealthReport(S.novel);
+  const total = r.chapters.length;
+  const written = r.written.length;
+  const pct = (v) => `${(v * 100).toFixed(1)}%`;
+  const metric = (value, label, sub) => `<div class="health-metric"><b>${value}</b><span>${label}</span>${sub ? `<em>${sub}</em>` : ''}</div>`;
+
+  const outlierRows = r.outliers.map((c) => {
+    const delta = c.ratio >= 1 ? `偏长 ${Math.round((c.ratio - 1) * 100)}%` : `偏短 ${Math.round((1 - c.ratio) * 100)}%`;
+    return `<button type="button" class="health-row" data-health-chapter="${esc(c.id)}">
+      <span>第 ${c.no} 章 · ${esc(c.title)}</span><em>${fmtWords(c.words)} 字 · ${delta}</em>
+    </button>`;
+  }).join('');
+
+  const duplicateRows = r.duplicates.map((d) => `
+    <div class="health-dup">
+      <div class="health-quote">${esc(d.sample)}</div>
+      <div class="health-dup-meta"><span>${d.count} 次</span>${d.chapters.map((c) => healthChip(c)).join('')}</div>
+    </div>`).join('');
+
+  const phraseBtns = r.phrases.map((p) => `<button type="button" class="health-phrase" data-health-phrase="${esc(p.text)}" title="出现在 ${p.chapters.length} 章，共 ${p.count} 次；点击去全书查找">${esc(p.text)}<b>${p.count}</b></button>`).join('');
+
+  const longRows = r.longParagraphs.map((c) => `<button type="button" class="health-row" data-health-chapter="${esc(c.id)}">
+    <span>第 ${c.no} 章 · ${esc(c.title)}</span><em>${c.count} 段 · 最长 ${c.max} 字</em>
+  </button>`).join('');
+
+  const gapRows = r.gaps.map((g) => {
+    const attr = g.id ? ` data-health-chapter="${esc(g.id)}"` : ' disabled';
+    const role = g.role ? `<i>${esc(g.role)}</i>` : '';
+    const meta = g.lastNo ? `第 ${g.lastNo} 章后未再出现 · 已隔 ${g.gap} 章` : '尚未在章节记忆中出现';
+    return `<button type="button" class="health-row"${attr}><span>${esc(g.name)}${role}</span><em>${meta}</em></button>`;
+  }).join('');
+
+  const threadRows = r.staleThreads.map((t) => `<button type="button" class="health-row" data-health-chapter="${esc(t.latest.id)}">
+    <span><b class="health-thread-kind">未决</b>${esc(t.text)}</span><em>第 ${t.latest.no} 章</em>
+  </button>`).join('');
+
+  const noMemory = r.written.length > 0 && r.memCount === 0;
+  const caution = r.issueKinds > 0 || noMemory;
+  const verdict = !r.totalWords
+    ? '正文还是空的，先写下第一章再来体检。'
+    : noMemory
+      ? '正文已经有了，但还没有章节记忆；这次只能检查正文层面的问题，补齐记忆后才能检查人物断档与线索。'
+      : r.issueKinds === 0
+        ? '整体状态很稳：没有发现明显的章节失衡、重复段落、人物断档或悬空线索。'
+        : `发现 ${r.issueKinds} 类可以顺手处理的地方。下面按优先顺序列出，点任意章节可直接跳过去改。`;
+  const verdictSub = r.totalWords && r.written.length < 3 ? '当前有正文的章节还少，统计结果仅供参考。' : '';
+
+  showModal(`
+    <h3>全书体检</h3>
+    <p class="modal-sub">《${esc(r.title)}》 · 全部在本机计算，不调用模型，不消耗 token。</p>
+    <div class="health-metrics">
+      ${metric(fmtWords(r.totalWords), '总字数', `${written} / ${total} 章有正文`)}
+      ${metric(r.avg ? fmtWords(r.avg) : '—', '平均章长', r.longest ? `最长第 ${r.longest.no} 章` : '还没有正文')}
+      ${metric(`${total ? Math.round((r.doneCount / total) * 100) : 0}%`, '完稿进度', `${r.doneCount} / ${total} 章已定稿`)}
+      ${metric(`${total ? Math.round((r.memCount / total) * 100) : 0}%`, '记忆覆盖', `${r.memCount} / ${total} 章有记忆`)}
+    </div>
+    <div class="health-verdict${caution ? '' : ' ok'}">
+      <svg class="ico"><use href="#${caution ? 'i-info' : 'i-check'}" /></svg>
+      <span>${verdict}${verdictSub ? `<em>${verdictSub}</em>` : ''}</span>
+    </div>
+    <div class="health-grid">
+      <section class="health-card">
+        <h4>章节长度 <span class="health-count">${r.outlierTotal ? `${r.outlierTotal} 章异常` : '均衡'}</span></h4>
+        <p>${written ? `平均 ${fmtWords(r.avg)} 字/章${r.longest ? ` · 最短第 ${r.shortest.no} 章 ${fmtWords(r.shortest.words)} 字` : ''}` : '还没有正文'}</p>
+        ${outlierRows ? `<div class="health-rows">${outlierRows}</div>` : healthOk(written >= 4 ? '没有明显过长或过短的章节。' : '章节还少，长度参考意义有限。')}
+      </section>
+
+      <section class="health-card">
+        <h4>对话密度 <span class="health-count">${pct(r.dialogueAvg)}</span></h4>
+        ${r.dialogueAvg
+          ? `<p>成对引号内文字约占全书的 ${pct(r.dialogueAvg)}。低于 8% 偏叙述，高于 75% 偏对话推动。</p>`
+          : '<p>没有检测到成对引号。可能是叙述型作品，也可能是引号格式不统一。</p>'}
+        ${r.lowDialogue.length ? `<div class="health-sub">低于 8%</div><div class="health-chip-row">${r.lowDialogue.map((c) => healthChip(c)).join('')}</div>` : ''}
+        ${r.highDialogue.length ? `<div class="health-sub">高于 75%</div><div class="health-chip-row">${r.highDialogue.map((c) => healthChip(c)).join('')}</div>` : ''}
+        ${!r.lowDialogue.length && !r.highDialogue.length && r.dialogueAvg ? healthOk('各章对话密度都在常见区间内。') : ''}
+      </section>
+
+      <section class="health-card wide">
+        <h4>重复段落 <span class="health-count">${r.duplicateTotal ? `${r.duplicateTotal} 组` : '无'}</span></h4>
+        <p>按段落去掉空白和标点后比对。重复不一定是错，也可能是刻意回环。</p>
+        ${duplicateRows ? `<div class="health-dups">${duplicateRows}</div>` : healthOk('没有发现整段重复的正文。')}
+      </section>
+
+      <section class="health-card wide">
+        <h4>口头禅 / AI 高频词 <span class="health-count">${r.phrases.length ? `${r.phrases.length} 个` : '无'}</span></h4>
+        <p>只统计常见高频表达，不判断好坏。点一下去全书查找，决定要不要换说法。</p>
+        ${phraseBtns ? `<div class="health-phrases">${phraseBtns}</div>` : healthOk('没有发现明显扎堆的高频表达。')}
+      </section>
+
+      <section class="health-card">
+        <h4>超长段落 <span class="health-count">${r.longParagraphTotal ? `${r.longParagraphTotal} 段` : '无'}</span></h4>
+        <p>超过 320 字的段落单独列出。手机阅读时，长段落最容易让人滑走。</p>
+        ${longRows ? `<div class="health-rows">${longRows}</div>` : healthOk('没有超过 320 字的超长段落。')}
+      </section>
+
+      <section class="health-card">
+        <h4>人物断档 <span class="health-count">${r.gapTotal ? `${r.gapTotal} 人` : '无'}</span></h4>
+        <p>依据章节记忆统计设定库人物，最近一次出场距今 ≥ 5 章会列出来。</p>
+        ${gapRows ? `<div class="health-rows">${gapRows}</div>` : healthOk('设定库人物在章节记忆里都有持续出场。')}
+      </section>
+
+      <section class="health-card wide">
+        <h4>未回收线索 <span class="health-count">${r.unresolved.length ? `${r.unresolved.length} 条未决` : '无'}</span></h4>
+        <p>从章节记忆汇总，共 ${r.unresolved.length} 条未决、${r.foreshadowing.length} 条伏笔。是否有回收仍以正文为准，越靠前说明越久没再提。</p>
+        ${threadRows ? `<div class="health-rows">${threadRows}</div>` : healthOk('章节记忆里没有未决线索。')}
+      </section>
+    </div>
+    ${r.memCount < total ? `<p class="health-disclaimer">章节记忆覆盖 ${r.memCount}/${total} 章，人物断档与线索统计会受此影响；可在「线索 → 批量补记忆」补齐。</p>` : ''}
+    <div class="modal-foot">
+      <span class="health-note">本地统计 · 结果仅供参考</span>
+      <button class="btn btn-text" id="healthCopy">复制报告</button>
+      <button class="btn" id="healthRefresh">重新体检</button>
+      <button class="btn btn-primary" id="healthClose">关闭</button>
+    </div>
+  `, (box) => {
+    box.querySelector('#healthClose').onclick = closeModal;
+    box.querySelector('#healthRefresh').onclick = () => openHealthReport();
+    box.querySelector('#healthCopy').onclick = () => copyHealthReport(r);
+    box.querySelectorAll('[data-health-chapter]').forEach((el) => {
+      el.onclick = () => {
+        closeModal();
+        openChapterFromIndex(el.dataset.healthChapter);
+      };
+    });
+    box.querySelectorAll('[data-health-phrase]').forEach((el) => {
+      el.onclick = () => {
+        closeModal();
+        openFind(el.dataset.healthPhrase);
+      };
+    });
+  }, { wide: true });
+}
+
+$('#healthBtn')?.addEventListener('click', openHealthReport);
 
 /* ============================================================
  * 4.6 分卷：章节目录按卷归组
@@ -4787,12 +5188,13 @@ function jumpToHit(chapterId, start, len) {
   }, 60);
 }
 
-async function openFind() {
+async function openFind(presetWord = '') {
   if (!S.novel) return toast('先打开作品', 'err');
   await saveChapterNow().catch(() => {});
   const novelId = S.novel.id;
   const ta = $('#chContent');
-  const picked = ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd).trim() : '';
+  const passed = String(presetWord || '').trim();
+  const picked = passed || (ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd).trim() : '');
   const preset = picked && picked.length <= 40 && !picked.includes('\n') ? picked : '';
   showModal(`<h3>全书查找 · 《${esc(S.novel.title)}》</h3>
     <div class="find-bar">
@@ -4926,6 +5328,7 @@ function cmdkSource() {
     op('撤销', 'undo', () => { setView('studio'); doUndo(); }, 'Ctrl+Z');
     op('重做', 'redo', () => { setView('studio'); doRedo(); }, 'Ctrl+Shift+Z');
     op('全书查找 / 替换', 'search', () => { setView('studio'); openFind(); }, 'Ctrl+F');
+    op('全书体检', 'pulse', () => { setView('studio'); openHealthReport(); });
   }
   op('立即保存', 'check', manualSave, 'Ctrl+S');
   op('切换明暗主题', 'moon', () => $('#themeBtn').click());
@@ -5290,5 +5693,5 @@ async function boot() {
   }
 }
 
-window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle };
+window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport };
 boot();
