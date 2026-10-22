@@ -85,6 +85,9 @@ export function proofIssue(info, content, paras, type, message, start, end, opt 
     start: s,
     end: e,
     loc,
+    // 指纹：用来记住「这一处我看过，是误报」。只跟规则类型、章节和命中文字有关，
+    // 不跟位置有关 —— 作者在段落里挪动一下字，不该让忽略失效。
+    key: `${type}|${info.id}|${content.slice(s, e).replace(/\s+/g, '').slice(0, 40)}`,
   };
 }
 

@@ -1147,12 +1147,23 @@ async function openProof() {
       </div>
       <div class="proof-sum" id="proofSum"></div>
     </div>
+    <div class="proof-ignored" id="proofIgnoredBox" hidden>
+      <div class="proof-ignored-head">
+        <span id="proofIgnoredTitle">已忽略</span>
+        <span style="flex:1"></span>
+        <button class="btn btn-sm btn-text" id="proofRestoreAll">全部恢复</button>
+        <button class="icon-btn sm" id="proofIgnoredClose" title="收起">${ico('x')}</button>
+      </div>
+      <div class="proof-ignored-list" id="proofIgnoredList"></div>
+    </div>
     <div id="proofBody"></div>
     <div class="modal-foot">
       <span class="proof-note">本地规则 · 不会自动修改正文</span>
       <button class="btn btn-primary" id="proofClose">关闭</button>
     </div>`, (b) => {
     b.querySelector('#proofClose').onclick = closeModal;
+    b.querySelector('#proofRestoreAll').onclick = () => { saveIgnoreList([]); render(); };
+    b.querySelector('#proofIgnoredClose').onclick = () => { b.querySelector('#proofIgnoredBox').hidden = true; };
     b.querySelectorAll('[data-proof-scope]').forEach((btn) => {
       btn.onclick = () => {
         if (btn.disabled) return;
@@ -1169,10 +1180,37 @@ async function openProof() {
 
   const sumEl = box.querySelector('#proofSum');
   const bodyEl = box.querySelector('#proofBody');
+  const ignoredBox = box.querySelector('#proofIgnoredBox');
+  const ignoredListEl = box.querySelector('#proofIgnoredList');
+  const ignoredTitleEl = box.querySelector('#proofIgnoredTitle');
   const chapterMap = () => new Map(report.chapters.map((ch) => [ch.id, ch]));
 
+  // 忽略清单：作者认定是误报的，以后不再提示（跟着作品走，换机器也在）
+  const ignoreList = () => (Array.isArray(S.novel.meta?.proofIgnored) ? S.novel.meta.proofIgnored : []);
+  const saveIgnoreList = (list) => {
+    S.novel.meta = { ...(S.novel.meta || {}), proofIgnored: list };
+    saveNovelPart({ meta: S.novel.meta });
+  };
+  const ignoreIssue = (issue) => {
+    const list = ignoreList();
+    if (list.some((x) => x.key === issue.key)) return;
+    list.push({
+      key: issue.key, type: issue.type, message: issue.message,
+      snippet: String(issue.snippet || '').slice(0, 60),
+      no: issue.no, title: issue.title, ts: Date.now(),
+    });
+    saveIgnoreList(list.slice(-500));
+    render();
+  };
+  const restoreIssue = (key) => {
+    saveIgnoreList(ignoreList().filter((x) => x.key !== key));
+    render();
+  };
+
   const render = () => {
-    const allIssues = report.issues;
+    const ignored = new Set(ignoreList().map((x) => x.key));
+    const allIssues = report.issues.filter((issue) => !ignored.has(issue.key));
+    const hidden = report.issues.length - allIssues.length;
     const total = allIssues.length;
     const counts = { punct: 0, quote: 0, typo: 0, ending: 0 };
     for (const issue of allIssues) counts[issue.type] = (counts[issue.type] || 0) + 1;
@@ -1182,7 +1220,24 @@ async function openProof() {
     for (const issue of filtered) groupCounts.set(issue.chId, (groupCounts.get(issue.chId) || 0) + 1);
     const chapters = chapterMap();
 
-    sumEl.innerHTML = `扫描 <b>${report.chapters.length}</b> 章 · ${fmtWords(report.words)} 字 · 发现 <b>${total}</b> 处`;
+    sumEl.innerHTML = `扫描 <b>${report.chapters.length}</b> 章 · ${fmtWords(report.words)} 字 · 发现 <b>${total}</b> 处`
+      + (hidden ? `　·　<button type="button" class="proof-link" id="proofShowIgnored">已忽略 ${hidden} 处</button>` : '');
+
+    // 已忽略清单
+    const list = ignoreList();
+    ignoredBox.hidden = !list.length;
+    if (list.length) {
+      ignoredTitleEl.textContent = `已忽略 ${list.length} 处`;
+      ignoredListEl.innerHTML = list.slice().reverse().map((x) => `
+        <div class="proof-ignored-row">
+          <span class="proof-kind k-${esc(x.type)}">${esc(PROOF_KINDS[x.type] || '问题')}</span>
+          <span class="proof-main">
+            <span class="proof-msg">${esc(x.message)}</span>
+            <span class="proof-snippet">第 ${x.no} 章 · ${esc(x.title || '')}</span>
+          </span>
+          <button type="button" class="btn btn-sm btn-text" data-proof-restore="${esc(x.key)}">恢复</button>
+        </div>`).join('');
+    }
 
     if (!total) {
       bodyEl.innerHTML = `<div class="proof-empty"><b>${report.words ? '没有发现明显问题' : '没有可校对的正文'}</b><span>${report.words ? '标点、引号和段落收尾都在规则范围内。' : '先写一点正文，再回来校对。'}</span></div>`;
@@ -1213,14 +1268,17 @@ async function openProof() {
       const capped = ch?.capped ? ` · 仅显示前 ${PROOF_MAX_CHAPTER_ISSUES} 条` : '';
       html += `<section class="proof-group">
         <div class="proof-group-head"><span>第 ${group.no} 章 · ${esc(group.title)}</span><em>${groupCounts.get(group.chId) || 0} 处${capped}</em></div>`;
-      html += group.rows.map(({ issue, idx }) => `<button type="button" class="proof-row" data-proof-row="${idx}" title="跳到正文并选中">
-        <span class="proof-kind k-${esc(issue.type)}">${esc(PROOF_KINDS[issue.type] || '问题')}</span>
-        <span class="proof-main">
-          <span class="proof-msg">${esc(issue.message)}</span>
-          ${issue.snippet ? `<span class="proof-snippet">${proofSnippetHtml(issue)}</span>` : ''}
-        </span>
-        <span class="proof-loc">${esc(issue.loc || '全章')}</span>
-      </button>`).join('');
+      html += group.rows.map(({ issue, idx }) => `<div class="proof-row-wrap">
+        <button type="button" class="proof-row" data-proof-row="${idx}" title="跳到正文并选中">
+          <span class="proof-kind k-${esc(issue.type)}">${esc(PROOF_KINDS[issue.type] || '问题')}</span>
+          <span class="proof-main">
+            <span class="proof-msg">${esc(issue.message)}</span>
+            ${issue.snippet ? `<span class="proof-snippet">${proofSnippetHtml(issue)}</span>` : ''}
+          </span>
+          <span class="proof-loc">${esc(issue.loc || '全章')}</span>
+        </button>
+        <button type="button" class="proof-ignore" data-proof-ignore="${idx}" title="忽略这一处（以后不再提示）">忽略</button>
+      </div>`).join('');
       html += '</section>';
     }
     html += '</div>';
@@ -1245,6 +1303,19 @@ async function openProof() {
         if (issue) jumpToHit(issue.chId, issue.start, Math.max(0, issue.end - issue.start));
       };
     });
+    bodyEl.querySelectorAll('[data-proof-ignore]').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const issue = filtered[Number(btn.dataset.proofIgnore)];
+        if (issue) ignoreIssue(issue);
+      };
+    });
+    // 已忽略清单在另一个容器里，得从它自己身上找
+    ignoredListEl.querySelectorAll('[data-proof-restore]').forEach((btn) => {
+      btn.onclick = () => restoreIssue(btn.dataset.proofRestore);
+    });
+    const showIgnored = sumEl.querySelector('#proofShowIgnored');
+    if (showIgnored) showIgnored.onclick = () => { ignoredBox.hidden = !ignoredBox.hidden; };
     const more = bodyEl.querySelector('#proofMore');
     if (more) more.onclick = () => {
       const groupsEl2 = bodyEl.querySelector('.proof-groups');

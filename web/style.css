@@ -2347,6 +2347,39 @@ button.hm-cell:focus-visible { outline: 1px solid var(--accent); outline-offset:
 .proof-empty span { display: block; }
 .proof-more { display: block; margin: 12px auto 0; }
 .proof-note { margin-right: auto; font-size: 10.5px; color: var(--text-4); }
+
+/* 忽略：误报标记 */
+.proof-row-wrap { position: relative; }
+.proof-row-wrap .proof-row { padding-right: 56px; }
+.proof-ignore {
+  position: absolute; top: 50%; right: 8px; transform: translateY(-50%);
+  padding: 3px 8px; border: 1px solid transparent; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-4); font: inherit; font-size: 10.5px;
+  cursor: pointer; opacity: 0;
+  transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.proof-row-wrap:hover .proof-ignore, .proof-ignore:focus-visible { opacity: 1; }
+.proof-ignore:hover { background: var(--surface-3); border-color: var(--border); color: var(--text-2); }
+.proof-ignore:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-bg); }
+.proof-link {
+  border: none; background: transparent; padding: 0; cursor: pointer;
+  font: inherit; font-size: 11.5px; color: var(--accent-hover);
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.proof-link:hover { color: var(--text-1); }
+.proof-ignored {
+  margin-bottom: 10px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2);
+}
+.proof-ignored-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 11.5px; color: var(--text-3); }
+.proof-ignored-list { max-height: 180px; overflow-y: auto; }
+.proof-ignored-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 6px 0; border-top: 1px solid var(--border);
+}
+.proof-ignored-row:first-child { border-top: none; }
+.proof-ignored-row .proof-snippet { font-family: var(--font-ui); font-size: 11px; }
+
 @media (max-width: 720px) {
   .proof-top { flex-wrap: wrap; }
   .proof-scope { width: 100%; }

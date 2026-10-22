@@ -493,6 +493,20 @@ async function main() {
   check('全局搜索能搜到', (search.hits?.length || search.results?.length || 0) >= 1);
 
   // ---------------------------------------------------------------
+  group('校对的忽略清单');
+  {
+    const ign = [{ key: 'typo|c_x|的的', type: 'typo', message: '疑似叠字「的的」', no: 1, title: '第一章', ts: 1 }];
+    await put(`${BASE}/api/novels/${id}`, { meta: { proofIgnored: ign } });
+    const n2 = (await get(`${BASE}/api/novels/${id}`)).novel;
+    check('忽略清单能存住', Array.isArray(n2.meta?.proofIgnored) && n2.meta.proofIgnored.length === 1,
+      JSON.stringify(n2.meta?.proofIgnored));
+    check('忽略项带着说明信息', n2.meta?.proofIgnored?.[0]?.message === '疑似叠字「的的」');
+    await put(`${BASE}/api/novels/${id}`, { meta: { proofIgnored: [] } });
+    const n3 = (await get(`${BASE}/api/novels/${id}`)).novel;
+    check('忽略清单能清空', (n3.meta?.proofIgnored || []).length === 0);
+  }
+
+  // ---------------------------------------------------------------
   group('导出附带材料（大纲 / 人物小传）');
   {
     const n2 = await post(`${BASE}/api/novels`, { title: '附带材料测试' });

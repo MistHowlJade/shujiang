@@ -10,6 +10,7 @@
 
 import { diffProse, diffHtml, diffSideHtml, splitSentences, lcsOps } from '../web/lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from '../web/lib/goal.js';
+import { scanProofChapter, buildProofReport } from '../web/lib/proof.js';
 
 let pass = 0;
 let fail = 0;
@@ -216,6 +217,39 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
 
   const escaped = goalPanelHtml({ title: '<b>x</b>', meta: { targetWords: 1000 }, chapters: [] }, { dailyRate: 1 });
   check('书名里的尖括号被转义', !escaped.includes('<b>x</b>'), escaped.slice(0, 120));
+}
+
+// ---------------- 校对：忽略用的指纹 ----------------
+{
+  const ch = { id: 'c_x', no: 1, title: '测试章', content: '他站在巷口，心里想的的确的事。' };
+  const scan = scanProofChapter(ch, 0);
+  check('扫得出叠字问题', scan.issues.some((i) => i.type === 'typo'), JSON.stringify(scan.issues.map((i) => i.message)));
+  check('每条问题都有指纹', scan.issues.every((i) => typeof i.key === 'string' && i.key.includes('c_x')), JSON.stringify(scan.issues.map((i) => i.key)));
+
+  // 同样的内容再扫一次，指纹不变
+  const again = scanProofChapter({ ...ch }, 0);
+  const keysA = scan.issues.map((i) => i.key).sort().join('|');
+  const keysB = again.issues.map((i) => i.key).sort().join('|');
+  check('重复扫描指纹不变', keysA === keysB, `${keysA} vs ${keysB}`);
+
+  // 位置变了（前面加一段话），指纹仍然不变 —— 作者挪动文字不该让忽略失效
+  const moved = scanProofChapter({ ...ch, content: `前面多了一段话。\n\n${ch.content}` }, 0);
+  check('挪动位置后指纹不变', moved.issues.map((i) => i.key).sort().join('|') === keysA,
+    `${moved.issues.map((i) => i.key).sort().join('|')} vs ${keysA}`);
+
+  // 改掉问题本身，指纹要变（否则改好了还一直不报）
+  const fixed = scanProofChapter({ ...ch, content: '他站在巷口，心里想的确的事。' }, 0);
+  const typoKeys = (s) => s.issues.filter((i) => i.type === 'typo').map((i) => i.key);
+  check('问题改掉后指纹会变', typoKeys(fixed).join('|') !== typoKeys(scan).join('|'),
+    `${typoKeys(fixed).join('|')} vs ${typoKeys(scan).join('|')}`);
+
+  // 不同的章节，指纹要不同（不然忽略一章会误伤另一章）
+  const other = scanProofChapter({ ...ch, id: 'c_y' }, 0);
+  check('不同章节指纹不同', other.issues.some((i) => i.key.includes('c_y')));
+
+  // 全书报告里也一样带着指纹
+  const report = buildProofReport({ id: 'n_x', title: '书', chapters: [ch] }, 'book', null);
+  check('全书报告里的问题也有指纹', (report.issues || []).every((i) => !!i.key));
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
