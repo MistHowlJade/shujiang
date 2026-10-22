@@ -9,12 +9,12 @@ import {
   ROOT, DATA_DIR, ensureDirs, loadConfig, saveConfig, maskKey,
   listNovels, createNovel, getNovel, saveNovel, deleteNovel, trashNovel, listTrash, restoreNovel, purgeTrash, purgeAllTrash, newId, countWords,
   listSnapshots, createSnapshot, readSnapshot, chapterVolumeIds, volumeLabel,
-  findOutlineEntry, CHAPTER_STAGES, cleanTargetWords,
+  findOutlineEntry, CHAPTER_STAGES, cleanTargetWords, cleanPalette,
   applyFragmentData,
 } from './store.js';
 import { buildTask, TASKS, TEMPLATE_SLOTS, TEMPLATE_VARS } from './prompts.js';
 import { buildEpub } from './epub.js';
-import { coverSvg, readCoverImage, saveCoverImage, deleteCoverImage } from './cover.js';
+import { coverSvg, readCoverImage, saveCoverImage, deleteCoverImage, coverOptions } from './cover.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
 import { addWords, setGoal, statsSummary, statsDay } from './stats.js';
 
@@ -577,6 +577,8 @@ async function handleApi(req, res, url) {
       if (!n) return sendJson(res, 404, { error: '作品不存在' });
       const meta = { ...n.meta, ...(body.meta || {}) };
       meta.targetWords = cleanTargetWords(meta.targetWords);
+      if (!['classic', 'minimal', 'band'].includes(meta.coverStyle)) meta.coverStyle = n.meta.coverStyle || '';
+      meta.coverPalette = cleanPalette(meta.coverPalette);
       const merged = {
         ...n,
         ...body,
@@ -755,7 +757,22 @@ async function handleApi(req, res, url) {
       const n = getNovel(id);
       if (!n) return sendJson(res, 404, { error: '作品不存在' });
       if (method === 'GET') {
-        // 看自定义封面；没有就回自动生成的那张
+        // 看自定义封面；没有就回自动生成的那张。
+        // 带 style / palette 参数时按参数现画一张，用来在界面上预览还没保存的选择。
+        const style = url.searchParams.get('style');
+        const palette = url.searchParams.get('palette');
+        if (style || palette) {
+          const svg = coverSvg(n, {
+            words: (n.chapters || []).reduce((s, c) => s + countWords(c.content), 0),
+            chapters: (n.chapters || []).length,
+          }, { style: style || undefined, palette: palette === null || palette === '' ? undefined : palette });
+          res.writeHead(200, {
+            'Content-Type': 'image/svg+xml; charset=utf-8',
+            'Content-Length': Buffer.byteLength(svg),
+            'Cache-Control': 'no-store',
+          });
+          return res.end(svg);
+        }
         const custom = readCoverImage(n);
         if (custom) {
           res.writeHead(200, {
@@ -979,6 +996,11 @@ async function handleApi(req, res, url) {
   /* --- 可自定义提示词的任务清单（设置界面的下拉框读这个） --- */
   if (seg[1] === 'prompt-slots' && method === 'GET') {
     return sendJson(res, 200, { slots: TEMPLATE_SLOTS, vars: TEMPLATE_VARS });
+  }
+
+  /* --- 封面可选的版式与配色 --- */
+  if (seg[1] === 'cover-options' && method === 'GET') {
+    return sendJson(res, 200, coverOptions());
   }
 
   /* --- 流式生成 --- */

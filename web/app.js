@@ -7689,6 +7689,18 @@ window.addEventListener('drop', (e) => {
   openImportModal(f);
 });
 
+/** 封面可选的版式与配色：只取一次，之后走缓存 */
+let coverOptsCache = null;
+async function loadCoverOptions() {
+  if (coverOptsCache) return coverOptsCache;
+  try {
+    coverOptsCache = await api.get('/api/cover-options');
+  } catch {
+    coverOptsCache = null;
+  }
+  return coverOptsCache;
+}
+
 function exportBook() {
   if (!S.novel) return toast('先打开作品', 'err');
   showModal(`<h3>导出 / 备份《${esc(S.novel.title)}》</h3>
@@ -7712,6 +7724,16 @@ function exportBook() {
       <div class="cover-side">
         <div class="cover-title">封面</div>
         <div class="dim small" id="exCoverLabel"></div>
+        <div class="cover-choices" id="exCoverChoices">
+          <div class="cover-choice-row">
+            <span class="cover-choice-lbl">版式</span>
+            <div class="cover-choice-btns" id="exCoverStyles"></div>
+          </div>
+          <div class="cover-choice-row">
+            <span class="cover-choice-lbl">配色</span>
+            <div class="cover-swatches" id="exCoverPalettes"></div>
+          </div>
+        </div>
         <div class="cover-actions">
           <button class="btn" id="exCoverPick">上传自己的封面</button>
           <button class="btn btn-text" id="exCoverReset" hidden>改回自动生成</button>
@@ -7735,14 +7757,63 @@ function exportBook() {
       const coverLabel = box.querySelector('#exCoverLabel');
       const coverReset = box.querySelector('#exCoverReset');
       const coverFile = box.querySelector('#exCoverFile');
+      const coverChoices = box.querySelector('#exCoverChoices');
+      const styleBtns = box.querySelector('#exCoverStyles');
+      const swatches = box.querySelector('#exCoverPalettes');
+      // 选中的版式与配色；'auto' 表示按书名自动挑
+      let curStyle = S.novel.meta?.coverStyle || 'classic';
+      let curPalette = Number.isInteger(Number(S.novel.meta?.coverPalette)) && S.novel.meta.coverPalette !== ''
+        ? Number(S.novel.meta.coverPalette)
+        : 'auto';
       const refreshCover = () => {
         const has = !!S.novel.cover;
-        coverImg.src = `/api/novels/${S.novel.id}/cover?t=${Date.now()}`;
+        // 有自定义图就显示那张；否则按当前选择现画一张预览
+        coverImg.src = has
+          ? `/api/novels/${S.novel.id}/cover?t=${Date.now()}`
+          : `/api/novels/${S.novel.id}/cover?style=${encodeURIComponent(curStyle)}&palette=${encodeURIComponent(curPalette)}&t=${Date.now()}`;
         coverLabel.textContent = has
           ? `自定义封面（${String(S.novel.cover.ext || '').toUpperCase()}）`
           : '自动生成（按书名、作者、题材现画）';
         coverReset.hidden = !has;
+        coverChoices.hidden = has;      // 传了自己的图，版式和配色就用不上了
+        markChoices();
       };
+      const markChoices = () => {
+        styleBtns.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.style === curStyle));
+        swatches.querySelectorAll('button').forEach((b) => b.classList.toggle('on', String(b.dataset.palette) === String(curPalette)));
+      };
+      const saveChoice = async (part) => {
+        try {
+          const res = await api.put(`/api/novels/${S.novel.id}`, { meta: part });
+          S.novel.meta = res.novel?.meta || { ...S.novel.meta, ...part };
+        } catch (err) {
+          toast(`封面设置没存上：${err.message || '未知错误'}`, 'err');
+        }
+      };
+      // 版式与配色清单：只取一次
+      loadCoverOptions().then((opts) => {
+        if (!opts) return;
+        styleBtns.innerHTML = opts.styles.map((s) => `<button type="button" class="btn btn-sm" data-style="${s.id}" title="${esc(s.desc)}">${esc(s.name)}</button>`).join('');
+        swatches.innerHTML = opts.palettes.map((p) => `<button type="button" class="cover-swatch" data-palette="${p.index}" title="${esc(p.name)}" style="--sw:${esc(p.accent)};--swbg:${esc(p.bg)}"></button>`).join('')
+          + '<button type="button" class="cover-swatch auto" data-palette="auto" title="按书名自动挑">自动</button>';
+        styleBtns.querySelectorAll('button').forEach((b) => {
+          b.onclick = async () => {
+            curStyle = b.dataset.style;
+            markChoices();
+            refreshCover();
+            await saveChoice({ coverStyle: curStyle });
+          };
+        });
+        swatches.querySelectorAll('button').forEach((b) => {
+          b.onclick = async () => {
+            curPalette = b.dataset.palette === 'auto' ? 'auto' : Number(b.dataset.palette);
+            markChoices();
+            refreshCover();
+            await saveChoice({ coverPalette: curPalette === 'auto' ? '' : curPalette });
+          };
+        });
+        markChoices();
+      });
       box.querySelector('#exCoverPick').onclick = () => coverFile.click();
       coverFile.onchange = async () => {
         const file = coverFile.files?.[0];

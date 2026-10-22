@@ -20,6 +20,13 @@ export function cleanTargetWords(value) {
   return Number.isFinite(n) && n > 0 ? Math.min(n, 1000000) : 0;
 }
 
+// 封面配色下标；空字符串表示「按书名自动挑」——注意 Number('') 是 0，不能当成「选第 0 套」
+export function cleanPalette(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 && n < 8 ? n : '';
+}
+
 const CONFIG_DEFAULT = {
   providers: [],
   activeProviderId: '',
@@ -373,6 +380,9 @@ export function getNovel(id) {
   n.meta = { ...blankNovel().meta, ...(n.meta || {}) };
   // 全书目标字数：0 表示没定；只用于算进度，不限制写作
   n.meta.targetWords = cleanTargetWords(n.meta.targetWords);
+  // 封面版式与配色：不认识的当成默认
+  if (!['classic', 'minimal', 'band'].includes(n.meta.coverStyle)) n.meta.coverStyle = '';
+  n.meta.coverPalette = cleanPalette(n.meta.coverPalette);
   // 记下磁盘上的字数，saveNovel 用它判断这次落盘是不是「骤降」
   lastWrittenWords.set(n.id, (n.chapters || []).reduce((s, c) => s + (c.words || countWords(c.content || '')), 0));
   return n;

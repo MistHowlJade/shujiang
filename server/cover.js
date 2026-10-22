@@ -7,7 +7,7 @@
 // 文件还小得多），EPUB 3 也允许 SVG 充当 cover-image。
 //
 // 版式沿用应用自己的审美：深色底、细边框、一根强调线、居中的字。
-// 同一本书永远拿到同一套配色（按书名哈希选），换台电脑导出也是同一张。
+// 三套版式 + 六套配色供作者挑；不挑就按书名哈希选一套，同一本书永远一样。
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './store.js';
@@ -18,13 +18,28 @@ const H = 2400;
 // 六套深色底 + 暖白字 + 一个强调色。
 // 刻意压低饱和度，避免花哨；都是能压住正文文字的深色。
 const PALETTES = [
-  { bg: ['#151821', '#23283a'], ink: '#e8e6df', accent: '#c9a86a' }, // 夜蓝 · 金
-  { bg: ['#171512', '#282219'], ink: '#efe8da', accent: '#c99b56' }, // 暖褐 · 铜
-  { bg: ['#131a18', '#1e2c27'], ink: '#e2ece6', accent: '#7fb39c' }, // 松绿 · 玉
-  { bg: ['#1a1418', '#2c2028'], ink: '#efe2e6', accent: '#c5869a' }, // 酒红 · 玫
-  { bg: ['#141416', '#212125'], ink: '#e6e6e8', accent: '#8e9cb8' }, // 石墨 · 钢蓝
-  { bg: ['#1c1714', '#2b231c'], ink: '#f1e9dc', accent: '#d6b463' }, // 赭石 · 藤黄
+  { id: 'night', name: '夜蓝', bg: ['#151821', '#23283a'], ink: '#e8e6df', accent: '#c9a86a' },
+  { id: 'amber', name: '暖褐', bg: ['#171512', '#282219'], ink: '#efe8da', accent: '#c99b56' },
+  { id: 'jade', name: '松绿', bg: ['#131a18', '#1e2c27'], ink: '#e2ece6', accent: '#7fb39c' },
+  { id: 'rose', name: '酒红', bg: ['#1a1418', '#2c2028'], ink: '#efe2e6', accent: '#c5869a' },
+  { id: 'steel', name: '石墨', bg: ['#141416', '#212125'], ink: '#e6e6e8', accent: '#8e9cb8' },
+  { id: 'ochre', name: '赭石', bg: ['#1c1714', '#2b231c'], ink: '#f1e9dc', accent: '#d6b463' },
 ];
+
+// 三套版式
+const STYLES = [
+  { id: 'classic', name: '边框居中', desc: '细边框 + 居中大字，最像传统书封' },
+  { id: 'minimal', name: '极简留白', desc: '不要边框，大留白，只有字' },
+  { id: 'band', name: '顶部色带', desc: '上半张一整块颜色，书名压在色带上' },
+];
+
+/** 给前端看的版式与配色清单 */
+export function coverOptions() {
+  return {
+    styles: STYLES.map((s) => ({ id: s.id, name: s.name, desc: s.desc })),
+    palettes: PALETTES.map((p, i) => ({ id: p.id, index: i, name: p.name, accent: p.accent, bg: p.bg[0] })),
+  };
+}
 
 // 封面用衬线中文，浏览器 / 阅读器都能找到近似字体
 const FONT = "'Songti SC','SimSun','Noto Serif CJK SC','Source Han Serif SC','STSong',serif";
@@ -193,46 +208,94 @@ function cnNumber(n) {
   return n.toLocaleString('zh-CN');
 }
 
+/** 版式 id 合法性检查；不认识的一律当 classic */
+function pickStyle(id) {
+  const s = String(id || '').trim();
+  return STYLES.some((x) => x.id === s) ? s : 'classic';
+}
+
+/** 配色：给了下标就用下标；给 'auto' 或不给就按书名哈希选 */
+function pickPalette(value, title) {
+  const n = Number(value);
+  if (Number.isInteger(n) && n >= 0 && n < PALETTES.length) return PALETTES[n];
+  return PALETTES[hashOf(title) % PALETTES.length];
+}
+
 /**
  * 生成封面 SVG。
  * @param {object} novel 作品
  * @param {{words?: number, chapters?: number}} info 章节数与总字数
+ * @param {{style?: string, palette?: number|string}} opts 临时指定版式 / 配色（预览用）
  */
-export function coverSvg(novel = {}, info = {}) {
+export function coverSvg(novel = {}, info = {}, opts = {}) {
   const title = String(novel.title || '').trim() || '未命名作品';
   const author = String(novel.author || '').trim();
   const genre = String(novel.genre || '').trim();
   const words = Number(info.words) || 0;
   const chapters = Number(info.chapters) || 0;
 
-  const pal = PALETTES[hashOf(title) % PALETTES.length];
-
-  // 版面：外框 + 内发丝线，中间留出标题区
-  const boxW = 980;
-  const boxH = 900;
-  const cy = 1130;
-  const fit = fitTitle(title, boxW, boxH, 168, 58);
-
-  // 标题整体垂直居中：首行基线 = 中心 - 上半 + 字高的一部分
-  const firstBase = cy - ((fit.lines.length - 1) * fit.lh) / 2 + fit.size * 0.36;
-  const titleText = fit.lines
-    .map((ln, i) => `<text x="${W / 2}" y="${(firstBase + i * fit.lh).toFixed(1)}" text-anchor="middle" font-family="${FONT}" font-size="${fit.size}" fill="${pal.ink}" letter-spacing="${(fit.size * 0.02).toFixed(1)}">${esc(ln)}</text>`)
-    .join('\n');
-
-  const genreText = genre
-    ? `<text x="${W / 2}" y="632" text-anchor="middle" font-family="${FONT}" font-size="44" fill="${pal.accent}" opacity="0.92" letter-spacing="18" dx="9">${esc(genre)}</text>`
-    : '';
-
-  const authorText = author
-    ? `<text x="${W / 2}" y="1768" text-anchor="middle" font-family="${FONT}" font-size="56" fill="${pal.ink}" opacity="0.88">${esc(author)}</text>`
-    : '';
+  const style = pickStyle(opts.style ?? novel.meta?.coverStyle);
+  const pal = pickPalette(opts.palette ?? novel.meta?.coverPalette, title);
 
   const footBits = [];
   if (chapters) footBits.push(`共 ${chapters} 章`);
   if (words) footBits.push(`约 ${cnNumber(words)} 字`);
-  const footText = footBits.length
-    ? `<text x="${W / 2}" y="2098" text-anchor="middle" font-family="${FONT}" font-size="34" fill="${pal.ink}" opacity="0.42" letter-spacing="3">${esc(footBits.join('  ·  '))}</text>`
-    : '';
+  const foot = footBits.join('  ·  ');
+
+  // 标题排版：三套版式的标题框大小和位置都不一样
+  const boxW = style === 'band' ? 1200 : 980;
+  const boxH = style === 'minimal' ? 1000 : 900;
+  const cy = style === 'band' ? 880 : style === 'minimal' ? 1060 : 1130;
+  const maxSize = style === 'minimal' ? 190 : 168;
+  const fit = fitTitle(title, boxW, boxH, maxSize, 58);
+  // 标题整体垂直居中：首行基线 = 中心 - 上半 + 字高的一部分
+  const firstBase = cy - ((fit.lines.length - 1) * fit.lh) / 2 + fit.size * 0.36;
+
+  const text = (x, y, size, fill, str, extra = '') => (str
+    ? `<text x="${x}" y="${y}" text-anchor="middle" font-family="${FONT}" font-size="${size}" fill="${fill}" ${extra}>${esc(str)}</text>`
+    : '');
+  const titleText = fit.lines
+    .map((ln, i) => `<text x="${W / 2}" y="${(firstBase + i * fit.lh).toFixed(1)}" text-anchor="middle" font-family="${FONT}" font-size="${fit.size}" fill="${pal.ink}" letter-spacing="${(fit.size * 0.02).toFixed(1)}">${esc(ln)}</text>`)
+    .join('\n');
+
+  const genreText = text(W / 2, 632, 44, pal.accent, genre, 'opacity="0.92" letter-spacing="18" dx="9"');
+  const authorText = text(W / 2, 1768, 56, pal.ink, author, 'opacity="0.88"');
+  const footText = text(W / 2, 2098, 34, pal.ink, foot, 'opacity="0.42" letter-spacing="3"');
+
+  let body = '';
+  if (style === 'minimal') {
+    // 极简：不要边框，不要顶部短线，字往上提，底部只留作者和统计
+    body = `
+${text(W / 2, 700, 40, pal.accent, genre, 'opacity="0.9" letter-spacing="16" dx="8"')}
+${titleText}
+<line x1="${W / 2 - 50}" y1="1620" x2="${W / 2 + 50}" y2="1620" stroke="${pal.accent}" stroke-width="2" opacity="0.6"/>
+${authorText}
+${footText}`;
+  } else if (style === 'band') {
+    // 色带：上半张一整块颜色，书名压在色带上（用底色写字，对比够）
+    const bandBottom = 1500;
+    const dark = pal.bg[0];
+    const bandTitle = fit.lines
+      .map((ln, i) => `<text x="${W / 2}" y="${(firstBase + i * fit.lh).toFixed(1)}" text-anchor="middle" font-family="${FONT}" font-size="${fit.size}" fill="${dark}" letter-spacing="${(fit.size * 0.02).toFixed(1)}">${esc(ln)}</text>`)
+      .join('\n');
+    body = `
+<rect x="0" y="0" width="${W}" height="${bandBottom}" fill="${pal.accent}"/>
+${text(W / 2, 420, 42, dark, genre, 'opacity="0.72" letter-spacing="18" dx="9"')}
+${bandTitle}
+${text(W / 2, 1740, 56, pal.ink, author, 'opacity="0.88"')}
+${text(W / 2, 2060, 34, pal.ink, foot, 'opacity="0.42" letter-spacing="3"')}`;
+  } else {
+    // 经典：外框 + 内发丝线 + 顶部短线 + 分隔线
+    body = `
+<rect x="150" y="150" width="${W - 300}" height="${H - 300}" fill="none" stroke="${pal.accent}" stroke-width="3" opacity="0.5"/>
+<rect x="186" y="186" width="${W - 372}" height="${H - 372}" fill="none" stroke="${pal.ink}" stroke-width="1" opacity="0.12"/>
+<line x1="${W / 2 - 60}" y1="516" x2="${W / 2 + 60}" y2="516" stroke="${pal.accent}" stroke-width="3" opacity="0.75"/>
+${genreText}
+${titleText}
+<line x1="${W / 2 - 70}" y1="1610" x2="${W / 2 + 70}" y2="1610" stroke="${pal.accent}" stroke-width="2" opacity="0.55"/>
+${authorText}
+${footText}`;
+  }
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="covertitle">
@@ -244,14 +307,7 @@ export function coverSvg(novel = {}, info = {}) {
 </linearGradient>
 </defs>
 <rect width="${W}" height="${H}" fill="url(#cvg)"/>
-<rect x="150" y="150" width="${W - 300}" height="${H - 300}" fill="none" stroke="${pal.accent}" stroke-width="3" opacity="0.5"/>
-<rect x="186" y="186" width="${W - 372}" height="${H - 372}" fill="none" stroke="${pal.ink}" stroke-width="1" opacity="0.12"/>
-<line x1="${W / 2 - 60}" y1="516" x2="${W / 2 + 60}" y2="516" stroke="${pal.accent}" stroke-width="3" opacity="0.75"/>
-${genreText}
-${titleText}
-<line x1="${W / 2 - 70}" y1="1610" x2="${W / 2 + 70}" y2="1610" stroke="${pal.accent}" stroke-width="2" opacity="0.55"/>
-${authorText}
-${footText}
+${body}
 </svg>
 `;
 }

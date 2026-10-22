@@ -355,6 +355,45 @@ async function main() {
   // ---------------------------------------------------------------
   group('自定义封面');
   {
+    // 版式与配色的清单
+    const opts = await get(`${BASE}/api/cover-options`);
+    check('封面版式清单可取', Array.isArray(opts?.styles) && opts.styles.length >= 3, JSON.stringify(opts?.styles));
+    check('封面配色清单可取', Array.isArray(opts?.palettes) && opts.palettes.length >= 6, opts?.palettes?.length);
+
+    // 配色下标：空表示「按书名自动挑」，不能被当成第 0 套（Number('') 是 0，这个坑踩过）
+    await put(`${BASE}/api/novels/${id}`, { meta: { coverPalette: '', coverStyle: '' } });
+    const auto = (await get(`${BASE}/api/novels/${id}`)).novel;
+    check('空配色仍然是「自动」而不是第 0 套', auto.meta?.coverPalette === '' || auto.meta?.coverPalette === undefined,
+      JSON.stringify(auto.meta?.coverPalette));
+    await put(`${BASE}/api/novels/${id}`, { meta: { coverPalette: 3, coverStyle: 'band' } });
+    const picked = (await get(`${BASE}/api/novels/${id}`)).novel;
+    check('选中的配色能存住', picked.meta?.coverPalette === 3, JSON.stringify(picked.meta?.coverPalette));
+    check('选中的版式能存住', picked.meta?.coverStyle === 'band', JSON.stringify(picked.meta?.coverStyle));
+    await put(`${BASE}/api/novels/${id}`, { meta: { coverPalette: 99, coverStyle: '不存在的版式' } });
+    const bad2 = (await get(`${BASE}/api/novels/${id}`)).novel;
+    check('越界的配色被夹回「自动」', bad2.meta?.coverPalette === '' || bad2.meta?.coverPalette === undefined,
+      JSON.stringify(bad2.meta?.coverPalette));
+    check('不认识的版式不会写进作品里', ['classic', 'minimal', 'band'].includes(bad2.meta?.coverStyle),
+      JSON.stringify(bad2.meta?.coverStyle));
+
+    // 导出的 EPUB 要用上选中的版式与配色
+    await put(`${BASE}/api/novels/${id}`, { meta: { coverPalette: 3, coverStyle: 'band' } });
+    const epubS = await req('GET', `${BASE}/api/novels/${id}/export?format=epub`);
+    const svgS = unzip(epubS.buf)['OEBPS/cover.svg']?.toString('utf8') || '';
+    check('EPUB 的封面用上了色带版式', svgS.includes('height="1500"'), svgS.slice(0, 80));
+    check('EPUB 的封面用上了选中的配色', svgS.includes('#c5869a'), '酒红');
+
+    // 预览接口：带参数现画一张，但不落盘
+    const prev = await req('GET', `${BASE}/api/novels/${id}/cover?style=minimal&palette=2`);
+    const prevSvg = prev.buf.toString('utf8');
+    check('预览能按参数现画', prev.status === 200 && prevSvg.includes('<svg') && prevSvg.includes('<text'));
+    check('预览的配色跟参数一致', prevSvg.includes('#7fb39c'), '松绿');
+    const stillPicked = (await get(`${BASE}/api/novels/${id}`)).novel;
+    check('预览不会把选择改掉', stillPicked.meta?.coverStyle === 'band' && stillPicked.meta?.coverPalette === 3,
+      `${stillPicked.meta?.coverStyle}/${stillPicked.meta?.coverPalette}`);
+
+    await put(`${BASE}/api/novels/${id}`, { meta: { coverPalette: '', coverStyle: '' } });
+
     const png = tinyPng();
     const up = await fetch(`${BASE}/api/novels/${id}/cover`, {
       method: 'POST', headers: { 'Content-Type': 'image/png' }, body: png,
