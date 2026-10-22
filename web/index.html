@@ -39,6 +39,7 @@
   <symbol id="i-highlight" viewBox="0 0 24 24"><path d="M6 3h12v4l-6 6-6-6V3z"/><path d="M6 21h12v-4l-6-6-6 6v4z"/><path d="M3 6v12"/></symbol>
   <symbol id="i-highlighter" viewBox="0 0 24 24"><path d="M6 3h12v4l-6 6-6-6V3z"/><path d="M6 21h12v-4l-6-6-6 6v4z"/><path d="M3 6v12"/></symbol>
   <symbol id="i-stamp" viewBox="0 0 24 24"><path d="M9 3h6v4.5a3 3 0 0 0 1.2 2.4A3.5 3.5 0 0 1 17.5 13h-11A3.5 3.5 0 0 1 7.8 9.9 3 3 0 0 0 9 7.5z"/><path d="M5 17h14v4H5z"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.2a2 2 0 0 1 1.5.7l1 1.3h7.3A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></symbol>
   <symbol id="i-warn" viewBox="0 0 24 24"><path d="M10.3 4.3 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 16.5v.5"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></symbol>
@@ -436,6 +437,55 @@
             <p class="desc">所有作品存放在项目内的 <code>data/novels/</code>，一部作品一个 JSON 文件，复制走就是备份。</p>
             <div class="btn-row">
               <button class="btn" id="openDataBtn"><svg class="ico"><use href="#i-folder" /></svg>查看数据位置</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>AI 提示词模板</h2>
+              <span class="tag tag-info">实验性</span>
+            </div>
+            <p class="desc">自定义各任务的 AI 提示词模板。修改后会保存到配置，重启后生效。点击「恢复默认」可恢复内置模板。</p>
+            <div class="field-label">
+              <select class="select" id="promptTaskSelect">
+                <option value="chapter">写正文</option>
+                <option value="continue">续写</option>
+                <option value="polish">润色</option>
+                <option value="expand">扩写</option>
+                <option value="shorten">精简</option>
+                <option value="rewrite">改写</option>
+                <option value="outline">生成大纲</option>
+                <option value="characters">生成人物</option>
+                <option value="worldview">生成世界观</option>
+                <option value="outline:aiFullOutline">从一句话生成全书大纲</option>
+                <option value="consistency">一致性检查</option>
+                <option value="review">责编评审</option>
+                <option value="summarize">生成概要</option>
+                <option value="titles">起名</option>
+                <option value="memory">存章节记忆</option>
+                <option value="batchMemory">批量补记忆</option>
+                <option value="analyzeStyle">提取文风</option>
+                <option value="scenesFromOutline">从章纲生成场景</option>
+                <option value="generateSceneProse">生成场景正文</option>
+                <option value="compileScenes">编译场景成正文</option>
+              </select>
+            </div>
+            <div class="field-label">
+              <label>系统提示词 (System)</label>
+              <textarea id="promptSystem" class="textarea" rows="6" placeholder="系统级提示词，定义 AI 的角色与行为准则……"></textarea>
+            </div>
+            <div class="field-label">
+              <label>用户提示词模板 (User)</label>
+              <textarea id="promptUser" class="textarea" rows="8" placeholder="用户提示词模板，可使用变量：${novel.title}、${chapter.title}、${targetWords} 等……"></textarea>
+            </div>
+            <div class="field-label">
+              <label>变量说明</label>
+              <div id="promptVars" class="dim small" style="line-height:2; font-family:var(--font-mono); font-size:11px;"></div>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-primary" id="savePromptBtn"><svg class="ico"><use href="#i-save" /></svg>保存模板</button>
+              <button class="btn btn-text" id="resetPromptBtn"><svg class="ico"><use href="#i-rotate" /></svg>恢复默认</button>
+              <span class="dim-text" id="promptMsg"></span>
             </div>
           </div>
 

@@ -10,6 +10,7 @@ import {
   listNovels, createNovel, getNovel, saveNovel, deleteNovel, trashNovel, listTrash, restoreNovel, purgeTrash, purgeAllTrash, newId, countWords,
   listSnapshots, createSnapshot, readSnapshot, chapterVolumeIds, volumeLabel,
   findOutlineEntry, CHAPTER_STAGES, cleanTargetWords,
+  applyFragmentData,
 } from './store.js';
 import { buildTask, TASKS } from './prompts.js';
 import { buildEpub } from './epub.js';
@@ -112,6 +113,21 @@ const ROLE_OF_TASK = {
   memory: 'summary', consistency: 'summary', review: 'review',
 };
 
+const FRAGMENT_TYPES = [
+  { key: 'outline', label: '大纲与分卷', icon: 'layers' },
+  { key: 'scenes', label: '场景卡片', icon: 'columns' },
+  { key: 'memories', label: '章节记忆', icon: 'book-open' },
+  { key: 'characters', label: '人物卡', icon: 'user' },
+  { key: 'world', label: '世界观', icon: 'globe' },
+  { key: 'timeline', label: '时间线', icon: 'clock' },
+  { key: 'beats', label: '结构/节拍', icon: 'pulse' },
+  { key: 'arcs', label: '人物弧光', icon: 'arrow-right' },
+  { key: 'relations', label: '关系图谱', icon: 'arrow-right' },
+  { key: 'threads', label: '线索/伏笔', icon: 'search' },
+  { key: 'style', label: '文风与规则', icon: 'pen' },
+  { key: 'annotations', label: '批注/高亮', icon: 'highlighter' },
+];
+
 function resolveModel(cfg, provider, task) {
   const role = ROLE_OF_TASK[task] || 'write';
   return (cfg.roleModels && cfg.roleModels[role]) || cfg.model || (provider.models || [])[0] || '';
@@ -122,7 +138,7 @@ function resolveModel(cfg, provider, task) {
 /* ------------------------------------------------------------------ */
 
 function prepareTask(cfg, body) {
-  const { task, novelId, chapterId, payload = {} } = body;
+  const { task, novelId, chapterId, payload = {}, customTemplates } = body;
   if (!task) throw new Error('缺少 task');
   if (!TASKS[task]) throw new Error(`未知任务：${task}`);
 
@@ -160,7 +176,8 @@ function prepareTask(cfg, body) {
     chapter,
     pack,
     prevTail,
-    payload: { ...payload, scopeText, prevTail },
+    payload: { ...payload, scopeText, prevTail, taskName: task },
+    customTemplates,
   };
   const built = buildTask(task, ctx);
   return { built, novel, stats, pack, chapter };
@@ -805,6 +822,30 @@ async function handleApi(req, res, url) {
       }
       if (count) saveNovel(n);
       return sendJson(res, 200, { count, chapters: chaptersTouched });
+    }
+
+    /* --- 片段导入 --- */
+    if (seg[3] === 'import-fragment' && method === 'POST') {
+      const body = await readBody(req);
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      
+      const pkg = body;
+      if (!pkg || !pkg.type || !FRAGMENT_TYPES.some(t => t.key === pkg.type)) {
+        return sendJson(res, 400, { error: '无效的片段类型' });
+      }
+      
+      try {
+        const n = getNovel(id);
+        const result = await applyFragmentData(n, pkg, { merge: body.merge !== false, overwrite: body.overwrite === true });
+        if (result?.backup) {
+          // 可以在这里记录备份用于撤销
+        }
+        saveNovel(n);
+        return sendJson(res, 200, { ok: true, type: pkg.type, message: `已导入 ${FRAGMENT_TYPES.find(t => t.key === pkg.type).label}` });
+      } catch (err) {
+        return sendJson(res, 400, { error: `导入失败：${err.message}` });
+      }
     }
 
     // 导入已有文稿：按「第X章」切分，按「第X卷」分组。

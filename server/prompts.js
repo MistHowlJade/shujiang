@@ -338,6 +338,28 @@ function textTask(instructionFn, bodyFn) {
 }
 
 export function buildTask(taskName, ctx) {
+  // 检查是否有自定义模板
+  const custom = ctx?.customTemplates?.[ctx?.payload?.taskName || ''];
+  // 如果没有直接传 taskName，尝试从 ctx 中获取
+  const taskKey = ctx?.payload?.taskName || '';
+  const customTpl = ctx?.customTemplates?.[taskKey];
+
+  // 如果有自定义模板且包含 system 和 user，直接使用
+  if (customTpl && customTpl.system && customTpl.user) {
+    // 支持字符串模板和函数模板
+    const renderSystem = typeof customTpl.system === 'function' ? customTpl.system(ctx) : customTpl.system;
+    const renderUser = typeof customTpl.user === 'function' ? customTpl.user(ctx) : customTpl.user;
+    return {
+      messages: [
+        { role: 'system', content: renderSystem },
+        { role: 'user', content: renderUser }
+      ],
+      temperature: 0.85,
+      maxTokens: 4096,
+      expect: 'text',
+    };
+  }
+
   const task = TASKS[taskName];
   if (!task) throw new Error(`未知任务：${taskName}`);
   const built = task.build(ctx) || {};

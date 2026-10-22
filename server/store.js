@@ -50,6 +50,99 @@ export function readJson(file, fallback) {
   }
 }
 
+export const FRAGMENT_TYPES = [
+  { key: 'outline', label: '大纲与分卷' },
+  { key: 'scenes', label: '场景卡片' },
+  { key: 'memories', label: '章节记忆' },
+  { key: 'characters', label: '人物卡' },
+  { key: 'world', label: '世界观' },
+  { key: 'timeline', label: '时间线' },
+  { key: 'beats', label: '结构/节拍' },
+  { key: 'arcs', label: '人物弧光' },
+  { key: 'relations', label: '关系图谱' },
+  { key: 'threads', label: '线索/伏笔' },
+  { key: 'style', label: '文风与规则' },
+  { key: 'annotations', label: '批注/高亮' },
+];
+
+export function mergeById(existing, incoming) {
+  const map = new Map();
+  for (const item of existing) {
+    if (item.id) map.set(item.id, { ...item });
+  }
+  for (const item of incoming) {
+    if (item.id && map.has(item.id)) {
+      map.set(item.id, { ...map.get(item.id), ...item });
+    } else {
+      const id = item.id || newId('b');
+      map.set(id, { ...item, id });
+    }
+  }
+  return Array.from(map.values());
+}
+
+export async function applyFragmentData(novel, pkg, opts = {}) {
+  // 合并策略
+  const merge = (opts?.merge !== false);
+  const overwrite = opts.overwrite === true;
+
+  // 获取类型信息
+  const type = FRAGMENT_TYPES.find(t => t.key === pkg.type);
+  if (!type) throw new Error('未知的片段类型：' + pkg.type);
+
+  // 备份
+  const backup = {};
+  if (type.key === 'outline') {
+    backup.outline = JSON.parse(JSON.stringify(novel.outline || { volumes: [], notes: '' }));
+    if (overwrite) {
+      novel.outline = { volumes: pkg.data.volumes || [], notes: pkg.data.notes || '' };
+    } else {
+      novel.outline.volumes = mergeById(novel.outline.volumes || [], pkg.data.volumes || []);
+      novel.outline.notes = pkg.data.notes || novel.outline.notes || '';
+    }
+  } else if (type.key === 'scenes') {
+    pkg.data.forEach(s => { if (!novel.scenesByChapter[s.chapterId]) novel.scenesByChapter[s.chapterId] = []; novel.scenesByChapter[s.chapterId].push(s); });
+  } else if (type.key === 'memories') {
+    pkg.data.forEach(m => {
+      const ch = novel.chapters.find(c => c.id === m.chapterId);
+      if (ch) ch.memory = m.memory;
+    });
+  } else if (type.key === 'characters') {
+    if (overwrite) novel.bible.characters = pkg.data;
+    else novel.bible.characters = mergeById(novel.bible.characters || [], pkg.data);
+  } else if (type.key === 'world') {
+    if (overwrite) novel.bible.world = pkg.data;
+    else novel.bible.world = mergeById(novel.bible.world || [], pkg.data);
+  } else if (type.key === 'timeline') {
+    if (overwrite) novel.bible.timeline = pkg.data;
+    else novel.bible.timeline = mergeById(novel.bible.timeline || [], pkg.data);
+  } else if (type.key === 'beats') {
+    if (overwrite) novel.beats = { items: pkg.data };
+    else novel.beats = { items: mergeById(novel.beats?.items || [], pkg.data) };
+  } else if (type.key === 'arcs') {
+    if (overwrite) novel.arcs = { items: pkg.data };
+    else novel.arcs = { items: mergeById(novel.arcs?.items || [], pkg.data) };
+  } else if (type.key === 'relations') {
+    if (overwrite) novel.relations = pkg.data;
+    else novel.relations = [...new Set([...(novel.relations || []).map(JSON.stringify), ...pkg.data.map(JSON.stringify)])].map(JSON.parse);
+  } else if (type.key === 'threads') {
+    if (overwrite) novel.threads = { items: pkg.data };
+    else novel.threads = { items: mergeById(novel.threads?.items || [], pkg.data) };
+  } else if (type.key === 'style') {
+    if (overwrite) novel.style = { ...pkg.data };
+    else novel.style = { ...novel.style, ...pkg.data };
+  } else if (type.key === 'annotations') {
+    // annotations are stored per chapter
+    novel.chapters.forEach(c => {
+      if (pkg.annotationsByChapter[c.id]) {
+        if (overwrite) c.annotations = pkg.annotationsByChapter[c.id];
+        else c.annotations = [...(c.annotations || []), ...pkg.annotationsByChapter[c.id]];
+      }
+    });
+  }
+  return { ok: true };
+}
+
 // 原子写：先写 .tmp 再 rename，避免断电/崩溃写坏文件
 export function writeJson(file, data) {
   const tmp = `${file}.${process.pid}.tmp`;
