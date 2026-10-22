@@ -3,6 +3,7 @@
 import { deflateRawSync } from 'node:zlib';
 import { randomUUID } from 'node:crypto';
 import { chapterVolumeIds, countWords, volumeLabel } from './store.js';
+import { coverSvg, readCoverImage } from './cover.js';
 
 const XML_HEAD = '<?xml version="1.0" encoding="utf-8"?>';
 const CHAPTER_FILE = (i) => `chapter-${String(i + 1).padStart(3, '0')}.xhtml`;
@@ -31,7 +32,7 @@ function paragraphs(text) {
     .join('\n');
 }
 
-function page(title, body) {
+function page(title, body, bodyClass = '') {
   return `${XML_HEAD}
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="zh-CN">
@@ -40,7 +41,7 @@ function page(title, body) {
 <title>${esc(title)}</title>
 <link rel="stylesheet" type="text/css" href="style.css" />
 </head>
-<body>
+<body${bodyClass ? ` class="${bodyClass}"` : ''}>
 ${body}
 </body>
 </html>
@@ -81,6 +82,9 @@ p.volume { margin: 0 0 1.8em; text-align: center; text-indent: 0; color: #777; f
 .titlepage .author { margin: 0 0 1.8em; text-indent: 0; color: #555; font-size: 1.05em; }
 .titlepage .meta { text-indent: 0; color: #888; font-size: .9em; }
 .titlepage .logline { margin: 2.2em auto 0; max-width: 26em; text-indent: 0; color: #666; font-size: .92em; line-height: 1.9; }
+body.cover-body { margin: 0; }
+.coverpage { margin: 0; text-align: center; }
+.coverpage img { display: block; width: 100%; height: auto; }
 nav ol { margin: .6em 0 1.2em; padding-left: 1.4em; }
 nav li { margin: .35em 0; }
 nav a { color: #1b1b1b; text-decoration: none; }
@@ -99,19 +103,20 @@ function navPage(groups, chapters) {
   return `<nav epub:type="toc" id="toc">
 <h1>目录</h1>
 <ol>
+<li><a href="cover.xhtml">封面</a></li>
 <li><a href="title.xhtml">书名页</a></li>
 ${links}
 </ol>
 </nav>
 <nav epub:type="landmarks" hidden="hidden">
 <ol>
+<li><a epub:type="cover" href="cover.xhtml">封面</a></li>
 <li><a epub:type="bodymatter" href="${chapters.length ? fileOf.get(chapters[0].id) : 'title.xhtml'}">正文</a></li>
 </ol>
 </nav>`;
 }
 
-function titlePage(novel, chapters) {
-  const words = chapters.reduce((sum, c) => sum + countWords(c.content), 0);
+function titlePage(novel, chapters, words = 0) {
   const meta = [novel.genre, `共 ${chapters.length} 章`, `约 ${words.toLocaleString('zh-CN')} 字`]
     .filter(Boolean)
     .join(' · ');
@@ -123,16 +128,20 @@ ${novel.meta?.logline ? `<p class="logline">${esc(novel.meta.logline)}</p>` : ''
 </section>`;
 }
 
-function packageFile(novel, chapters) {
+function packageFile(novel, chapters, cover) {
   const description = novel.meta?.logline || novel.meta?.synopsis || '';
   const modified = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
   const manifest = [
     '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav" />',
     '<item id="css" href="style.css" media-type="text/css" />',
+    // cover-image 挂在图片本身（不是引用它的 xhtml）上，这是 EPUB 3 的要求
+    `<item id="cover-img" href="${cover.href}" media-type="${cover.media}" properties="cover-image" />`,
+    '<item id="cover" href="cover.xhtml" media-type="application/xhtml+xml" />',
     '<item id="title" href="title.xhtml" media-type="application/xhtml+xml" />',
     ...chapters.map((c, i) => `<item id="ch${i + 1}" href="${CHAPTER_FILE(i)}" media-type="application/xhtml+xml" />`),
   ].join('\n');
   const spine = [
+    '<itemref idref="cover" />',
     '<itemref idref="title" />',
     '<itemref idref="nav" />',
     ...chapters.map((_, i) => `<itemref idref="ch${i + 1}" />`),
@@ -147,6 +156,7 @@ ${novel.author ? `<dc:creator>${esc(novel.author)}</dc:creator>` : ''}
 ${novel.genre ? `<dc:subject>${esc(novel.genre)}</dc:subject>` : ''}
 ${description ? `<dc:description>${esc(description)}</dc:description>` : ''}
 <meta property="dcterms:modified">${modified}</meta>
+<meta name="cover" content="cover-img" />
 </metadata>
 <manifest>
 ${manifest}
@@ -250,6 +260,13 @@ export function buildEpub(novel, chapters = novel.chapters || []) {
   for (const group of groups) {
     if (group.vol && group.chapters[0]) kicker.set(group.chapters[0].id, group.vol);
   }
+  const words = list.reduce((sum, c) => sum + countWords(c.content), 0);
+
+  // 封面：用户传过自己的图就用那张，没传就现画一张
+  const custom = readCoverImage(novel);
+  const cover = custom
+    ? { href: `cover.${custom.ext}`, media: custom.mime, data: custom.data }
+    : { href: 'cover.svg', media: 'image/svg+xml', data: coverSvg(novel, { words, chapters: list.length }) };
 
   const files = [
     { name: 'mimetype', data: 'application/epub+zip', store: true },
@@ -263,10 +280,21 @@ export function buildEpub(novel, chapters = novel.chapters || []) {
 </container>
 `,
     },
-    { name: 'OEBPS/content.opf', data: packageFile(novel, list) },
+    { name: 'OEBPS/content.opf', data: packageFile(novel, list, cover) },
     { name: 'OEBPS/nav.xhtml', data: page('目录', navPage(groups, list)) },
     { name: 'OEBPS/style.css', data: STYLE },
-    { name: 'OEBPS/title.xhtml', data: page(novel.title || '书名页', titlePage(novel, list)) },
+    { name: `OEBPS/${cover.href}`, data: cover.data },
+    {
+      name: 'OEBPS/cover.xhtml',
+      data: page(
+        '封面',
+        `<section epub:type="cover" class="coverpage">
+<img src="${cover.href}" alt="${esc(novel.title || '封面')}" />
+</section>`,
+        'cover-body'
+      ),
+    },
+    { name: 'OEBPS/title.xhtml', data: page(novel.title || '书名页', titlePage(novel, list, words)) },
   ];
 
   list.forEach((ch, i) => {

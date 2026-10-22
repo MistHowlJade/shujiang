@@ -14,6 +14,7 @@ import {
 } from './store.js';
 import { buildTask, TASKS, TEMPLATE_SLOTS, TEMPLATE_VARS } from './prompts.js';
 import { buildEpub } from './epub.js';
+import { coverSvg, readCoverImage, saveCoverImage, deleteCoverImage } from './cover.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
 import { addWords, setGoal, statsSummary } from './stats.js';
 
@@ -742,6 +743,57 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { ok: true, changed });
     }
 
+    // 封面：上传 / 查看 / 移除
+    if (seg[3] === 'cover' && seg.length === 4) {
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      if (method === 'GET') {
+        // 看自定义封面；没有就回自动生成的那张
+        const custom = readCoverImage(n);
+        if (custom) {
+          res.writeHead(200, {
+            'Content-Type': custom.mime,
+            'Content-Length': custom.data.length,
+            'Cache-Control': 'no-store',
+          });
+          return res.end(custom.data);
+        }
+        const svg = coverSvg(n, {
+          words: (n.chapters || []).reduce((s, c) => s + countWords(c.content), 0),
+          chapters: (n.chapters || []).length,
+        });
+        res.writeHead(200, {
+          'Content-Type': 'image/svg+xml; charset=utf-8',
+          'Content-Length': Buffer.byteLength(svg),
+          'Cache-Control': 'no-store',
+        });
+        return res.end(svg);
+      }
+      if (method === 'POST') {
+        let buf;
+        try {
+          buf = await readBinary(req, 9 * 1024 * 1024);
+        } catch (err) {
+          return sendJson(res, 400, { error: err.message || '读取图片失败' });
+        }
+        let meta;
+        try {
+          meta = saveCoverImage(id, buf, req.headers['content-type']);
+        } catch (err) {
+          return sendJson(res, 400, { error: err.message || '保存封面失败' });
+        }
+        n.cover = meta;
+        saveNovel(n);
+        return sendJson(res, 200, { ok: true, cover: meta });
+      }
+      if (method === 'DELETE') {
+        deleteCoverImage(id, n.cover);
+        delete n.cover;
+        saveNovel(n);
+        return sendJson(res, 200, { ok: true });
+      }
+    }
+
     // 导出
     if (seg[3] === 'export' && method === 'GET') {
       const n = getNovel(id);
@@ -1313,6 +1365,28 @@ function parseManuscript(text) {
     if (c.volume != null) c.volume = remap.get(c.volume) ?? null;
   }
   return { chapters, volumes: kept };
+}
+
+/* ------------------------------------------------------------------ */
+/* 二进制请求体（上传封面图用），不走 JSON 解析                        */
+/* ------------------------------------------------------------------ */
+
+function readBinary(req, limit = 8 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) {
+        reject(new Error('图片太大了（上限 8 MB）'));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
 }
 
 /* ------------------------------------------------------------------ */

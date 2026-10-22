@@ -149,6 +149,17 @@ const api = {
   },
   put(url, body) { return this.send(url, body, 'PUT'); },
   del(url) { return this.send(url, undefined, 'DELETE'); },
+  /** 上传二进制（封面图）：不走 JSON，原样把字节发过去 */
+  async upload(url, blob) {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': blob.type || 'application/octet-stream' },
+      body: blob,
+    });
+    const j = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    return j;
+  },
 };
 
 /** 流式生成：逐块回调，返回完整文本 */
@@ -7209,6 +7220,19 @@ function exportBook() {
     </label>
     <div class="dim small export-done-hint" id="exDoneHint" hidden>章号沿用原书，不会自动重新编号。</div>
     <div class="dim small" id="exHint" hidden>EPUB 会导出全书，自动生成标题页、目录和分卷结构，适合放进手机 / 阅读器。</div>
+    <div class="cover-row" id="exCoverRow" hidden>
+      <div class="cover-thumb"><img id="exCoverImg" alt="封面预览" /></div>
+      <div class="cover-side">
+        <div class="cover-title">封面</div>
+        <div class="dim small" id="exCoverLabel"></div>
+        <div class="cover-actions">
+          <button class="btn" id="exCoverPick">上传自己的封面</button>
+          <button class="btn btn-text" id="exCoverReset" hidden>改回自动生成</button>
+        </div>
+        <input type="file" id="exCoverFile" accept="image/png,image/jpeg,image/gif" hidden />
+        <div class="dim small">支持 PNG / JPG / GIF，8 MB 以内。不上传就按书名、作者和题材自动画一张。</div>
+      </div>
+    </div>
     <div class="modal-foot"><button class="btn btn-text" id="exCancel">取消</button><button class="btn btn-primary" id="exOk">下载</button></div>`,
     (box) => {
       const fmtEl = box.querySelector('#exFmt');
@@ -7218,6 +7242,44 @@ function exportBook() {
       const doneRow = box.querySelector('#exDoneRow');
       const doneCountEl = box.querySelector('#exDoneCount');
       const doneHintEl = box.querySelector('#exDoneHint');
+      // 封面：只导出 EPUB 时才有意义
+      const coverRow = box.querySelector('#exCoverRow');
+      const coverImg = box.querySelector('#exCoverImg');
+      const coverLabel = box.querySelector('#exCoverLabel');
+      const coverReset = box.querySelector('#exCoverReset');
+      const coverFile = box.querySelector('#exCoverFile');
+      const refreshCover = () => {
+        const has = !!S.novel.cover;
+        coverImg.src = `/api/novels/${S.novel.id}/cover?t=${Date.now()}`;
+        coverLabel.textContent = has
+          ? `自定义封面（${String(S.novel.cover.ext || '').toUpperCase()}）`
+          : '自动生成（按书名、作者、题材现画）';
+        coverReset.hidden = !has;
+      };
+      box.querySelector('#exCoverPick').onclick = () => coverFile.click();
+      coverFile.onchange = async () => {
+        const file = coverFile.files?.[0];
+        coverFile.value = '';
+        if (!file) return;
+        try {
+          const res = await api.upload(`/api/novels/${S.novel.id}/cover`, file);
+          S.novel.cover = res.cover;
+          refreshCover();
+          toast('封面已换好', 'ok');
+        } catch (err) {
+          toast(`换封面失败：${err.message || '未知错误'}`, 'err');
+        }
+      };
+      coverReset.onclick = async () => {
+        try {
+          await api.del(`/api/novels/${S.novel.id}/cover`);
+          delete S.novel.cover;
+          refreshCover();
+          toast('已改回自动生成的封面', 'ok');
+        } catch (err) {
+          toast(`改不回去：${err.message || '未知错误'}`, 'err');
+        }
+      };
       const total = S.novel.chapters.length;
       const doneCount = S.novel.chapters.filter((c) => stageOf(c) === 'done').length;
       const sync = () => {
@@ -7238,6 +7300,9 @@ function exportBook() {
         if (doneCount === 0) doneEl.checked = false;
         doneCountEl.textContent = doneCount ? `已定稿 ${doneCount} / ${total} 章` : '还没有定稿章节';
         doneHintEl.hidden = !(showDone && doneEl.checked);
+        // 封面只跟 EPUB 有关
+        coverRow.hidden = !epub;
+        if (epub) refreshCover();
       };
       fmtEl.onchange = sync;
       scopeEl.onchange = sync;

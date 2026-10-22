@@ -1545,6 +1545,23 @@ kbd {
 .export-done.disabled { opacity: .55; cursor: not-allowed; }
 .export-done-hint { margin-top: 7px; }
 
+/* ---------------- 导出弹窗里的封面 ---------------- */
+.cover-row {
+  display: flex; gap: 14px; margin-top: 14px; padding: 12px;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.cover-thumb {
+  width: 84px; height: 126px; flex: 0 0 auto;
+  border-radius: var(--r-sm); overflow: hidden;
+  border: 1px solid var(--border-2); background: var(--surface-1);
+}
+.cover-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cover-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.cover-title { font-size: 12.5px; font-weight: 500; color: var(--text-1); }
+.cover-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.cover-actions .btn { padding: 4px 10px; font-size: 11.5px; }
+
 /* ---------------- 导入文稿 ---------------- */
 .import-drop {
   display: flex; flex-direction: column; align-items: center; gap: 6px;

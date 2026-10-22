@@ -515,6 +515,10 @@ export function purgeTrash(trashId) {
   const id = String(n?.id || '');
   if (/^n_[a-z0-9]{6,}$/.test(id) && !fs.existsSync(novelFile(id))) {
     try { fs.rmSync(path.join(DATA_DIR, 'backups', id), { recursive: true, force: true }); } catch {}
+    // 封面图也是这部作品的一部分，一并清掉（扩展名与 server/cover.js 里收的那几种一致）
+    for (const ext of ['png', 'jpg', 'gif']) {
+      try { fs.rmSync(path.join(DATA_DIR, 'covers', `${id}.${ext}`), { force: true }); } catch {}
+    }
   }
   return true;
 }
