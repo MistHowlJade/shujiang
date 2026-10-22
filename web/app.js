@@ -4,6 +4,7 @@ import { $, $$, esc, ico, debounce, toast, countWords, fmtWords, fmtDate, fmtAgo
 import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads } from './lib/data.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
+import { diffProse, diffHtml, diffSideHtml } from './lib/diff.js';
 
 /* 阅读进度只存在本浏览器，不写作品 JSON，也不走服务端 */
 const READER_PROGRESS_KEY = 'shu.reader.progress.v1';
@@ -3802,9 +3803,15 @@ async function runModelCompare(picks, task) {
   showModal(`
     <div class="cmp-head">
       <h3>模型对比</h3>
-      <button class="btn btn-sm btn-text" id="cmpStop"><svg class="ico"><use href="#i-stop" /></svg>停止</button>
+      <div class="cmp-head-actions">
+        <div class="cmp-views">
+          <button class="btn btn-sm on" id="cmpViewSide" type="button">并排</button>
+          <button class="btn btn-sm" id="cmpViewDiff" type="button">差异</button>
+        </div>
+        <button class="btn btn-sm btn-text" id="cmpStop"><svg class="ico"><use href="#i-stop" /></svg>停止</button>
+      </div>
     </div>
-    <div class="cmp-grid">
+    <div class="cmp-grid" id="cmpGrid">
       ${state.map((s, i) => `
         <section class="cmp-col">
           <header class="cmp-col-head">
@@ -3817,6 +3824,13 @@ async function runModelCompare(picks, task) {
             <button class="btn btn-sm" data-copy="${i}" disabled>复制</button>
           </footer>
         </section>`).join('')}
+    </div>
+    <div class="cmp-diff-wrap" id="cmpDiffWrap" hidden>
+      <div class="cmp-diff-bar">
+        <span class="cmp-diff-sum" id="cmpDiffSum"></span>
+        <label class="diff-toggle"><input type="checkbox" id="cmpOnlyChanges" />只看改动</label>
+      </div>
+      <div class="cmp-diff" id="cmpDiff"></div>
     </div>`, (box) => {
       box.querySelector('#cmpStop').onclick = () => ac.abort();
       box.querySelectorAll('[data-use]').forEach((btn) => {
@@ -3838,6 +3852,38 @@ async function runModelCompare(picks, task) {
           toast('已复制', 'ok');
         };
       });
+      // 并排 / 差异 两个视图
+      const gridEl = box.querySelector('#cmpGrid');
+      const diffWrap = box.querySelector('#cmpDiffWrap');
+      const viewSide = box.querySelector('#cmpViewSide');
+      const viewDiff = box.querySelector('#cmpViewDiff');
+      const onlyChanges = box.querySelector('#cmpOnlyChanges');
+      const diffSum = box.querySelector('#cmpDiffSum');
+      const diffBody = box.querySelector('#cmpDiff');
+      const refreshDiff = () => {
+        const [a, b] = state;
+        if (!a.text || !b.text) {
+          diffSum.textContent = '';
+          diffBody.innerHTML = '<div class="cmp-empty">两边都有内容之后才能比差异</div>';
+          return;
+        }
+        const d = diffProse(a.text, b.text);
+        diffSum.innerHTML = `<span class="d-del">只有 A 有 ${d.removed} 字</span><span class="d-add">只有 B 有 ${d.added} 字</span><span>相似度 ${d.similarity}%</span>`;
+        diffBody.innerHTML = diffHtml(d.segs, onlyChanges.checked);
+      };
+      const setView = (mode) => {
+        const isDiff = mode === 'diff';
+        gridEl.hidden = isDiff;
+        diffWrap.hidden = !isDiff;
+        viewSide.classList.toggle('on', !isDiff);
+        viewDiff.classList.toggle('on', isDiff);
+        if (isDiff) refreshDiff();
+      };
+      viewSide.onclick = () => setView('side');
+      viewDiff.onclick = () => setView('diff');
+      onlyChanges.onchange = refreshDiff;
+      // 边流边算差异：流完自动刷新一次
+      state.onSettled = refreshDiff;
     }, { wide: true, onClose: () => ac.abort() });
 
   const renderCol = (i) => {
@@ -3902,6 +3948,8 @@ async function runModelCompare(picks, task) {
   try {
     await Promise.all(state.map((s, i) => runOne(s, i)));
   } finally {
+    // 两边都跑完了，差异视图里的数据要跟着更新一次
+    try { state[0]?.onSettled?.(); } catch (err) { console.warn('[cmp] 刷新差异失败', err); }
     // 只有还是自己在跑的时候才收尾，别把用户后来新开的任务状态搅乱
     if (S.controller === ac) {
       S.controller = null;
@@ -4232,8 +4280,10 @@ function showDiff(oldText, newText, op, range) {
   const panel = $('#diffPanel');
   const names = { polish: '润色', expand: '扩写', shorten: '精简', rewrite: '改写', custom: '按指令处理' };
   $('#diffTitle').textContent = `${names[op] || op}结果 · ${countWords(oldText)} 字 → ${countWords(newText)} 字`;
-  $('#diffOld').textContent = oldText;
-  $('#diffNew').textContent = newText;
+  // 差异高亮：左边标出被改掉的字，右边标出新写的字，一眼看出动在哪
+  const d = diffProse(oldText, newText);
+  $('#diffOld').innerHTML = diffSideHtml(d.segs, 'old');
+  $('#diffNew').innerHTML = diffSideHtml(d.segs, 'new');
   panel.hidden = false;
   $('#diffAccept').onclick = () => {
     const ta = $('#chContent');
