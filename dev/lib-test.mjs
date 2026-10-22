@@ -9,7 +9,7 @@
 // ===========================================================================
 
 import { diffProse, diffHtml, diffSideHtml, splitSentences, lcsOps } from '../web/lib/diff.js';
-import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase } from '../web/lib/goal.js';
+import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from '../web/lib/goal.js';
 
 let pass = 0;
 let fail = 0;
@@ -189,6 +189,34 @@ check('空对象返回 null', bookGoalOf(null) === null);
 check('不到两周按天说', daysPhrase(9) === '还要 9 天', daysPhrase(9));
 check('几个月按月说', daysPhrase(90) === '还要 3 个月（约 90 天）', daysPhrase(90));
 check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天）', daysPhrase(500));
+
+// 统计面板里的目标区块
+{
+  const none = goalPanelHtml(null, { dailyRate: 1000 });
+  check('没打开作品时给出提示', none.includes('goal-panel empty') && none.includes('打开一部作品'));
+  check('没打开作品时不给按钮', !none.includes('stSetGoal'));
+
+  const noGoal = goalPanelHtml({ title: '甲书', meta: {}, chapters: [] }, { dailyRate: 1000 });
+  check('没定目标时给出提示', noGoal.includes('还没定全书目标字数'));
+  check('没定目标时给去设定按钮', noGoal.includes('stSetGoal'));
+
+  const n = { title: '乙书', meta: { targetWords: 100000 }, chapters: [{ content: '字'.repeat(25000) }] };
+  const g = goalPanelHtml(n, { dailyRate: 2000 });
+  check('有目标时显示书名', g.includes('《乙书》'));
+  check('有目标时显示目标字数', g.includes('目标 10 万 字'));
+  check('有目标时显示进度', g.includes('25%') && g.includes('width:25%'));
+  check('有目标时显示还差多少', g.includes('还差 7.50 万 字'), g.slice(0, 200));
+  check('有目标时显示完稿预测', g.includes('日均 2000 字算') && g.includes('完稿'));
+
+  const done = goalPanelHtml({ title: '丙书', meta: { targetWords: 1000 }, chapters: [{ content: '字'.repeat(2000) }] }, { dailyRate: 100 });
+  check('写完了显示已达成', done.includes('已达成目标') && done.includes('goal-panel done'));
+
+  const idle = goalPanelHtml(n, { dailyRate: 0 });
+  check('最近没动笔就说算不出', idle.includes('算不出还要多久'), idle.slice(0, 260));
+
+  const escaped = goalPanelHtml({ title: '<b>x</b>', meta: { targetWords: 1000 }, chapters: [] }, { dailyRate: 1 });
+  check('书名里的尖括号被转义', !escaped.includes('<b>x</b>'), escaped.slice(0, 120));
+}
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
 process.exit(fail ? 1 : 0);

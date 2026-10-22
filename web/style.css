@@ -1671,6 +1671,32 @@ kbd {
 }
 .cmp-empty { padding: 30px 12px; text-align: center; color: var(--text-3); font-size: 12.5px; }
 
+/* 统计面板里的全书目标区块 */
+.goal-panel {
+  margin: 14px 0 4px; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2);
+}
+.goal-panel.empty {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: transparent; border-style: dashed;
+}
+.goal-panel-head { display: flex; align-items: baseline; gap: 10px; }
+.goal-panel-title { font-size: 12.5px; font-weight: 500; color: var(--text-1); }
+.goal-panel-target { font-size: 11.5px; color: var(--text-3); }
+.goal-panel-pct {
+  margin-left: auto; font-size: 12px; color: var(--accent-hover);
+  font-variant-numeric: tabular-nums;
+}
+.goal-panel.done .goal-panel-pct { color: var(--success); }
+.goal-panel-bar {
+  margin: 9px 0 8px; height: 5px; border-radius: var(--r-full);
+  background: var(--border-2); overflow: hidden;
+}
+.goal-panel-bar i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.goal-panel.done .goal-panel-bar i { background: var(--success); }
+.goal-panel-line { font-size: 12px; color: var(--text-2); line-height: 1.8; }
+.goal-panel-line.dim.small { font-size: 11.5px; color: var(--text-3); }
+
 /* ---------------- 全书目标字数 ---------------- */
 .goal-set { align-items: start; }
 .goal-set .field-label { display: block; }

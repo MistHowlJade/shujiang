@@ -5,7 +5,7 @@
 //
 // 纯计算，不碰 DOM、不依赖全局状态。
 
-import { countWords } from './util.js';
+import { countWords, esc, fmtWords } from './util.js';
 
 /**
  * 全书目标：设了就报进度，没设返回 null。
@@ -63,4 +63,40 @@ export function daysPhrase(days) {
 export function datePhrase(date) {
   if (!date) return '';
   return `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
+}
+
+/**
+ * 统计面板里的「全书目标与完稿预测」区块。
+ * 没打开作品就提示一句；打开了但没定目标就留一个去设定的入口。
+ * @param {object} novel 当前打开的作品（没有就传 null）
+ * @param {object} stats 服务端的统计（要带 dailyRate）
+ */
+export function goalPanelHtml(novel, stats) {
+  if (!novel) {
+    return '<div class="goal-panel empty"><span class="dim small">打开一部作品，这里会显示它的完稿进度和预计完稿时间。</span></div>';
+  }
+  const goal = bookGoalOf(novel);
+  if (!goal) {
+    return `<div class="goal-panel empty">
+      <span class="dim small">《${esc(novel.title || '')}》还没定全书目标字数。</span>
+      <button class="btn btn-sm" id="stSetGoal">去设定</button>
+    </div>`;
+  }
+  const est = finishEstimate(goal, stats);
+  const rate = Number(stats?.dailyRate) || 0;
+  const pace = est?.done
+    ? '全书目标已达成'
+    : est?.days
+      ? `按最近 14 天日均 ${fmtWords(est.rate)} 字算，${daysPhrase(est.days)}，预计 ${datePhrase(est.date)}完稿`
+      : '最近没动笔，算不出还要多久';
+  return `<div class="goal-panel${goal.done ? ' done' : ''}">
+    <div class="goal-panel-head">
+      <span class="goal-panel-title">《${esc(novel.title || '')}》</span>
+      <span class="goal-panel-target">目标 ${fmtGoal(goal.target)} 字</span>
+      <span class="goal-panel-pct">${goal.pct}%</span>
+    </div>
+    <div class="goal-panel-bar"><i style="width:${goal.pct}%"></i></div>
+    <div class="goal-panel-line">已写 ${fmtWords(goal.words)} 字　·　${goal.done ? '已达成目标' : `还差 ${fmtWords(goal.left)} 字`}</div>
+    <div class="goal-panel-line dim small">${pace}${rate ? '' : '（日均为 0）'}</div>
+  </div>`;
 }

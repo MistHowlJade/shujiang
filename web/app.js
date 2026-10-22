@@ -5,7 +5,7 @@ import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryC
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
 import { diffProse, diffHtml, diffSideHtml } from './lib/diff.js';
-import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase } from './lib/goal.js';
+import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from './lib/goal.js';
 
 /* 阅读进度只存在本浏览器，不写作品 JSON，也不走服务端 */
 const READER_PROGRESS_KEY = 'shu.reader.progress.v1';
@@ -876,6 +876,8 @@ async function openStatsModal() {
   // 热力图要看一整年，单独再取一次长区间数据
   const year = await api.get('/api/stats?days=364').catch(() => null);
   const heat = statsHeatmap((year && year.days) || st.days, goal, st.today);
+  // 全书目标与完稿预测：打开作品时才有
+  const bookBlock = goalPanelHtml(S.novel, st);
   showModal(`
     <h3>写作统计</h3>
     <p class="modal-sub">只算你真的写进正文的字。删字、撤销重做还原、导入旧稿、恢复快照、全书替换都不算今天的产出。</p>
@@ -889,6 +891,7 @@ async function openStatsModal() {
       ${goal ? `<div class="stat-track big"><i style="width:${pct}%"></i></div>
         <div class="sh-goal">${pct}% · 目标 ${fmtWords(goal)} 字/天</div>` : ''}
     </div>
+    ${bookBlock}
     <div class="stat-cap">最近 14 天</div>
     <div class="stat-chart">${bars}</div>
     <div class="stat-foot">最近 7 天 ${fmtWords(st.week)} 字　·　连续 ${st.streak} 天　·　累计 ${fmtWords(st.total)} 字</div>
@@ -916,6 +919,15 @@ async function openStatsModal() {
     box.querySelector('#goalSave').addEventListener('click', () => saveGoal(Math.max(0, Math.floor(Number(input.value) || 0))));
     box.querySelector('#goalZero').addEventListener('click', () => saveGoal(0));
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') box.querySelector('#goalSave').click(); });
+    // 「去设定」：跳到设定库的「文风与规则」页
+    box.querySelector('#stSetGoal')?.addEventListener('click', () => {
+      closeModal();
+      setView('bible');
+      bibleTab = 'style';
+      $$('#bibleTabs button').forEach((x) => x.classList.toggle('on', x.dataset.bible === 'style'));
+      renderBible();
+      setTimeout(() => document.querySelector('[data-key="targetWords"]')?.focus(), 120);
+    });
     // 日历上点某一天 → 看那天写了什么
     box.querySelectorAll('.hm-cell[data-date]').forEach((cell) => {
       cell.addEventListener('click', () => openStatsDay(cell.dataset.date));
