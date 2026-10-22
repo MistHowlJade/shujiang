@@ -4234,7 +4234,7 @@ function openBatchMemory() {
         setProgress(i, list.length, ch);
         try {
           let acc = '';
-          await streamAI({ task: 'memory', novelId: S.novel.id, chapterId: ch.id }, {
+          await streamAI({ task: 'memory', novelId: S.novel.id, chapterId: ch.id, payload: { templateKey: 'batchMemory' } }, {
             signal: ac.signal,
             onDelta: (d) => { acc += d; },
           });
@@ -4318,16 +4318,12 @@ $$('[data-quick]').forEach((btn) => btn.addEventListener('click', async () => {
 
   if (kind === 'summarize') {
     if (!ch.content.trim()) return toast('本章还没正文', 'err');
+    // 走 summarize 任务，自定义模板才能生效（直接传 messages 会绕过模板）
     const text = await runStream({
-      messages: [
-        { role: 'system', content: '你是小说编辑。只输出结果，不要任何解释。' },
-        { role: 'user', content: `用 120 字以内概括这一章的剧情（写清谁做了什么、结果如何）：\n"""\n${ch.content.slice(0, 12000)}\n"""` },
-      ],
-      task: 'memory',
+      task: 'summarize',
       novelId: S.novel.id,
       chapterId: ch.id,
-      temperature: 0.4,
-      maxTokens: 400,
+      payload: { templateKey: 'summarize' },
     });
     if (!text.trim()) return;
     ch.summary = text.trim().slice(0, 300);
@@ -4989,9 +4985,19 @@ async function generateSceneProse(ch, sceneIndex) {
     chapterId: ch.id,
     model: $('#genModel').value.trim() || undefined,
     payload: {
+      templateKey: 'generateSceneProse',
       instruction,
       targetWords,
       extraQuery: instruction,
+      scene: {
+        pov: sc.pov || '',
+        location: sc.location || '',
+        time: sc.time || '',
+        characters: sc.characters || '',
+        summary: sc.summary || '',
+        hook: sc.hook || '',
+        tone: S.novel?.meta?.tone || '',
+      },
     },
   });
 
@@ -5883,6 +5889,7 @@ function renderOutlineTab(host, n) {
       task: 'outline',
       novelId: n.id,
       payload: {
+        templateKey: 'outline:aiFullOutline',
         instruction: `你是一位资深网文策划。根据核心设定「${logline}」，为这部小说设计完整的分卷大纲与前 3 卷的章纲。
 
 要求：
@@ -7156,206 +7163,36 @@ function renderSettings() {
  * AI 提示词模板管理
  * ============================================================ */
 
-// 默认提示词模板（客户端副本，用于重置与预览）
-// 使用函数返回模板字符串，避免在定义时引用未定义的变量
-function getDefaultPromptTemplates() {
-  return {
-    chapter: {
-      system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-      user: (ctx) => `现在写《${ctx.novel?.title || ''}》第 ${ctx.chapter?.no || '?'} 章：${ctx.chapter?.title || ctx.payload?.chapterTitle || ''}
-本章要求：${ctx.payload?.instruction || ''}
-${ctx.tail ? `上一章结尾原文（直接接着写，不要重述）：\n"""\n${ctx.tail}\n"""` : ''}
-
-写作要求：
-1. 直接输出正文，不要任何解释、标题、序号或"以下是正文"之类的话；
-2. 篇幅约 ${ctx.target || 3000} 字（可上下浮动 15%）；
-3. 只写本章内容，不要抢下一章的剧情；
-4. 严格遵守资料中的设定，不得凭空新增与设定冲突的能力、人物或地名；
-5. 开头要接续前文，结尾留钩子。`
-  },
-  continue: {
-    system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-    user: (ctx) => `以下是《${ctx.novel?.title || ''}》第 ${ctx.chapter?.no || '?'} 章「${ctx.chapter?.title || ''}」已写好的部分：\n"""\n${ctx.tail || ''}\n"""\n\n请直接接着往下写约 ${ctx.target || 800} 字。要求：${ctx.payload?.instruction || '顺着上文自然推进。'}\n直接输出续写内容，不要重复上文、不要任何说明文字。`
-  },
-  polish: {
-    system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-    user: (ctx) => `润色这段文字：保持原意与情节不变，去除 AI 腔，让语言更自然、更有画面感和节奏感。
-
-待处理文字：
-"""\n${ctx.text || ''}\n"""\n\n只输出处理后的文字，不要任何解释。`
-  },
-  expand: {
-    system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-    user: (ctx) => `扩写这段文字：补充细节、动作、感官与心理描写，使篇幅明显增加，情节走向和人物言行不得改变。
-
-待扩写文字：
-"""\n${ctx.text || ''}\n"""\n\n只输出扩写后的文字，不要任何解释。`
-  },
-  shorten: {
-    system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-    user: (ctx) => `精简这段文字：删去冗余修饰与重复表述，保留全部关键信息与情节，句子更干脆。
-
-待精简文字：
-"""\n${ctx.text || ''}\n"""\n\n只输出精简后的文字，不要任何解释。`
-  },
-  rewrite: {
-    system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-    user: (ctx) => `改写这段文字：事件结果与人物立场保持不变，但换一种写法与语感。
-
-待改写文字：
-"""\n${ctx.text || ''}\n"""\n\n只输出改写后的文字，不要任何解释。`
-  },
-  custom: {
-    system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-    user: (ctx) => `按作者要求处理这段文字。
-
-处理要求：${ctx.instruction || ''}
-
-原文字：
-"""\n${ctx.text || ''}\n"""\n\n只输出处理后的文字，不要任何解释。`
-  },
-  outline: {
-    system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-    user: (ctx) => `请为《${ctx.novel?.title || ''}》设计分卷大纲与章节细纲。${ctx.existing || ''}
-
-输出格式（严格照此 Markdown）：
-## 第X卷 卷名
-> 本卷定位与主要冲突（1-2 句）
-### 第1章 章节名
-- 场景：
-- 出场人物：
-- 核心事件：
-- 章末钩子：
-
-要求：剧情必须有推进和反转，避免流水账；每章都要有明确的目标、阻碍与钩子。`
-  },
-  characters: {
-    system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-    user: (ctx) => `根据已有大纲与世界观，设计本书的主要人物。
-
-只输出 JSON 数组，不要任何解释、不要 markdown 代码块。数组元素结构：
-{"name":"姓名","role":"主角/配角/反派","identity":"身份职业","age":"年龄","appearance":"外貌特征（1句）","personality":"性格（2-3个关键词+1句说明）","goal":"核心目标","flaw":"性格缺陷","secret":"隐藏秘密（可空）","speech":"说话风格（1句）","arc":"成长弧线（1句）","keywords":["可用1-3个关键词"]}`
-  },
-  worldview: {
-    system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-    user: (ctx) => `根据本书题材与大纲，补全世界观设定条目。
-
-只输出 JSON 数组，不要解释、不要代码块。元素结构：
-{"category":"地理/势力/力量体系/规则/物品/风俗/历史","name":"名称","desc":"说明（2-3句，要有可用于写作的具体细节）","keywords":["检索关键词"]}`
-  },
-  "outline:aiFullOutline": {
-    system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-    user: (ctx) => `从一句话生成全书大纲：${ctx.instruction || ''}
-
-输出格式（严格照此 Markdown）：
-## 第X卷 卷名
-> 本卷定位与主要冲突（1-2 句）
-### 第1章 章节名
-- 场景：
-- 出场人物：
-- 核心事件：
-- 章末钩子：
-
-要求：剧情必须有推进和反转，避免流水账；每章都要有明确的目标、阻碍与钩子。`
-  },
-  consistency: {
-    system: `你是一位极其严格的小说审校编辑，专门找出长篇连载中的自相矛盾。你只依据给出的设定与正文判断，不臆测，不客气。`,
-    user: (ctx) => `${ctx.head || ''}\n\n===== 待检查正文 =====\n${ctx.scope || ''}\n===== 正文结束 =====\n\n请检查上述正文与设定资料、以及正文内部是否存在矛盾。重点：人物设定/性格/能力前后冲突、时间线错乱、已死亡或已离场人物不合理的再次出场、道具与称谓前后不一致、与既有剧情重复、伏笔丢失或与旧章冲突。\n\n只输出 JSON 数组，不要解释、不要代码块。若无问题输出 []。元素结构：\n{"level":"严重/中等/轻微","type":"设定冲突/时间线/人物/道具/重复/伏笔","location":"问题所在章节或原文片段（引用不超过30字）","problem":"问题说明","suggestion":"修改建议"}`
-  },
-  review: {
-    system: (ctx) => `你是${ctx.platform || '头部网文平台'}的资深责编，看惯了大神的稿子，对节奏、爽点密度、代入感与商业潜力非常敏感。你的点评要具体、可执行，直接指出问题段落，不讲空话好话。`,
-    user: (ctx) => `${ctx.head || ''}\n\n===== 待评审正文 =====\n${ctx.scope || ''}\n===== 正文结束 =====\n\n请从编辑视角给出一份审稿意见，包含：\n1. 一句话结论（是否具备签约潜力）；\n2. 开篇/本段是否抓人（具体指出问题位置）；\n3. 节奏与爽点密度评估（指出拖沓或高潮不足处）；\n4. 人物与对话问题；\n5. 语言层面（AI 腔、重复用词、画面感）；\n6. 三条最优先的修改建议，按优先级排序。\n用 Markdown 小标题组织，控制在 800 字内。`
-  },
-  summarize: {
-    system: `你是一位经验丰富的中文小说编辑，擅长提炼章节核心。`,
-    user: (ctx) => `请为《${ctx.novel?.title || ''}》第 ${ctx.chapter?.no || '?'} 章「${ctx.chapter?.title || ''}」生成概要。\n\n正文：\n"""\n${ctx.content || ''}\n"""\n\n只输出 JSON，结构：{"summary":"概要（120字以内）","events":["关键事件"],"characters":["出场人物"],"stateChanges":["状态变化"]}`
-  },
-  titles: {
-    system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-    user: (ctx) => `${ctx.instruction || '给这本书想书名，并给最近三章起章节名。'}
-
-要求：给出 8 个书名候选（每个附一句理由，贴合平台调性与搜索习惯），再给出 3 组章节名候选（每组 3 章，标注章号）。直接输出 Markdown 列表，不要客套话。`
-  },
-  memory: {
-    system: `你是小说编辑助手，负责把章节压缩成可供后续写作检索的记忆档案。只做客观提取，不做评价。`,
-    user: (ctx) => `以下是《${ctx.novel?.title || ''}》第 ${ctx.chapter?.no || '?'} 章「${ctx.chapter?.title || ''}」的正文：\n"""\n${(ctx.content || '').slice(0, 24000)}\n"""\n\n请提取本章记忆，只输出 JSON 对象，不要解释、不要代码块。结构：\n{"summary":"本章剧情概要（120字以内，写清谁做了什么、结果如何）","events":["按时间顺序的关键事件，每条20字以内"],"characters":["本章出场人物名"],"stateChanges":["人物/势力/物品的状态变化，如'张三左臂受伤'"],"foreshadowing":["本章埋下或呼应的伏笔"],"unresolved":["本章结束时悬而未决的问题"]}`
-  },
-  batchMemory: {
-    system: `你是小说编辑助手，负责把章节批量压缩成可供后续写作检索的记忆档案。只做客观提取，不做评价。`,
-    user: (ctx) => `以下是《${ctx.novel?.title || ''}》第 ${ctx.from || '?'} 到 ${ctx.to || '?'} 章的正文：\n"""\n${ctx.content || ''}\n"""\n\n请为每章提取记忆，输出 JSON 数组，每项结构同单章记忆。`
-  },
-  analyzeStyle: {
-    system: `你是文本风格分析专家，能从样本中提炼出可以直接指导写作的技法规则。`,
-    user: (ctx) => `以下是小说样本文本：\n"""\n${ctx.text || ''}\n"""\n\n请提炼其文风，输出可直接写进 AI 写作提示词的文风档案（Markdown）：\n## 叙事视角与人称\n## 句式与节奏\n## 用词倾向（含高频标志性表达）\n## 描写手法（景物/动作/心理/对白比例与偏好）\n## 情绪与悬念处理\n## 可复用的写作规则（5-8 条祈使句）\n只做技法分析，不要评价好坏，不要引用超过 15 字的原文。`
-  },
-  scenesFromOutline: {
-    system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-    user: (ctx) => `根据章纲生成场景卡片。章纲：${JSON.stringify(ctx.outline || {})}`
-  },
-  generateSceneProse: {
-    system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-    user: (ctx) => `请根据以下场景设定，写出这段正文。要求：
-- 视角（POV）：${ctx.pov || '不限'}
-- 地点：${ctx.location || '不限'}
-- 时间：${ctx.time || '不限'}
-- 出场人物：${ctx.characters || '不限'}
-- 梗概：${ctx.summary || '按大纲推进'}
-- 场末钩子：${ctx.hook || '自行设计'}
-- 目标字数：约 ${ctx.targetWords || 1500} 字
-- 风格：${ctx.tone || '网文风格，节奏紧凑，心理描写细腻'}
-- 只输出正文，不要包含场景标题或标记。`
-  },
-  compileScenes: {
-    system: `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`,
-    user: (ctx) => `请将以下场景按顺序编译成连贯正文。每个场景包含标题、地点/时间、人物、梗概、钩子。用 --- 分隔，保持衔接自然。`
-  },
-};
-}
-// 默认提示词模板常量（供旧代码兼容使用）
-const DEFAULT_PROMPT_TEMPLATES = getDefaultPromptTemplates();
-
-/* 变量说明映射 */
-const PROMPT_VARIABLES = {
-  chapter: 'novel.title, chapter.no, chapter.title, req, target, tail',
-  continue: 'novel.title, chapter.no, chapter.title, target, req, tail',
-  polish: 'text',
-  expand: 'text',
-  shorten: 'text',
-  rewrite: 'text, instruction',
-  custom: 'text, instruction',
-  outline: 'novel.title, existing, instruction',
-  characters: 'instruction',
-  worldview: 'instruction',
-  'outline:aiFullOutline': 'instruction',
-  consistency: 'head, scope',
-  review: 'head, scope, platform',
-  summarize: 'novel.title, chapter.no, chapter.title, content',
-  titles: 'instruction, novel.title',
-  memory: 'novel.title, chapter.no, chapter.title, content',
-  batchMemory: 'novel.title, from, to, content',
-  analyzeStyle: 'text',
-  scenesFromOutline: 'outline',
-  generateSceneProse: 'pov, location, time, characters, summary, hook, targetWords, tone',
-  compileScenes: 'scenes (array of scene objects)',
-};
 
 /* 提示词管理状态 */
 let currentPromptTask = 'chapter';
+// 服务端下发的可定制任务清单：{ key, task, label, vars }
+// 与 server/prompts.js 的 TEMPLATE_SLOTS 是同一份，避免两边对不上
+let promptSlots = [];
+let promptVarList = [];
 
-function initPromptTemplates() {
+async function initPromptTemplates() {
   // 从配置加载自定义模板
   if (!S.config.promptTemplates) {
     S.config.promptTemplates = {};
   }
+  // 任务清单从服务端取，保证「下拉框里有的」与「真正能生效的」永远一致
+  try {
+    const r = await api.get('/api/prompt-slots');
+    promptSlots = Array.isArray(r?.slots) ? r.slots : [];
+    promptVarList = Array.isArray(r?.vars) ? r.vars : [];
+  } catch {
+    promptSlots = [];
+    promptVarList = [];
+  }
 }
 
-// 获取模板的字符串表示（用于显示和编辑）
-function getTemplateString(tpl) {
-  if (!tpl) return { system: '', user: '' };
-  return {
-    system: typeof tpl.system === 'function' ? '// 此模板使用动态函数生成，无法直接编辑' : (tpl.system || ''),
-    user: typeof tpl.user === 'function' ? '// 此模板使用动态函数生成，无法直接编辑' : (tpl.user || '')
-  };
+// 模板里的 ${变量} 说明，给用户一个可点的清单
+function varHintText(vars) {
+  const names = vars?.length ? vars : promptVarList.map((v) => v.key);
+  if (!names.length) return '可用变量：（暂无）';
+  const desc = Object.fromEntries(promptVarList.map((v) => [v.key, v.desc]));
+  return `可用变量：${names.map((n) => `${n}（${desc[n] || ''}）`).join('、')}`;
 }
 
 function renderPromptTemplateUI() {
@@ -7364,24 +7201,24 @@ function renderPromptTemplateUI() {
   const userEl = $('#promptUser');
   const varsEl = $('#promptVars');
 
-  // 填充下拉框（如果还没填）
-  if (select.options.length === 1) {
-    const tasks = Object.keys(DEFAULT_PROMPT_TEMPLATES);
-    select.innerHTML = tasks.map(key => `<option value="${key}">${key}</option>`).join('');
-  }
+  // 填充下拉框：用服务端的清单，键是模板在 config 里的键
+  const keys = promptSlots.map((s) => s.key);
+  const current = select.value;
+  select.innerHTML = keys.map((key) => {
+    const slot = promptSlots.find((s) => s.key === key);
+    const label = slot?.label || key;
+    return `<option value="${esc(key)}">${esc(label)}</option>`;
+  }).join('');
+  if (keys.includes(current)) select.value = current;
 
-  // 加载当前选中的模板
   const taskKey = select.value || 'chapter';
   currentPromptTask = taskKey;
+  const slot = promptSlots.find((s) => s.key === taskKey);
   const custom = S.config.promptTemplates?.[taskKey];
-  const def = DEFAULT_PROMPT_TEMPLATES[taskKey];
-  const tpl = custom || def;
-  if (tpl) {
-    const strings = getTemplateString(tpl);
-    systemEl.value = strings.system;
-    userEl.value = strings.user;
-  }
-  varsEl.textContent = `可用变量：${PROMPT_VARIABLES[taskKey] || '(无)'}`;
+  // 没有自定义模板时留空：留空 = 用内置模板，方便一眼看出「我没改过」
+  systemEl.value = custom?.system || '';
+  userEl.value = custom?.user || '';
+  varsEl.textContent = varHintText(slot?.vars);
 }
 
 function savePromptTemplate() {
@@ -7418,41 +7255,43 @@ $('#savePromptBtn')?.addEventListener('click', savePromptTemplate);
 $('#resetPromptBtn')?.addEventListener('click', resetPromptTemplate);
 
 // 在 renderSettings 最后调用渲染（此时 S.config 已加载）
-function renderPromptTemplatesInSettings() {
-  initPromptTemplates();
+async function renderPromptTemplatesInSettings() {
+  await initPromptTemplates();
   renderPromptTemplateUI();
 }
 
-/* 获取任务的提示词（优先用自定义，否则用默认） */
-function getPromptTemplate(taskKey) {
-  const custom = S.config.promptTemplates?.[taskKey];
-  if (custom) return custom;
-  const def = DEFAULT_PROMPT_TEMPLATES[taskKey];
-  if (!def) return { system: '', user: '' };
-  // 如果是函数，返回函数本身（用于显示提示）
-  return def;
-}
-
-/* 在 buildTask 中使用自定义模板（如果有） */
-function buildTaskWithCustomTemplate(taskName, ctx) {
-  const custom = S.config.promptTemplates?.[taskName];
-  if (custom && custom.system && custom.user) {
-    // 支持字符串模板和函数模板
-    const renderSystem = typeof custom.system === 'function' ? custom.system(ctx) : custom.system;
-    const renderUser = typeof custom.user === 'function' ? custom.user(ctx) : custom.user;
-    return {
-      messages: [
-        { role: 'system', content: renderSystem },
-        { role: 'user', content: renderUser }
-      ],
-      temperature: 0.85,
-      maxTokens: 4096,
-      expect: 'text'
-    };
+/* 预览当前模板渲染后的实际提示词：走服务端的 /api/context，
+   用的就是真正发模型的那套组装逻辑，所见即所得。 */
+async function previewPromptTemplate() {
+  const taskKey = $('#promptTaskSelect').value;
+  const slot = promptSlots.find((s) => s.key === taskKey);
+  if (!slot) return toast('这个任务不支持自定义提示词', 'err');
+  // 未保存的编辑内容也一并预览
+  const draft = {
+    system: $('#promptSystem').value.trim(),
+    user: $('#promptUser').value.trim(),
+  };
+  const body = {
+    task: slot.task,
+    templateKey: slot.key,
+    customTemplates: draft.system || draft.user ? { [slot.key]: draft } : {},
+    novelId: S.novel?.id,
+    chapterId: S.chapterId,
+    payload: { targetWords: 800, instruction: '（这里填作者给的要求）', text: '（这里是被处理的原文）' },
+  };
+  try {
+    const r = await api.send('/api/context', body, 'POST');
+    const msgs = (r?.messages || []).map((m) => `【${m.role === 'system' ? '系统' : '用户'}】\n${m.content}`).join('\n\n');
+    showModal(`<h3>提示词预览 · ${esc(slot.label || slot.key)}</h3>
+      <p class="modal-sub">这是变量替换后的实际内容，与发给模型的完全一致。</p>
+      <pre class="ctx-preview">${esc(msgs)}</pre>
+      <div class="modal-foot"><button class="btn btn-primary" id="pvClose">关闭</button></div>`,
+      (box) => { box.querySelector('#pvClose').onclick = closeModal; });
+  } catch (err) {
+    toast(`预览失败：${err.message}`, 'err');
   }
-  // 没有自定义模板，使用原有的 buildTask
-  return buildTask(taskName, ctx);
 }
+$('#previewPromptBtn')?.addEventListener('click', previewPromptTemplate);
 
 function renderModelSelect() {
   const cfg = S.config;
@@ -7502,7 +7341,7 @@ $('#saveCfgBtn').addEventListener('click', async () => {
 $('#analyzeStyleBtn').addEventListener('click', async () => {
   const text = $('#styleSample').value.trim();
   if (!text) return toast('先粘贴一段样本', 'err');
-  const out = await runStream({ task: 'style', payload: { text } });
+  const out = await runStream({ task: 'style', payload: { text, templateKey: 'analyzeStyle' } });
   if (!out.trim()) return;
   S.styleDraft = `${out}\n\n`;
   $('#styleBox').innerHTML = mdLite(out);

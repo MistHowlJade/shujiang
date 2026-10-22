@@ -443,40 +443,18 @@
           <div class="card">
             <div class="card-head">
               <h2>AI 提示词模板</h2>
-              <span class="tag tag-info">实验性</span>
             </div>
-            <p class="desc">自定义各任务的 AI 提示词模板。修改后会保存到配置，重启后生效。点击「恢复默认」可恢复内置模板。</p>
+            <p class="desc">自定义各任务的 AI 提示词模板。留空即使用内置模板；模板里可用 <code>${变量名}</code> 引用当前上下文（如 <code>${novel.title}</code>、<code>${chapter.title}</code>、<code>${target}</code>）。保存后立即生效。</p>
             <div class="field-label">
-              <select class="select" id="promptTaskSelect">
-                <option value="chapter">写正文</option>
-                <option value="continue">续写</option>
-                <option value="polish">润色</option>
-                <option value="expand">扩写</option>
-                <option value="shorten">精简</option>
-                <option value="rewrite">改写</option>
-                <option value="outline">生成大纲</option>
-                <option value="characters">生成人物</option>
-                <option value="worldview">生成世界观</option>
-                <option value="outline:aiFullOutline">从一句话生成全书大纲</option>
-                <option value="consistency">一致性检查</option>
-                <option value="review">责编评审</option>
-                <option value="summarize">生成概要</option>
-                <option value="titles">起名</option>
-                <option value="memory">存章节记忆</option>
-                <option value="batchMemory">批量补记忆</option>
-                <option value="analyzeStyle">提取文风</option>
-                <option value="scenesFromOutline">从章纲生成场景</option>
-                <option value="generateSceneProse">生成场景正文</option>
-                <option value="compileScenes">编译场景成正文</option>
-              </select>
+              <select class="select" id="promptTaskSelect"></select>
             </div>
             <div class="field-label">
               <label>系统提示词 (System)</label>
-              <textarea id="promptSystem" class="textarea" rows="6" placeholder="系统级提示词，定义 AI 的角色与行为准则……"></textarea>
+              <textarea id="promptSystem" class="textarea" rows="6" placeholder="留空则使用内置系统提示词。定义 AI 的角色与行为准则……"></textarea>
             </div>
             <div class="field-label">
               <label>用户提示词模板 (User)</label>
-              <textarea id="promptUser" class="textarea" rows="8" placeholder="用户提示词模板，可使用变量：${novel.title}、${chapter.title}、${targetWords} 等……"></textarea>
+              <textarea id="promptUser" class="textarea" rows="8" placeholder="留空则使用内置提示词。可用变量见下方说明。"></textarea>
             </div>
             <div class="field-label">
               <label>变量说明</label>
@@ -485,6 +463,7 @@
             <div class="btn-row">
               <button class="btn btn-primary" id="savePromptBtn"><svg class="ico"><use href="#i-save" /></svg>保存模板</button>
               <button class="btn btn-text" id="resetPromptBtn"><svg class="ico"><use href="#i-rotate" /></svg>恢复默认</button>
+              <button class="btn btn-text" id="previewPromptBtn"><svg class="ico"><use href="#i-eye" /></svg>预览效果</button>
               <span class="dim-text" id="promptMsg"></span>
             </div>
           </div>

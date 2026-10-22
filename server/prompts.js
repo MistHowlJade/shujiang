@@ -56,6 +56,15 @@ function head(novel, pack) {
     .join('\n');
 }
 
+// 已有大纲的续写提示：让模型在大纲上继续，而不是推倒重来
+function outlineExisting(novel) {
+  const volumes = novel?.outline?.volumes || [];
+  if (!volumes.length) return '';
+  return `\n\n已有大纲（请在此基础上延续，不要重写已定稿部分）：\n${volumes
+    .map((v) => `第${v.name}：${v.desc || ''}\n` + (v.chapters || []).map((c) => `  - ${c.title}：${c.summary || ''}`).join('\n'))
+    .join('\n')}`;
+}
+
 function sys(...parts) {
   return { role: 'system', content: parts.filter(Boolean).join('\n\n') };
 }
@@ -74,12 +83,7 @@ export const TASKS = {
     maxTokens: 4096,
     build({ novel, pack, payload }) {
       const ask = payload?.instruction || `请为《${novel.title}》设计分卷大纲与章节细纲。`;
-      const volumes = novel.outline?.volumes || [];
-      const existing = volumes.length
-        ? `\n\n已有大纲（请在此基础上延续，不要重写已定稿部分）：\n${volumes
-            .map((v) => `第${v.name}：${v.desc || ''}\n` + (v.chapters || []).map((c) => `  - ${c.title}：${c.summary || ''}`).join('\n'))
-            .join('\n')}`
-        : '';
+      const existing = outlineExisting(novel);
       return {
         messages: [
           sys(BASE_SYSTEM, head(novel, pack)),
@@ -224,6 +228,23 @@ export const TASKS = {
     ),
   },
 
+  /* ---------- 章节概要 ---------- */
+  summarize: {
+    expect: 'text',
+    temperature: 0.4,
+    maxTokens: 400,
+    build({ novel, chapter }) {
+      return {
+        messages: [
+          sys('你是小说编辑。只输出结果，不要任何解释。'),
+          user(
+            `用 120 字以内概括这一章的剧情（写清谁做了什么、结果如何）：\n"""\n${(chapter?.content || '').slice(0, 12000)}\n"""\n\n只输出概要正文本身，不要标题、不要解释。`,
+          ),
+        ],
+      };
+    },
+  },
+
   /* ---------- 章节记忆 ---------- */
   memory: {
     expect: 'json',
@@ -337,37 +358,147 @@ function textTask(instructionFn, bodyFn) {
   };
 }
 
+/* ============================================================
+ * 自定义模板引擎
+ * ------------------------------------------------------------
+ * 用户在「设置 → AI 提示词模板」里写的模板是纯文本，里面可以用
+ * ${变量名} 引用当前上下文。这里负责把变量替换成实际值。
+ *
+ * 变量表由 buildTemplateVars 生成，是模板作者唯一需要知道的东西。
+ * 未定义的变量一律替换成空字符串，不会把 ${...} 原样发给模型。
+ * ============================================================ */
+
+// 模板里可用的变量说明（设置界面同步展示这份清单）
+export const TEMPLATE_VARS = [
+  { key: 'novel.title', desc: '书名' },
+  { key: 'novel.genre', desc: '题材' },
+  { key: 'chapter.no', desc: '章节序号' },
+  { key: 'chapter.title', desc: '章节标题' },
+  { key: 'req', desc: '本章要求 / 指令' },
+  { key: 'target', desc: '目标字数' },
+  { key: 'tail', desc: '上一章结尾或本章已写部分' },
+  { key: 'text', desc: '选中的原文' },
+  { key: 'content', desc: '本章正文' },
+  { key: 'scope', desc: '待检查的正文范围' },
+  { key: 'head', desc: '作品资料包（设定 + 大纲 + 记忆）' },
+  { key: 'instruction', desc: '作者给的指令' },
+  { key: 'existing', desc: '已有大纲摘要' },
+  { key: 'pov', desc: '场景视角' },
+  { key: 'location', desc: '场景地点' },
+  { key: 'time', desc: '场景时间' },
+  { key: 'characters', desc: '场景出场人物' },
+  { key: 'summary', desc: '场景梗概' },
+  { key: 'hook', desc: '场景钩子' },
+  { key: 'tone', desc: '整体基调' },
+];
+
+// 从上下文收集模板变量
+function buildTemplateVars(ctx) {
+  const novel = ctx?.novel || {};
+  const chapter = ctx?.chapter || null;
+  const payload = ctx?.payload || {};
+  const pack = ctx?.pack || [];
+  const scopeText = payload.scopeText || '';
+  const tail = payload.tail || ctx?.prevTail || '';
+  // 场景类任务的字段：客户端把当前场景塞进 payload.scene
+  const scene = payload.scene || {};
+  return {
+    'novel.title': novel.title || '',
+    'novel.genre': novel.genre || '',
+    'chapter.no': chapter?.no ?? '',
+    'chapter.title': chapter?.title || payload.chapterTitle || '',
+    req: payload.instruction || '',
+    target: payload.targetWords || novel.meta?.targetWordsPerChapter || 3000,
+    tail,
+    text: payload.text || '',
+    content: chapter?.content || '',
+    scope: scopeText,
+    head: novel.id ? head(novel, pack) : '',
+    instruction: payload.instruction || '',
+    existing: outlineExisting(novel),
+    pov: scene.pov || '',
+    location: scene.location || '',
+    time: scene.time || '',
+    characters: scene.characters || '',
+    summary: scene.summary || '',
+    hook: scene.hook || '',
+    tone: scene.tone || novel.meta?.tone || '',
+  };
+}
+
+// 替换 ${变量名}。未定义的变量换成空串，避免把占位符原样发给模型。
+function renderTemplate(text, vars) {
+  if (typeof text !== 'string' || !text) return '';
+  return text.replace(/\$\{([a-zA-Z0-9_.]+)\}/g, (m, name) => {
+    const v = vars[name];
+    return v === undefined || v === null ? '' : String(v);
+  });
+}
+
+/**
+ * 可自定义提示词的任务清单：设置界面的下拉框直接读这份。
+ * task      —— 发给服务端的真实任务名
+ * templateKey —— 模板在 config.promptTemplates 里的键。同一任务被多处复用时用它区分
+ *               （例如 outline 既用于「生成大纲」也用于「从一句话生成全书大纲」）。
+ * vars      —— 这个任务可用的变量名，写在提示词里用 ${变量名} 引用。
+ */
+export const TEMPLATE_SLOTS = [
+  { key: 'chapter', task: 'chapter', label: '写正文', vars: ['novel.title', 'chapter.no', 'chapter.title', 'req', 'target', 'tail', 'head'] },
+  { key: 'continue', task: 'continue', label: '续写', vars: ['novel.title', 'chapter.no', 'chapter.title', 'req', 'target', 'tail'] },
+  { key: 'polish', task: 'polish', label: '润色', vars: ['text', 'instruction'] },
+  { key: 'expand', task: 'expand', label: '扩写', vars: ['text', 'instruction'] },
+  { key: 'shorten', task: 'shorten', label: '精简', vars: ['text', 'instruction'] },
+  { key: 'rewrite', task: 'rewrite', label: '改写', vars: ['text', 'instruction'] },
+  { key: 'custom', task: 'custom', label: '按指令处理', vars: ['text', 'instruction'] },
+  { key: 'outline', task: 'outline', label: '生成大纲', vars: ['novel.title', 'req', 'existing', 'head'] },
+  { key: 'outline:aiFullOutline', task: 'outline', label: '从一句话生成全书大纲', vars: ['novel.title', 'req', 'existing', 'head'] },
+  { key: 'characters', task: 'characters', label: '生成人物', vars: ['req', 'head'] },
+  { key: 'worldview', task: 'worldview', label: '生成世界观', vars: ['req', 'head'] },
+  { key: 'consistency', task: 'consistency', label: '一致性检查', vars: ['head', 'scope'] },
+  { key: 'review', task: 'review', label: '责编评审', vars: ['head', 'scope', 'novel.genre'] },
+  { key: 'summarize', task: 'summarize', label: '生成概要', vars: ['novel.title', 'chapter.no', 'chapter.title', 'content'] },
+  { key: 'titles', task: 'titles', label: '起名', vars: ['novel.title', 'req'] },
+  { key: 'memory', task: 'memory', label: '存章节记忆', vars: ['novel.title', 'chapter.no', 'chapter.title', 'content'] },
+  { key: 'batchMemory', task: 'memory', label: '批量补记忆', vars: ['novel.title', 'chapter.no', 'chapter.title', 'content'] },
+  { key: 'analyzeStyle', task: 'style', label: '提取文风', vars: ['text'] },
+  { key: 'generateSceneProse', task: 'chapter', label: '生成场景正文', vars: ['pov', 'location', 'time', 'characters', 'summary', 'hook', 'target', 'tone', 'req'] },
+];
+
 export function buildTask(taskName, ctx) {
-  // 检查是否有自定义模板
-  const custom = ctx?.customTemplates?.[ctx?.payload?.taskName || ''];
-  // 如果没有直接传 taskName，尝试从 ctx 中获取
-  const taskKey = ctx?.payload?.taskName || '';
-  const customTpl = ctx?.customTemplates?.[taskKey];
-
-  // 如果有自定义模板且包含 system 和 user，直接使用
-  if (customTpl && customTpl.system && customTpl.user) {
-    // 支持字符串模板和函数模板
-    const renderSystem = typeof customTpl.system === 'function' ? customTpl.system(ctx) : customTpl.system;
-    const renderUser = typeof customTpl.user === 'function' ? customTpl.user(ctx) : customTpl.user;
-    return {
-      messages: [
-        { role: 'system', content: renderSystem },
-        { role: 'user', content: renderUser }
-      ],
-      temperature: 0.85,
-      maxTokens: 4096,
-      expect: 'text',
-    };
-  }
-
   const task = TASKS[taskName];
   if (!task) throw new Error(`未知任务：${taskName}`);
+
+  // 自定义模板优先：键就是任务名（chapter / continue / polish …）。
+  // 同一任务可能对应多个用途（outline 与 outline:aiFullOutline），所以也认 payload.templateKey。
+  const templates = ctx?.customTemplates || {};
+  const key = ctx?.payload?.templateKey || taskName;
+  const custom = templates[key] || templates[taskName];
+
+  if (custom && (custom.system || custom.user)) {
+    const vars = buildTemplateVars(ctx);
+    const render = (tpl) => (typeof tpl === 'function' ? tpl(ctx) : renderTemplate(tpl, vars));
+    const system = custom.system ? render(custom.system) : '';
+    const user = custom.user ? render(custom.user) : '';
+    if (user) {
+      return {
+        messages: [
+          ...(system ? [{ role: 'system', content: system }] : []),
+          { role: 'user', content: user },
+        ],
+        // 用任务本身的温度与长度上限，只在模板显式指定时覆盖
+        temperature: custom.temperature ?? task.temperature ?? 0.85,
+        maxTokens: custom.maxTokens ?? task.maxTokens ?? 4096,
+        expect: custom.expect || task.expect || 'text',
+      };
+    }
+  }
+
   const built = task.build(ctx) || {};
   return {
     messages: built.messages,
-    temperature: built.temperature ?? ctx?.novel?.meta?.temperature ?? 0.85,
-    maxTokens: built.maxTokens ?? 4096,
-    expect: built.expect || 'text',
+    temperature: built.temperature ?? task.temperature ?? 0.85,
+    maxTokens: built.maxTokens ?? task.maxTokens ?? 4096,
+    expect: built.expect || task.expect || 'text',
   };
 }
 

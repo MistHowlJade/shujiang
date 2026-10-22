@@ -12,7 +12,7 @@ import {
   findOutlineEntry, CHAPTER_STAGES, cleanTargetWords,
   applyFragmentData,
 } from './store.js';
-import { buildTask, TASKS } from './prompts.js';
+import { buildTask, TASKS, TEMPLATE_SLOTS, TEMPLATE_VARS } from './prompts.js';
 import { buildEpub } from './epub.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
 import { addWords, setGoal, statsSummary } from './stats.js';
@@ -141,7 +141,6 @@ function prepareTask(cfg, body) {
   const { task, novelId, chapterId, payload = {}, customTemplates } = body;
   if (!task) throw new Error('缺少 task');
   if (!TASKS[task]) throw new Error(`未知任务：${task}`);
-
   let novel = null;
   let pack = [];
   let stats = {};
@@ -176,8 +175,11 @@ function prepareTask(cfg, body) {
     chapter,
     pack,
     prevTail,
-    payload: { ...payload, scopeText, prevTail, taskName: task },
-    customTemplates,
+    payload: { ...payload, scopeText, prevTail, taskName: task, templateKey: payload.templateKey || '' },
+    // 请求体没带模板时回落配置里的：API 直调也能用上用户设定的模板
+    customTemplates: customTemplates && Object.keys(customTemplates).length
+      ? customTemplates
+      : (cfg?.promptTemplates || {}),
   };
   const built = buildTask(task, ctx);
   return { built, novel, stats, pack, chapter };
@@ -903,6 +905,11 @@ async function handleApi(req, res, url) {
       maxTokens: built.maxTokens,
       stats: { ...stats, lines: packSummaryLines(pack), packChars: (pack || []).join('').length },
     });
+  }
+
+  /* --- 可自定义提示词的任务清单（设置界面的下拉框读这个） --- */
+  if (seg[1] === 'prompt-slots' && method === 'GET') {
+    return sendJson(res, 200, { slots: TEMPLATE_SLOTS, vars: TEMPLATE_VARS });
   }
 
   /* --- 流式生成 --- */
