@@ -7766,6 +7766,12 @@ function exportBook() {
     </label>
     <div class="dim small export-done-hint" id="exDoneHint" hidden>章号沿用原书，不会自动重新编号。</div>
     <div class="dim small" id="exHint" hidden>EPUB 会导出全书，自动生成标题页、目录和分卷结构，适合放进手机 / 阅读器。</div>
+    <div class="export-extras" id="exExtras" hidden>
+      <span class="export-extras-lbl">随稿附带</span>
+      <label class="export-extra"><input type="checkbox" id="exOutline" /><span>全书大纲</span></label>
+      <label class="export-extra"><input type="checkbox" id="exCharacters" /><span>人物小传</span></label>
+      <div class="dim small" id="exExtrasHint"></div>
+    </div>
     <div class="cover-row" id="exCoverRow" hidden>
       <div class="cover-thumb"><img id="exCoverImg" alt="封面预览" /></div>
       <div class="cover-side">
@@ -7887,9 +7893,21 @@ function exportBook() {
       };
       const total = S.novel.chapters.length;
       const doneCount = S.novel.chapters.filter((c) => stageOf(c) === 'done').length;
+      // 随稿附带的材料：只有作品里真写了才有得选
+      const extrasRow = box.querySelector('#exExtras');
+      const outlineEl = box.querySelector('#exOutline');
+      const charactersEl = box.querySelector('#exCharacters');
+      const extrasHint = box.querySelector('#exExtrasHint');
+      const hasOutline = (S.novel.outline?.volumes || []).some((v) => (v.chapters || []).length);
+      const hasCharacters = (S.novel.bible?.characters || []).length > 0;
+      outlineEl.checked = hasOutline;
+      charactersEl.checked = hasCharacters;
+      outlineEl.disabled = !hasOutline;
+      charactersEl.disabled = !hasCharacters;
       const sync = () => {
         const backup = fmtEl.value === 'json';
         const epub = fmtEl.value === 'epub';
+        const md = fmtEl.value === 'md';
         const whole = epub || backup;
         scopeEl.disabled = whole;
         if (whole) scopeEl.value = 'all';
@@ -7908,10 +7926,22 @@ function exportBook() {
         // 封面只跟 EPUB 有关
         coverRow.hidden = !epub;
         if (epub) refreshCover();
+        // 附带材料：Markdown 与 EPUB 有意义；TXT 是拿来读的，不塞这些
+        extrasRow.hidden = !(md || epub);
+        const picked = [];
+        if (outlineEl.checked) picked.push('全书大纲');
+        if (charactersEl.checked) picked.push('人物小传');
+        extrasHint.textContent = !hasOutline && !hasCharacters
+          ? '这部作品还没写章纲和人物卡，填了才有得附带。'
+          : picked.length
+            ? `会附在正文后面：${picked.join('、')}。`
+            : '勾上的会附在正文后面。';
       };
       fmtEl.onchange = sync;
       scopeEl.onchange = sync;
       doneEl.onchange = sync;
+      outlineEl.onchange = sync;
+      charactersEl.onchange = sync;
       sync();
       box.querySelector('#exCancel').onclick = closeModal;
       box.querySelector('#exOk').onclick = () => {
@@ -7925,7 +7955,11 @@ function exportBook() {
           return;
         }
         const q = `${fmt !== 'epub' && scope === 'chapter' && S.chapterId ? `&chapterId=${S.chapterId}` : ''}${onlyDone ? '&only=done' : ''}`;
-        window.location.href = `/api/novels/${S.novel.id}/export?format=${fmt}${q}`;
+        const extras = [];
+        if (!extrasRow.hidden && outlineEl.checked) extras.push('outline');
+        if (!extrasRow.hidden && charactersEl.checked) extras.push('characters');
+        const extraQ = extras.length ? `&extras=${extras.join(',')}` : '';
+        window.location.href = `/api/novels/${S.novel.id}/export?format=${fmt}${q}${extraQ}`;
         closeModal();
       };
     });

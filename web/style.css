@@ -1578,8 +1578,7 @@ kbd {
   border: 1px solid var(--border-2); background: var(--surface-1);
 }
 .cover-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.cover-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.cover-title { font-size: 12.5px; font-weight: 500; color: var(--text-1); }
+.cover-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }.cover-title { font-size: 12.5px; font-weight: 500; color: var(--text-1); }
 .cover-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .cover-actions .btn { padding: 4px 10px; font-size: 11.5px; }
 
@@ -1680,6 +1679,18 @@ kbd {
   display: flex; gap: 6px; padding: 9px 12px;
   border-top: 1px solid var(--border); background: var(--surface-2);
 }
+
+/* 导出弹窗：随稿附带的材料 */
+.export-extras {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  margin-top: 12px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2);
+}
+.export-extras-lbl { font-size: 12px; color: var(--text-2); }
+.export-extra { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); cursor: pointer; }
+.export-extra input { accent-color: var(--accent); }
+.export-extra:has(input:disabled) { opacity: .45; cursor: not-allowed; }
+.export-extras .dim.small { flex: 1 0 100%; }
 
 /* ---------------- 导入文稿 ---------------- */
 .import-drop {

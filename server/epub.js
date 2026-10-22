@@ -4,6 +4,7 @@ import { deflateRawSync } from 'node:zlib';
 import { randomUUID } from 'node:crypto';
 import { chapterVolumeIds, countWords, volumeLabel } from './store.js';
 import { coverSvg, readCoverImage } from './cover.js';
+import { outlineRows, characterRows } from './manuscript.js';
 
 const XML_HEAD = '<?xml version="1.0" encoding="utf-8"?>';
 const CHAPTER_FILE = (i) => `chapter-${String(i + 1).padStart(3, '0')}.xhtml`;
@@ -89,9 +90,19 @@ nav ol { margin: .6em 0 1.2em; padding-left: 1.4em; }
 nav li { margin: .35em 0; }
 nav a { color: #1b1b1b; text-decoration: none; }
 nav span { color: #666; }
+
+/* 随稿附带的材料：全书大纲 / 人物小传 */
+.ol-page h1 { margin-bottom: 1.2em; }
+.ol-page h2 { margin: 2em 0 .6em; font-size: 1.2em; font-weight: 600; }
+.ol-page h3 { margin: 1.6em 0 .4em; font-size: 1.05em; font-weight: 600; }
+.ol-page .vol-desc { margin: 0 0 1em; color: #666; font-size: .92em; }
+.ol-page .ol-words { color: #888; font-size: .82em; font-weight: 400; }
+.ol-page .ol-field { margin: .2em 0; text-indent: 0; font-size: .95em; line-height: 1.75; }
+.ol-page .ol-field b { margin-right: .8em; color: #555; font-weight: 600; }
+.ol-page .ol-note { margin-top: 2em; color: #888; font-size: .88em; text-indent: 0; }
 `;
 
-function navPage(groups, chapters) {
+function navPage(groups, chapters, extras = {}) {
   const fileOf = new Map(chapters.map((c, i) => [c.id, CHAPTER_FILE(i)]));
   const links = groups.map((g) => {
     const items = g.chapters
@@ -100,11 +111,16 @@ function navPage(groups, chapters) {
     if (!g.vol) return items;
     return `<li><span>${esc(volumeLabel(g.vol, g.vol.no))}</span>\n<ol>\n${items}\n</ol>\n</li>`;
   }).join('\n');
+  // 随稿附带的材料：目录里也给出入口
+  const extraLinks = [];
+  if (extras.outline) extraLinks.push('<li><a href="outline.xhtml">全书大纲</a></li>');
+  if (extras.characters) extraLinks.push('<li><a href="characters.xhtml">人物小传</a></li>');
   return `<nav epub:type="toc" id="toc">
 <h1>目录</h1>
 <ol>
 <li><a href="cover.xhtml">封面</a></li>
 <li><a href="title.xhtml">书名页</a></li>
+${extraLinks.join('\n')}
 ${links}
 </ol>
 </nav>
@@ -114,6 +130,38 @@ ${links}
 <li><a epub:type="bodymatter" href="${chapters.length ? fileOf.get(chapters[0].id) : 'title.xhtml'}">正文</a></li>
 </ol>
 </nav>`;
+}
+
+/** 随稿附带的「全书大纲」页 */
+function outlinePage(novel, chapters) {
+  const o = outlineRows(novel, chapters);
+  const body = o.volumes.map((v) => `
+<h2>第${v.no}卷 ${esc(v.name)}</h2>
+${v.desc ? `<p class="vol-desc">${esc(v.desc)}</p>` : ''}
+${v.entries.map((e) => `<section class="ol-entry">
+<h3>${e.no ? `第${e.no}章 ` : ''}${esc(e.title)}${e.words ? `　<span class="ol-words">${e.words} 字</span>` : ''}</h3>
+${e.fields.map((f) => `<p class="ol-field"><b>${esc(f.label)}</b>${esc(f.value)}</p>`).join('\n')}
+</section>`).join('\n')}`).join('\n');
+  const missing = o.missing ? `<p class="ol-note">另有 ${o.missing} 章还没写章纲。</p>` : '';
+  return `<section epub:type="chapter" class="ol-page">
+<h1>全书大纲</h1>
+${body}
+${missing}
+</section>`;
+}
+
+/** 随稿附带的「人物小传」页 */
+function charactersPage(novel) {
+  const rows = characterRows(novel);
+  const body = rows.map((c) => `
+<section class="ol-entry">
+<h3>${esc(c.name)}</h3>
+${c.fields.map((f) => `<p class="ol-field"><b>${esc(f.label)}</b>${esc(f.value)}</p>`).join('\n')}
+</section>`).join('\n');
+  return `<section epub:type="chapter" class="ol-page">
+<h1>人物小传</h1>
+${body}
+</section>`;
 }
 
 function titlePage(novel, chapters, words = 0) {
@@ -128,7 +176,7 @@ ${novel.meta?.logline ? `<p class="logline">${esc(novel.meta.logline)}</p>` : ''
 </section>`;
 }
 
-function packageFile(novel, chapters, cover) {
+function packageFile(novel, chapters, cover, extras = {}) {
   const description = novel.meta?.logline || novel.meta?.synopsis || '';
   const modified = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
   const manifest = [
@@ -138,12 +186,16 @@ function packageFile(novel, chapters, cover) {
     `<item id="cover-img" href="${cover.href}" media-type="${cover.media}" properties="cover-image" />`,
     '<item id="cover" href="cover.xhtml" media-type="application/xhtml+xml" />',
     '<item id="title" href="title.xhtml" media-type="application/xhtml+xml" />',
+    ...(extras.outline ? ['<item id="outline" href="outline.xhtml" media-type="application/xhtml+xml" />'] : []),
+    ...(extras.characters ? ['<item id="characters" href="characters.xhtml" media-type="application/xhtml+xml" />'] : []),
     ...chapters.map((c, i) => `<item id="ch${i + 1}" href="${CHAPTER_FILE(i)}" media-type="application/xhtml+xml" />`),
   ].join('\n');
   const spine = [
     '<itemref idref="cover" />',
     '<itemref idref="title" />',
     '<itemref idref="nav" />',
+    ...(extras.outline ? ['<itemref idref="outline" />'] : []),
+    ...(extras.characters ? ['<itemref idref="characters" />'] : []),
     ...chapters.map((_, i) => `<itemref idref="ch${i + 1}" />`),
   ].join('\n');
   return `${XML_HEAD}
@@ -253,7 +305,7 @@ function zip(files) {
 }
 
 /** 生成完整的 EPUB 文件 Buffer */
-export function buildEpub(novel, chapters = novel.chapters || []) {
+export function buildEpub(novel, chapters = novel.chapters || [], extras = {}) {
   const list = (chapters || []).slice();
   const groups = volumeGroups(novel, list);
   const kicker = new Map();
@@ -280,8 +332,8 @@ export function buildEpub(novel, chapters = novel.chapters || []) {
 </container>
 `,
     },
-    { name: 'OEBPS/content.opf', data: packageFile(novel, list, cover) },
-    { name: 'OEBPS/nav.xhtml', data: page('目录', navPage(groups, list)) },
+    { name: 'OEBPS/content.opf', data: packageFile(novel, list, cover, extras) },
+    { name: 'OEBPS/nav.xhtml', data: page('目录', navPage(groups, list, extras)) },
     { name: 'OEBPS/style.css', data: STYLE },
     { name: `OEBPS/${cover.href}`, data: cover.data },
     {
@@ -296,6 +348,14 @@ export function buildEpub(novel, chapters = novel.chapters || []) {
     },
     { name: 'OEBPS/title.xhtml', data: page(novel.title || '书名页', titlePage(novel, list, words)) },
   ];
+
+  // 随稿附带的材料：全书大纲、人物小传
+  if (extras.outline) {
+    files.push({ name: 'OEBPS/outline.xhtml', data: page('全书大纲', outlinePage(novel, list)) });
+  }
+  if (extras.characters) {
+    files.push({ name: 'OEBPS/characters.xhtml', data: page('人物小传', charactersPage(novel)) });
+  }
 
   list.forEach((ch, i) => {
     const vol = kicker.get(ch.id);

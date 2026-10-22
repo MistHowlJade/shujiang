@@ -481,6 +481,46 @@ async function main() {
   check('全局搜索能搜到', (search.hits?.length || search.results?.length || 0) >= 1);
 
   // ---------------------------------------------------------------
+  group('导出附带材料（大纲 / 人物小传）');
+  {
+    const n2 = await post(`${BASE}/api/novels`, { title: '附带材料测试' });
+    const nid = n2.novel?.id;
+    // 一卷一章纲 + 一个人物
+    await put(`${BASE}/api/novels/${nid}`, {
+      outline: { notes: '', volumes: [{ id: 'v_r1', name: '第一卷', desc: '本卷定位', chapters: [{ id: 'o_r1', title: '起手', scene: '城南雨夜', characters: '甲、乙', summary: '主角动身', hook: '门开了' }] }] },
+      bible: { characters: [{ name: '甲', role: '主角', identity: '剑客', goal: '找到师父' }], world: [], timeline: [] },
+    });
+    const ch = await post(`${BASE}/api/novels/${nid}/chapters`, { title: '第一章 起手', content: '正文内容。', outlineId: 'o_r1' });
+    check('建章时可以挂上章纲', ch.chapter?.outlineId === 'o_r1', ch.chapter?.outlineId);
+    const bogus = await post(`${BASE}/api/novels/${nid}/chapters`, { title: '第二章', content: 'x', outlineId: 'o_不存在' });
+    check('挂不存在的章纲会被忽略', !bogus.chapter?.outlineId, bogus.chapter?.outlineId);
+
+    const mdPlain = (await req('GET', `${BASE}/api/novels/${nid}/export?format=md`)).buf.toString('utf8');
+    check('默认导出没有附带材料', !mdPlain.includes('## 全书大纲') && !mdPlain.includes('## 人物小传'));
+    const mdExtra = (await req('GET', `${BASE}/api/novels/${nid}/export?format=md&extras=outline,characters`)).buf.toString('utf8');
+    check('Markdown 能带上全书大纲', mdExtra.includes('## 全书大纲') && mdExtra.includes('第一卷'));
+    check('大纲里有章纲内容', mdExtra.includes('场景：城南雨夜') && mdExtra.includes('章末钩子：门开了'));
+    check('Markdown 能带上人物小传', mdExtra.includes('## 人物小传') && mdExtra.includes('核心目标：找到师父'));
+    check('附带材料时正文还在', mdExtra.includes('正文内容。'));
+
+    const epubPlain = unzip((await req('GET', `${BASE}/api/novels/${nid}/export?format=epub`)).buf);
+    check('EPUB 默认没有大纲页', !epubPlain['OEBPS/outline.xhtml'] && !epubPlain['OEBPS/characters.xhtml']);
+    const epubExtra = unzip((await req('GET', `${BASE}/api/novels/${nid}/export?format=epub&extras=outline,characters`)).buf);
+    check('EPUB 带上了大纲页', !!epubExtra['OEBPS/outline.xhtml']);
+    check('EPUB 带上了人物页', !!epubExtra['OEBPS/characters.xhtml']);
+    const opfE = epubExtra['OEBPS/content.opf'].toString('utf8');
+    check('opf 收了这两页', opfE.includes('outline.xhtml') && opfE.includes('characters.xhtml'));
+    check('书脊里有这两页', opfE.includes('<itemref idref="outline" />') && opfE.includes('<itemref idref="characters" />'));
+    check('目录里有入口', epubExtra['OEBPS/nav.xhtml'].toString('utf8').includes('全书大纲'));
+    const olXml = epubExtra['OEBPS/outline.xhtml'].toString('utf8');
+    check('大纲页内容正确', olXml.includes('城南雨夜') && olXml.includes('第一卷'));
+    // 上面故意造了一章挂不上章纲的，缺章纲的章数应该是 1 而不是 2
+    check('缺章纲的章数算得对', olXml.includes('另有 1 章还没写章纲'), olXml.slice(-140));
+
+    await req('DELETE', `${BASE}/api/novels/${nid}?permanent=1`);
+  }
+
+  // ---------------------------------------------------------------
   group('章节状态');
   {
     // 新建章节时 stage 会被尊重（拆分本章继承原章阶段靠这个）

@@ -14,6 +14,7 @@ import {
 } from './store.js';
 import { buildTask, TASKS, TEMPLATE_SLOTS, TEMPLATE_VARS } from './prompts.js';
 import { buildEpub } from './epub.js';
+import { outlineRows, characterRows, hasExtras } from './manuscript.js';
 import { coverSvg, readCoverImage, saveCoverImage, deleteCoverImage, coverOptions } from './cover.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
 import { addWords, setGoal, statsSummary, statsDay } from './stats.js';
@@ -656,6 +657,13 @@ async function handleApi(req, res, url) {
           stage: CHAPTER_STAGES.has(body.stage) ? body.stage : 'draft',
           targetWords: cleanTargetWords(body.targetWords),
           outline: body.outline || null,
+          // 章纲可以一开始就挂上（大纲驱动的建章流程用得上）；只认真的存在的章纲 id
+          outlineId: (() => {
+            const oid = typeof body.outlineId === 'string' ? body.outlineId : '';
+            if (!oid) return '';
+            const exists = (n.outline?.volumes || []).some((v) => (v.chapters || []).some((o) => o?.id === oid));
+            return exists ? oid : '';
+          })(),
           memory: null,
           // 归入哪一卷由前端决定（新章节默认跟着前一章走，见 web/app.js 的 addChapter）
           volumeId: typeof body.volumeId === 'string' ? body.volumeId : '',
@@ -847,10 +855,15 @@ async function handleApi(req, res, url) {
       // 空书仍可导出（至少保留书名页 / 封面信息）；只有「只导出定稿」没内容时才报错
       if (!list.length && onlyDone) return sendJson(res, 400, { error: '还没有已定稿的章节' });
       const suffix = onlyDone ? '_定稿版' : '';
+      // 随稿附带的材料：extras=outline,characters
+      const extras = {
+        outline: (url.searchParams.get('extras') || '').split(',').includes('outline'),
+        characters: (url.searchParams.get('extras') || '').split(',').includes('characters'),
+      };
 
       if (format === 'epub') {
         // EPUB 始终导出全书：单章电子书没有阅读价值，目录也按全书分卷生成
-        const buf = buildEpub(n, list);
+        const buf = buildEpub(n, list, extras);
         const name = `${safeName(n.title)}${suffix}.epub`;
         res.writeHead(200, {
           'Content-Type': 'application/epub+zip',
@@ -861,7 +874,7 @@ async function handleApi(req, res, url) {
         return res.end(buf);
       }
 
-      const text = format === 'md' ? exportMarkdown(n, list) : exportTxt(n, list);
+      const text = format === 'md' ? exportMarkdown(n, list, extras) : exportTxt(n, list);
       const name = `${safeName(n.title)}${suffix}${cid && list[0] ? `_第${list[0].no}章` : ''}.${format}`;
       res.writeHead(200, {
         'Content-Type': format === 'md' ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8',
@@ -1096,7 +1109,7 @@ function exportTxt(n, chapters) {
   return `${head}\n${'-'.repeat(30)}${body}\n`;
 }
 
-function exportMarkdown(n, chapters) {
+function exportMarkdown(n, chapters, extras = {}) {
   const lines = [`# ${n.title}`];
   if (n.author) lines.push(`作者：${n.author}`);
   if (n.genre) lines.push(`类型：${n.genre}`);
@@ -1113,6 +1126,36 @@ function exportMarkdown(n, chapters) {
     lines.push((c.content || '').trim().split(/\n+/).map((p) => `　　${p}`).join('\n\n'));
     lines.push('');
   });
+  // 附带材料：放在正文后面，方便编辑连着看
+  if (extras.outline) {
+    const o = outlineRows(n, chapters);
+    if (o.volumes.length) {
+      lines.push('\n---\n');
+      lines.push('## 全书大纲\n');
+      for (const v of o.volumes) {
+        lines.push(`### 第${v.no}卷 ${v.name}\n`);
+        if (v.desc) lines.push(`> ${v.desc}\n`);
+        for (const e of v.entries) {
+          lines.push(`**${e.no ? `第${e.no}章 ` : ''}${e.title}**${e.words ? `　（${e.words} 字）` : ''}\n`);
+          for (const f of e.fields) lines.push(`- ${f.label}：${f.value}`);
+          lines.push('');
+        }
+      }
+      if (o.missing) lines.push(`\n> 另有 ${o.missing} 章还没写章纲。\n`);
+    }
+  }
+  if (extras.characters) {
+    const rows = characterRows(n);
+    if (rows.length) {
+      lines.push('\n---\n');
+      lines.push('## 人物小传\n');
+      for (const c of rows) {
+        lines.push(`### ${c.name}\n`);
+        for (const f of c.fields) lines.push(`- ${f.label}：${f.value}`);
+        lines.push('');
+      }
+    }
+  }
   return lines.join('\n');
 }
 
