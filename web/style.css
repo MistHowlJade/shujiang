@@ -1916,6 +1916,42 @@ body.sprint-open .toast-wrap { bottom: 302px; }
 .stat-col.today .sc-day { color: var(--text-1); }
 .stat-foot { margin-top: 14px; font-size: 11.5px; color: var(--text-3); }
 
+/* 写作日历热力图：一格一天，列是周、行是星期几 */
+.hm-wrap { display: flex; flex-direction: column; gap: 8px; }
+.hm-top { display: flex; gap: 8px; min-width: 0; }
+.hm-weekdays {
+  display: flex; flex-direction: column; justify-content: space-around;
+  padding-top: 18px; font-size: 9.5px; color: var(--text-3); line-height: 1;
+  flex: 0 0 auto;
+}
+.hm-weekdays span { height: 11px; }
+.hm-grid {
+  flex: 1; min-width: 0; display: flex; gap: 3px; overflow-x: auto;
+  padding-bottom: 4px;
+}
+.hm-week { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
+.hm-month {
+  height: 15px; font-size: 9.5px; color: var(--text-3); white-space: nowrap;
+}
+.hm-col { display: flex; flex-direction: column; gap: 3px; }
+.hm-cell {
+  width: 11px; height: 11px; border-radius: 2px; display: block;
+  background: var(--border-2); border: 1px solid transparent;
+}
+.hm-cell.empty { background: transparent; }
+.hm-cell.lv1 { background: color-mix(in srgb, var(--accent) 28%, var(--surface-2)); }
+.hm-cell.lv2 { background: color-mix(in srgb, var(--accent) 52%, var(--surface-2)); }
+.hm-cell.lv3 { background: color-mix(in srgb, var(--accent) 76%, var(--surface-2)); }
+.hm-cell.lv4 { background: var(--accent); }
+.hm-cell.today { border-color: var(--text-1); }
+.hm-cell:hover { outline: 1px solid var(--accent-hover); outline-offset: 1px; }
+.hm-legend {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 10.5px; color: var(--text-3);
+}
+.hm-legend .hm-cell { width: 10px; height: 10px; }
+.hm-note { margin-left: auto; }
+
 .modal-foot .goal-field { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; font-size: 11.5px; color: var(--text-3); }
 .modal-foot .goal-field input {
   width: 78px; height: 28px; padding: 0 9px; font-size: 12px;

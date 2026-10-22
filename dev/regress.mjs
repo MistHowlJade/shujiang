@@ -290,6 +290,18 @@ async function main() {
   }
 
   // ---------------------------------------------------------------
+  group('写作统计');
+  {
+    const s = await get(`${BASE}/api/stats?days=364`);
+    check('统计能取一年区间', Array.isArray(s?.days) && s.days.length === 364, `days=${s?.days?.length}`);
+    check('统计带目标与连续天数', typeof s?.goal === 'number' && typeof s?.streak === 'number');
+    // 改目标后能读回来
+    const set = await post(`${BASE}/api/stats`, { goal: 2500 });
+    check('日更目标可设置', set?.goal === 2500, set?.goal);
+    await post(`${BASE}/api/stats`, { goal: 3000 });
+  }
+
+  // ---------------------------------------------------------------
   group('导入已有文稿');
   await checkManuscript(id);
 

@@ -74,7 +74,8 @@ function streakOf(days, now) {
 /** 面向前端的汇总：最近 N 天（含今天）+ 目标 + 周合计 + 连续天数 + 累计 */
 export function statsSummary({ days = 14, now = new Date() } = {}) {
   const s = loadStats();
-  const n = Math.max(7, Math.min(90, Math.floor(Number(days) || 14)));
+  // 上限放到 KEEP_DAYS：写作日历热力图要看一整年，14 天不够用
+  const n = Math.max(7, Math.min(KEEP_DAYS, Math.floor(Number(days) || 14)));
   const list = [];
   for (let i = n - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);

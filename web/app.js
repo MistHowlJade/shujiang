@@ -748,6 +748,76 @@ function renderStats() {
   }
 }
 
+/**
+ * 写作日历热力图：一格一天，按当天字数相对日更目标着色。
+ * 布局跟 GitHub 贡献图一样 —— 列是周，行是星期几，最后一列是本周。
+ */
+function statsHeatmap(days, goal, today) {
+  if (!days.length) return '';
+  // 补齐到整周：开头补上第一列之前的空位，结尾补满本周
+  const first = new Date(days[0].date + 'T00:00:00');
+  const lead = (first.getDay() + 6) % 7;         // 周一为第一行
+  const cells = [];
+  for (let i = 0; i < lead; i++) cells.push(null);
+  for (const d of days) cells.push(d);
+  while (cells.length % 7) cells.push(null);
+
+  const weeks = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+
+  // 色阶：以日更目标为基准；没设目标就按「这批里的最大值」分档
+  const peak = Math.max(1, ...days.map((d) => d.words));
+  const base = goal > 0 ? goal : peak;
+  const level = (w) => {
+    if (!w) return 0;
+    if (!w.words) return 0;
+    const r = w.words / base;
+    if (r >= 1) return 4;
+    if (r >= 0.6) return 3;
+    if (r >= 0.3) return 2;
+    return 1;
+  };
+
+  const monthLabels = weeks.map((w, i) => {
+    const firstCell = w.find(Boolean);
+    if (!firstCell) return '';
+    const d = new Date(firstCell.date + 'T00:00:00');
+    const prev = i > 0 ? weeks[i - 1].find(Boolean) : null;
+    const pd = prev ? new Date(prev.date + 'T00:00:00') : null;
+    // 跨月才标一次月份
+    return !pd || pd.getMonth() !== d.getMonth() ? `${d.getMonth() + 1}月` : '';
+  });
+
+  const grid = weeks.map((w, wi) => `
+    <div class="hm-week">
+      <span class="hm-month">${monthLabels[wi]}</span>
+      <div class="hm-col">
+        ${w.map((d) => {
+          if (!d) return '<i class="hm-cell empty"></i>';
+          const lv = level(d);
+          return `<i class="hm-cell lv${lv}${d.date === today ? ' today' : ''}" title="${d.date}　${fmtWords(d.words)} 字${goal ? `　目标 ${fmtWords(goal)}` : ''}"></i>`;
+        }).join('')}
+      </div>
+    </div>`).join('');
+
+  const activeDays = days.filter((d) => d.words > 0).length;
+  const best = days.reduce((a, b) => (b.words > (a?.words || 0) ? b : a), null);
+
+  return `
+    <div class="hm-wrap">
+      <div class="hm-top">
+        <div class="hm-weekdays"><span>一</span><span></span><span>三</span><span></span><span>五</span><span></span><span>日</span></div>
+        <div class="hm-grid">${grid}</div>
+      </div>
+      <div class="hm-legend">
+        <span>少</span>
+        <i class="hm-cell lv0"></i><i class="hm-cell lv1"></i><i class="hm-cell lv2"></i><i class="hm-cell lv3"></i><i class="hm-cell lv4"></i>
+        <span>多</span>
+        <span class="hm-note">${activeDays} 天有产出${best ? `　最多的一天 ${fmtWords(best.words)} 字` : ''}</span>
+      </div>
+    </div>`;
+}
+
 async function openStatsModal() {
   const st = (await loadStats({ force: true })) || S.stats;
   if (!st) return toast('统计还读不出来', 'err');
@@ -760,6 +830,9 @@ async function openStatsModal() {
     const cls = `stat-col${d.date === st.today ? ' today' : ''}${d.words ? '' : ' zero'}`;
     return `<div class="${cls}" title="${d.date}　${fmtWords(d.words)} 字"><span class="sc-fill"><i style="height:${h}%"></i></span><span class="sc-day">${d.date.slice(8)}</span></div>`;
   }).join('');
+  // 热力图要看一整年，单独再取一次长区间数据
+  const year = await api.get('/api/stats?days=364').catch(() => null);
+  const heat = statsHeatmap((year && year.days) || st.days, goal, st.today);
   showModal(`
     <h3>写作统计</h3>
     <p class="modal-sub">只算你真的写进正文的字。删字、撤销重做还原、导入旧稿、恢复快照、全书替换都不算今天的产出。</p>
@@ -776,6 +849,8 @@ async function openStatsModal() {
     <div class="stat-cap">最近 14 天</div>
     <div class="stat-chart">${bars}</div>
     <div class="stat-foot">最近 7 天 ${fmtWords(st.week)} 字　·　连续 ${st.streak} 天　·　累计 ${fmtWords(st.total)} 字</div>
+    <div class="stat-cap" style="margin-top:22px">写作日历（近一年）</div>
+    ${heat}
     <div class="modal-foot">
       <label class="goal-field">日更目标
         <input id="goalInput" type="number" min="0" max="500000" step="500" value="${goal}" /> 字/天
@@ -798,7 +873,7 @@ async function openStatsModal() {
     box.querySelector('#goalSave').addEventListener('click', () => saveGoal(Math.max(0, Math.floor(Number(input.value) || 0))));
     box.querySelector('#goalZero').addEventListener('click', () => saveGoal(0));
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') box.querySelector('#goalSave').click(); });
-  });
+  }, { wide: true });
 }
 
 function openHealthReport() {
@@ -8137,5 +8212,5 @@ async function boot() {
   }
 }
 
-window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, openChapterTargetModal, toggleFocus, openGlobalSearch, openTrash, restoreNovelBackup, applyFragmentData };
+window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, openChapterTargetModal, toggleFocus, openGlobalSearch, openTrash, restoreNovelBackup, applyFragmentData, openStatsModal, openRevisionInbox };
 boot();
