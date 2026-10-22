@@ -10,9 +10,12 @@
 //   - 章节落盘字段（含场景卡片这个曾经刷新就丢的）
 //   - 片段导入 11 个板块按真实导出格式落盘
 //   - 版本历史、章节移动、导出三种格式、回收站往返、全局检索
+//   - EPUB 的 zip 结构（mimetype 不压缩、正文与目录齐全）
 //
 // 全部通过时退出码为 0，可直接挂进 CI 或提交前的手动检查。
 // ===========================================================================
+
+import zlib from 'node:zlib';
 
 const BASE = process.env.SHU_BASE || 'http://127.0.0.1:8848';
 
@@ -42,6 +45,49 @@ async function req(method, url, body) {
 const get = async (u) => (await req('GET', u)).json;
 const post = async (u, b) => (await req('POST', u, b)).json;
 const put = async (u, b) => (await req('PUT', u, b)).json;
+
+/** 极简 zip 解析：把 EPUB 里的文件解出来（只处理 store 方式与 deflate） */
+function unzip(buf) {
+  const files = {};
+  let i = 0;
+  while (i < buf.length - 4) {
+    if (buf.readUInt32LE(i) !== 0x04034b50) { i += 1; continue; }
+    const method = buf.readUInt16LE(i + 8);
+    const compSize = buf.readUInt32LE(i + 18);
+    const nameLen = buf.readUInt16LE(i + 26);
+    const extraLen = buf.readUInt16LE(i + 28);
+    const name = buf.slice(i + 30, i + 30 + nameLen).toString('utf8');
+    const start = i + 30 + nameLen + extraLen;
+    const raw = buf.slice(start, start + compSize);
+    try { files[name] = method === 0 ? raw : zlib.inflateRawSync(raw); } catch { files[name] = Buffer.alloc(0); }
+    i = start + compSize;
+  }
+  return files;
+}
+
+function checkEpub(buf, chapters) {
+  const names = Object.keys(unzip(buf));
+  const has = (s) => names.some((n) => n.includes(s));
+  check('EPUB 有 mimetype', has('mimetype'));
+  check('EPUB 有 container.xml', has('META-INF/container.xml'));
+  check('EPUB 有 content.opf', has('.opf'));
+  check('EPUB 有目录 nav/toc', has('nav') || has('toc'));
+  check('EPUB 有正文 xhtml', has('.xhtml'));
+  // EPUB 规范：mimetype 必须是第一个文件，且不压缩
+  const mtName = buf.indexOf(Buffer.from('mimetype'));
+  const mtHdr = mtName - 30;
+  check('EPUB mimetype 在文件开头', mtHdr >= 0 && mtHdr < 60, `offset=${mtHdr}`);
+  check('EPUB mimetype 未压缩', mtHdr >= 0 && buf.readUInt16LE(mtHdr + 8) === 0);
+  // 正文与目录是否齐全
+  const files = unzip(buf);
+  const xhtml = names.filter((n) => n.endsWith('.xhtml')).map((n) => files[n].toString('utf8')).join('\n');
+  const nav = names.filter((n) => n.includes('nav') || n.includes('toc')).map((n) => files[n].toString('utf8')).join('\n');
+  const titles = chapters.map((c) => c.title).filter(Boolean);
+  const missingBody = titles.filter((t) => !xhtml.includes(t));
+  const missingNav = titles.filter((t) => !nav.includes(t));
+  check('EPUB 正文含全部章节', missingBody.length === 0, missingBody.join(','));
+  check('EPUB 目录含全部章节', missingNav.length === 0, missingNav.join(','));
+}
 
 async function main() {
   console.log('书匠 · 回归自检');
@@ -152,6 +198,7 @@ async function main() {
   check('TXT 导出 200', txt.status === 200 && txt.buf.length > 50);
   const epub = await req('GET', `${BASE}/api/novels/${id}/export?format=epub`);
   check('EPUB 导出 200 且是合法 zip', epub.status === 200 && epub.buf.slice(0, 2).toString() === 'PK');
+  checkEpub(epub.buf, (await get(`${BASE}/api/novels/${id}`)).novel.chapters || []);
   const jsonExp = await req('GET', `${BASE}/api/novels/${id}/export?format=json`);
   check('备份 JSON 可解析', (() => { try { return !!JSON.parse(jsonExp.buf.toString('utf8')); } catch { return false; } })());
 
