@@ -493,6 +493,27 @@ async function main() {
   check('全局搜索能搜到', (search.hits?.length || search.results?.length || 0) >= 1);
 
   // ---------------------------------------------------------------
+  group('稿件头部的作者联系方式');
+  {
+    await put(`${BASE}/api/novels/${id}`, { meta: { contact: 'me@example.com / 微信 myid' } });
+    const rec = (await get(`${BASE}/api/novels/${id}`)).novel;
+    check('联系方式能存住', rec.meta?.contact === 'me@example.com / 微信 myid', rec.meta?.contact);
+
+    const txt = (await req('GET', `${BASE}/api/novels/${id}/export?format=txt`)).buf.toString('utf8');
+    check('TXT 头部有联系方式', txt.includes('联系方式：me@example.com / 微信 myid'), txt.split('\n')[0]);
+    const md = (await req('GET', `${BASE}/api/novels/${id}/export?format=md`)).buf.toString('utf8');
+    check('Markdown 头部有联系方式', md.includes('联系方式：me@example.com / 微信 myid'));
+    const epub = unzip((await req('GET', `${BASE}/api/novels/${id}/export?format=epub`)).buf);
+    check('EPUB 书名页有联系方式', epub['OEBPS/title.xhtml'].toString('utf8').includes('me@example.com / 微信 myid'));
+    const json = (await req('GET', `${BASE}/api/novels/${id}/export?format=json`)).buf.toString('utf8');
+    check('备份 JSON 里有联系方式', json.includes('me@example.com / 微信 myid'));
+
+    await put(`${BASE}/api/novels/${id}`, { meta: { contact: '' } });
+    const txt2 = (await req('GET', `${BASE}/api/novels/${id}/export?format=txt`)).buf.toString('utf8');
+    check('没填时稿件里不出现联系方式', !txt2.includes('联系方式：'));
+  }
+
+  // ---------------------------------------------------------------
   group('校对的忽略清单');
   {
     const ign = [{ key: 'typo|c_x|的的', type: 'typo', message: '疑似叠字「的的」', no: 1, title: '第一章', ts: 1 }];

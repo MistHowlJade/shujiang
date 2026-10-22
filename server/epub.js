@@ -81,6 +81,7 @@ p.volume { margin: 0 0 1.8em; text-align: center; text-indent: 0; color: #777; f
 .titlepage { margin-top: 22%; text-align: center; }
 .titlepage h1 { margin: 0 0 .5em; font-size: 2.2em; }
 .titlepage .author { margin: 0 0 1.8em; text-indent: 0; color: #555; font-size: 1.05em; }
+.titlepage .contact { margin: -1.2em 0 1.8em; text-indent: 0; color: #888; font-size: .9em; }
 .titlepage .meta { text-indent: 0; color: #888; font-size: .9em; }
 .titlepage .logline { margin: 2.2em auto 0; max-width: 26em; text-indent: 0; color: #666; font-size: .92em; line-height: 1.9; }
 body.cover-body { margin: 0; }
@@ -172,6 +173,7 @@ function titlePage(novel, chapters, words = 0) {
   return `<section epub:type="titlepage" class="titlepage">
 <h1>${esc(novel.title || '未命名作品')}</h1>
 ${novel.author ? `<p class="author">${esc(novel.author)}</p>` : ''}
+${novel.meta?.contact ? `<p class="contact">${esc(novel.meta.contact)}</p>` : ''}
 <p class="meta">${esc(meta)}</p>
 ${novel.meta?.logline ? `<p class="logline">${esc(novel.meta.logline)}</p>` : ''}
 </section>`;

@@ -1094,7 +1094,13 @@ function safeName(s) {
 }
 
 function exportTxt(n, chapters) {
-  const head = [`《${n.title}》`, n.author ? `作者：${n.author}` : '', n.genre ? `类型：${n.genre}` : '', n.meta?.logline ? `简介：${n.meta.logline}` : '']
+  const head = [
+    `《${n.title}》`,
+    n.author ? `作者：${n.author}` : '',
+    n.meta?.contact ? `联系方式：${n.meta.contact}` : '',
+    n.genre ? `类型：${n.genre}` : '',
+    n.meta?.logline ? `简介：${n.meta.logline}` : '',
+  ]
     .filter(Boolean)
     .join('\n');
   const plan = volumePlan(n);
@@ -1112,6 +1118,7 @@ function exportTxt(n, chapters) {
 function exportMarkdown(n, chapters, extras = {}) {
   const lines = [`# ${n.title}`];
   if (n.author) lines.push(`作者：${n.author}`);
+  if (n.meta?.contact) lines.push(`联系方式：${n.meta.contact}`);
   if (n.genre) lines.push(`类型：${n.genre}`);
   if (n.meta?.logline) lines.push(`\n> ${n.meta.logline}`);
   if (n.meta?.synopsis) lines.push(`\n## 作品简介\n\n${n.meta.synopsis}`);

@@ -5873,6 +5873,10 @@ function renderOutlineTab(host, n) {
         ${field('一句话故事', 'logline', n.meta, { ph: '一个少年背着一把不能出鞘的剑，去杀他师傅。' })}
         ${field('目标平台 / 调性', 'platform', n.meta)}
       </div>
+      <div class="grid2">
+        ${field('作者联系方式', 'contact', n.meta, { ph: '邮箱 / QQ / 微信' })}
+        <div class="dim small" style="align-self:end">投稿时编辑要联系你。导出 TXT / Markdown / EPUB 时，这行会印在稿件头部。</div>
+      </div>
       ${field('故事梗概', 'synopsis', n.meta, { area: true, rows: 4 })}
       ${field('大纲备注（主线、支线、伏笔规划）', 'notes', n.outline, { area: true, rows: 3 })}
       <div class="row gap6">
@@ -7849,6 +7853,7 @@ function exportBook() {
     </label>
     <div class="dim small export-done-hint" id="exDoneHint" hidden>章号沿用原书，不会自动重新编号。</div>
     <div class="dim small" id="exHint" hidden>EPUB 会导出全书，自动生成标题页、目录和分卷结构，适合放进手机 / 阅读器。</div>
+    <div class="dim small export-done-hint" id="exContactHint" hidden></div>
     <div class="export-extras" id="exExtras" hidden>
       <span class="export-extras-lbl">随稿附带</span>
       <label class="export-extra"><input type="checkbox" id="exOutline" /><span>全书大纲</span></label>
@@ -7887,6 +7892,7 @@ function exportBook() {
       const doneRow = box.querySelector('#exDoneRow');
       const doneCountEl = box.querySelector('#exDoneCount');
       const doneHintEl = box.querySelector('#exDoneHint');
+      const contactHintEl = box.querySelector('#exContactHint');
       // 封面：只导出 EPUB 时才有意义
       const coverRow = box.querySelector('#exCoverRow');
       const coverImg = box.querySelector('#exCoverImg');
@@ -8029,6 +8035,21 @@ function exportBook() {
               + (charactersEl.checked ? `（${charList.length} 人${relCount ? ` · ${relCount} 条关系` : ''}）` : '')
               + '。'
             : '勾上的会附在正文后面。';
+        // 联系方式：稿子的头部要能联系到人（JSON 备份本来就有联系方式，不用提示）
+        const needContact = !backup && !S.novel.meta?.contact;
+        contactHintEl.hidden = !needContact;
+        if (needContact) {
+          contactHintEl.innerHTML = `《${esc(S.novel.title || '这部作品')}》还没填作者联系方式，填了会印在稿件头部。`
+            + ' <button type="button" class="proof-link" id="exGoContact">去填</button>';
+          contactHintEl.querySelector('#exGoContact').onclick = () => {
+            closeModal();
+            setView('bible');
+            bibleTab = 'outline';
+            $$('#bibleTabs button').forEach((x) => x.classList.toggle('on', x.dataset.bible === 'outline'));
+            renderBible();
+            setTimeout(() => document.querySelector('[data-key="contact"]')?.focus(), 120);
+          };
+        }
       };
       fmtEl.onchange = sync;
       scopeEl.onchange = sync;

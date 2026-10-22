@@ -301,6 +301,7 @@ export function blankNovel({ title = '未命名作品', genre = '', author = '' 
     meta: {
       logline: '',
       synopsis: '',
+      contact: '',
       pov: '第三人称限知',
       tense: '过去时',
       tone: '',
