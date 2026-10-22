@@ -82,6 +82,17 @@ check('空文本不炸', splitSentences('').length === 0);
   check('新栏保留没变的部分', newHtml.includes('夜色'));
 }
 
+// 只看某一边时的「只看改动」
+{
+  const d = diffProse('夜色压下来。他握紧了剑。', '夜色涌下来。他握紧了刀。');
+  const oldOnly = diffSideHtml(d.segs, 'old', true);
+  const newOnly = diffSideHtml(d.segs, 'new', true);
+  check('只看改动时旧栏只剩改动部分', !oldOnly.includes('夜色') && oldOnly.includes('d-del'), oldOnly);
+  check('只看改动时新栏只剩改动部分', !newOnly.includes('夜色') && newOnly.includes('d-add'), newOnly);
+  check('只看改动时旧栏不含新增', !oldOnly.includes('d-add'), oldOnly);
+  check('只看改动时新栏不含删除', !newOnly.includes('d-del'), newOnly);
+}
+
 // 转义：正文里带尖括号不能破坏 HTML
 {
   const d = diffProse('他说 <script>alert(1)</script>。', '他说 <b>x</b>。');

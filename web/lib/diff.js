@@ -253,14 +253,15 @@ export function diffHtml(segs, onlyChanges = false) {
 
 /**
  * 渲染成左右两栏里的一栏：旧栏只显示「没变的 + 被删的」，新栏只显示「没变的 + 新增的」。
- * 用于「原文 / 新文」那种并排对照的面板。
+ * 用于「原文 / 新文」那种并排对照的面板，也用于差异视图里「只看某一边」。
  * @param {'old'|'new'} side
+ * @param {boolean} onlyChanges 只保留有改动的地方
  */
-export function diffSideHtml(segs, side) {
+export function diffSideHtml(segs, side, onlyChanges = false) {
   const out = [];
   for (const s of segs) {
     if (s.type === 'same') {
-      out.push(esc(s.text));
+      if (!onlyChanges) out.push(esc(s.text));
       continue;
     }
     if (s.type === 'del') {

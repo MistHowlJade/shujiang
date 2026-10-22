@@ -3888,8 +3888,9 @@ async function runModelCompare(picks, task) {
   if (S.controller || S.batchController) { toast('已有任务在跑，先停止', 'err'); return; }
   const body = cmpTaskBody(task);
   const md = MD_OUT_TASKS.has(task);
-  const ac = new AbortController();
+  let ac = new AbortController();
   const state = picks.map((p, i) => ({ ...p, side: i === 0 ? 'A' : 'B', text: '', err: '', ms: 0, done: false }));
+  let running = false;
 
   showModal(`
     <div class="cmp-head">
@@ -3899,6 +3900,7 @@ async function runModelCompare(picks, task) {
           <button class="btn btn-sm on" id="cmpViewSide" type="button">并排</button>
           <button class="btn btn-sm" id="cmpViewDiff" type="button">差异</button>
         </div>
+        <button class="btn btn-sm btn-text" id="cmpAgain" title="用同样的两个模型再跑一遍"><svg class="ico"><use href="#i-refresh" /></svg>再跑一次</button>
         <button class="btn btn-sm btn-text" id="cmpStop"><svg class="ico"><use href="#i-stop" /></svg>停止</button>
       </div>
     </div>
@@ -3918,6 +3920,11 @@ async function runModelCompare(picks, task) {
     </div>
     <div class="cmp-diff-wrap" id="cmpDiffWrap" hidden>
       <div class="cmp-diff-bar">
+        <div class="cmp-views">
+          <button class="btn btn-sm on" data-dmode="chg" type="button">改动</button>
+          <button class="btn btn-sm" data-dmode="a" type="button" id="cmpModeA">A 版</button>
+          <button class="btn btn-sm" data-dmode="b" type="button" id="cmpModeB">B 版</button>
+        </div>
         <span class="cmp-diff-sum" id="cmpDiffSum"></span>
         <label class="diff-toggle"><input type="checkbox" id="cmpOnlyChanges" />只看改动</label>
       </div>
@@ -3951,6 +3958,9 @@ async function runModelCompare(picks, task) {
       const onlyChanges = box.querySelector('#cmpOnlyChanges');
       const diffSum = box.querySelector('#cmpDiffSum');
       const diffBody = box.querySelector('#cmpDiff');
+      // 差异视图有三档：改动（红绿混排）、A 版、B 版
+      let dMode = 'chg';
+      const modeBtns = $$('[data-dmode]', box);
       const refreshDiff = () => {
         const [a, b] = state;
         if (!a.text || !b.text) {
@@ -3959,9 +3969,25 @@ async function runModelCompare(picks, task) {
           return;
         }
         const d = diffProse(a.text, b.text);
-        diffSum.innerHTML = `<span class="d-del">只有 A 有 ${d.removed} 字</span><span class="d-add">只有 B 有 ${d.added} 字</span><span>相似度 ${d.similarity}%</span>`;
-        diffBody.innerHTML = diffHtml(d.segs, onlyChanges.checked);
+        const only = onlyChanges.checked;
+        if (dMode === 'a') {
+          diffSum.innerHTML = `<span>${esc(a.label)} 的写法</span><span class="d-del">A 独有 ${d.removed} 字</span><span>相似度 ${d.similarity}%</span>`;
+          diffBody.innerHTML = diffSideHtml(d.segs, 'old', only);
+        } else if (dMode === 'b') {
+          diffSum.innerHTML = `<span>${esc(b.label)} 的写法</span><span class="d-add">B 独有 ${d.added} 字</span><span>相似度 ${d.similarity}%</span>`;
+          diffBody.innerHTML = diffSideHtml(d.segs, 'new', only);
+        } else {
+          diffSum.innerHTML = `<span class="d-del">只有 A 有 ${d.removed} 字</span><span class="d-add">只有 B 有 ${d.added} 字</span><span>相似度 ${d.similarity}%</span>`;
+          diffBody.innerHTML = diffHtml(d.segs, only);
+        }
       };
+      modeBtns.forEach((b) => {
+        b.onclick = () => {
+          dMode = b.dataset.dmode;
+          modeBtns.forEach((x) => x.classList.toggle('on', x === b));
+          refreshDiff();
+        };
+      });
       const setView = (mode) => {
         const isDiff = mode === 'diff';
         gridEl.hidden = isDiff;
@@ -3975,6 +4001,13 @@ async function runModelCompare(picks, task) {
       onlyChanges.onchange = refreshDiff;
       // 边流边算差异：流完自动刷新一次
       state.onSettled = refreshDiff;
+      // A 版 / B 版 按钮上写清楚是哪个模型
+      box.querySelector('#cmpModeA').textContent = `A 版`;
+      box.querySelector('#cmpModeA').title = `${state[0].label} 的写法`;
+      box.querySelector('#cmpModeB').textContent = `B 版`;
+      box.querySelector('#cmpModeB').title = `${state[1].label} 的写法`;
+      // 再跑一次：同样的两个模型重来一遍
+      box.querySelector('#cmpAgain').onclick = () => { start(); };
     }, { wide: true, onClose: () => ac.abort() });
 
   const renderCol = (i) => {
@@ -4033,20 +4066,34 @@ async function runModelCompare(picks, task) {
     renderCol(i);
   };
 
-  // 借用全局的忙状态：这样左下角的「停止」和别处的按钮都跟着一起禁用
-  S.controller = ac;
-  setBusy(true);
-  try {
-    await Promise.all(state.map((s, i) => runOne(s, i)));
-  } finally {
-    // 两边都跑完了，差异视图里的数据要跟着更新一次
-    try { state[0]?.onSettled?.(); } catch (err) { console.warn('[cmp] 刷新差异失败', err); }
-    // 只有还是自己在跑的时候才收尾，别把用户后来新开的任务状态搅乱
-    if (S.controller === ac) {
-      S.controller = null;
-      setBusy(false);
+  /** 跑一轮：两个模型同时来一遍 */
+  const start = async () => {
+    if (running) return;
+    running = true;
+    const again = document.querySelector('#cmpAgain');
+    if (again) again.disabled = true;
+    ac = new AbortController();
+    state.forEach((s) => { s.text = ''; s.err = ''; s.ms = 0; s.done = false; });
+    state.forEach((_, i) => renderCol(i));
+    // 借用全局的忙状态：这样左下角的「停止」和别处的按钮都跟着一起禁用
+    S.controller = ac;
+    setBusy(true);
+    try {
+      await Promise.all(state.map((s, i) => runOne(s, i)));
+    } finally {
+      running = false;
+      if (again) again.disabled = false;
+      // 两边都跑完了，差异视图里的数据要跟着更新一次
+      try { state[0]?.onSettled?.(); } catch (err) { console.warn('[cmp] 刷新差异失败', err); }
+      // 只有还是自己在跑的时候才收尾，别把用户后来新开的任务状态搅乱
+      if (S.controller === ac) {
+        S.controller = null;
+        setBusy(false);
+      }
     }
-  }
+  };
+
+  await start();
 }
 
 $('#cmpBtn')?.addEventListener('click', openModelCompare);
