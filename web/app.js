@@ -7293,6 +7293,220 @@ async function previewPromptTemplate() {
 }
 $('#previewPromptBtn')?.addEventListener('click', previewPromptTemplate);
 
+/* ============================================================
+ * 提示词模板导出/导入
+ * ------------------------------------------------------------
+ * 模板存在 config.json 里（不是作品里），所以导出的是「模板包」：
+ * 可以整套带走，也可以只带某一个任务，方便在不同作品/项目之间复用。
+ * ============================================================ */
+
+const TEMPLATE_PKG_VERSION = 1;
+
+// 收集当前所有自定义模板（只导用户改过的，内置模板不重复导出）
+function collectCustomTemplates() {
+  const all = S.config?.promptTemplates || {};
+  const out = {};
+  for (const [key, tpl] of Object.entries(all)) {
+    const system = typeof tpl?.system === 'string' ? tpl.system : '';
+    const user = typeof tpl?.user === 'string' ? tpl.user : '';
+    if (system || user) out[key] = { system, user };
+  }
+  return out;
+}
+
+function templateSlotLabel(key) {
+  return promptSlots.find((s) => s.key === key)?.label || key;
+}
+
+function downloadText(filename, text, mime) {
+  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportTemplatesAsJson(onlyKey) {
+  const all = collectCustomTemplates();
+  const templates = onlyKey ? (all[onlyKey] ? { [onlyKey]: all[onlyKey] } : {}) : all;
+  const keys = Object.keys(templates);
+  if (!keys.length) return toast(onlyKey ? '这个任务还没有自定义模板' : '还没有任何自定义模板', 'err');
+  const pkg = {
+    kind: 'prompt-templates',
+    version: TEMPLATE_PKG_VERSION,
+    exportedAt: Date.now(),
+    templates,
+  };
+  const name = onlyKey
+    ? `提示词模板_${templateSlotLabel(onlyKey)}_${new Date().toISOString().slice(0, 10)}.json`
+    : `提示词模板_全部_${new Date().toISOString().slice(0, 10)}.json`;
+  downloadText(name, JSON.stringify(pkg, null, 2), 'application/json');
+  toast(`已导出 ${keys.length} 个模板为 JSON`, 'ok');
+}
+
+function exportTemplatesAsMarkdown(onlyKey) {
+  const all = collectCustomTemplates();
+  const templates = onlyKey ? (all[onlyKey] ? { [onlyKey]: all[onlyKey] } : {}) : all;
+  const keys = Object.keys(templates);
+  if (!keys.length) return toast(onlyKey ? '这个任务还没有自定义模板' : '还没有任何自定义模板', 'err');
+  let md = '# 提示词模板导出\n\n';
+  md += `> 导出时间：${new Date().toLocaleString()}  \n`;
+  md += `> 共 ${keys.length} 个任务  \n\n`;
+  for (const key of keys) {
+    md += `## ${templateSlotLabel(key)}（\`${key}\`）\n\n`;
+    const slot = promptSlots.find((s) => s.key === key);
+    if (slot?.vars?.length) md += `可用变量：${slot.vars.map((v) => `\`${v}\``).join('、')}\n\n`;
+    if (templates[key].system) {
+      md += '### 系统提示词\n\n```\n' + templates[key].system + '\n```\n\n';
+    }
+    if (templates[key].user) {
+      md += '### 用户提示词\n\n```\n' + templates[key].user + '\n```\n\n';
+    }
+  }
+  const name = onlyKey
+    ? `提示词模板_${templateSlotLabel(onlyKey)}_${new Date().toISOString().slice(0, 10)}.md`
+    : `提示词模板_全部_${new Date().toISOString().slice(0, 10)}.md`;
+  downloadText(name, md, 'text/markdown');
+  toast(`已导出 ${keys.length} 个模板为 Markdown`, 'ok');
+}
+
+// 解析模板包：兼容两种形状 —— {kind,version,templates} 或直接 {key:{system,user}}
+function parseTemplatePackage(text) {
+  let obj;
+  try { obj = JSON.parse(text); } catch (e) { throw new Error('JSON 解析失败：' + e.message); }
+  if (!obj || typeof obj !== 'object') throw new Error('不是有效的模板文件');
+  let templates = obj.templates;
+  if (!templates && obj.kind === 'prompt-templates') templates = {};
+  if (!templates) {
+    // 旧格式：直接把 {key: {system,user}} 当作模板表
+    templates = Object.fromEntries(
+      Object.entries(obj).filter(([k, v]) => v && typeof v === 'object' && ('system' in v || 'user' in v))
+    );
+  }
+  if (!templates || typeof templates !== 'object') throw new Error('文件里没有找到模板');
+  const clean = {};
+  for (const [key, tpl] of Object.entries(templates)) {
+    if (!tpl || typeof tpl !== 'object') continue;
+    const system = typeof tpl.system === 'string' ? tpl.system : '';
+    const user = typeof tpl.user === 'string' ? tpl.user : '';
+    if (system || user) clean[key] = { system, user };
+  }
+  if (!Object.keys(clean).length) throw new Error('文件里没有可导入的模板');
+  return clean;
+}
+
+async function applyTemplatePackage(templates, { merge = true, overwrite = false } = {}) {
+  const cur = { ...(S.config.promptTemplates || {}) };
+  let added = 0, updated = 0, skipped = 0;
+  for (const [key, tpl] of Object.entries(templates)) {
+    if (cur[key]) {
+      if (overwrite) { cur[key] = tpl; updated++; }
+      else if (merge) {
+        // 合并：只补齐缺失的字段，不动用户已经写好的部分
+        cur[key] = {
+          system: cur[key].system || tpl.system,
+          user: cur[key].user || tpl.user,
+        };
+        updated++;
+      } else skipped++;
+    } else {
+      cur[key] = tpl;
+      added++;
+    }
+  }
+  S.config.promptTemplates = cur;
+  await saveConfig();
+  renderPromptTemplateUI();
+  return { added, updated, skipped };
+}
+
+$('#promptExportBtn')?.addEventListener('click', () => {
+  const custom = collectCustomTemplates();
+  const customKeys = Object.keys(custom);
+  showModal(`<h3>导出提示词模板</h3>
+    <p class="modal-sub">导出你自己改写过的提示词，便于在不同作品、不同项目之间复用。内置模板不会被导出。</p>
+    <div class="field-label" style="margin-top:8px"><strong>整套导出</strong></div>
+    <div class="field-row" style="margin-top:8px">
+      <button class="btn btn-primary" id="tplExpJson">${ico('download')} 导出全部 JSON</button>
+      <button class="btn btn-sm btn-text" id="tplExpMd">${ico('file-text')} 导出全部 Markdown</button>
+    </div>
+    <div class="field-label" style="margin-top:16px"><strong>单个导出</strong></div>
+    <div class="fragment-grid" id="tplExportGrid"></div>
+    <div class="modal-foot"><button class="btn btn-text" id="tplExpCancel">取消</button></div>`,
+  (box) => {
+    const grid = box.querySelector('#tplExportGrid');
+    grid.innerHTML = promptSlots.map((s) => {
+      const has = !!custom[s.key];
+      return `
+      <div class="frag-card">
+        <div class="frag-label">${esc(s.label)}</div>
+        <div class="dim small" style="margin-bottom:4px">${has ? '已自定义' : '未自定义'}</div>
+        <div class="frag-actions">
+          <button class="btn btn-sm btn-text" data-key="${s.key}" data-fmt="json" ${has ? '' : 'disabled'}>${ico('download')} JSON</button>
+          <button class="btn btn-sm btn-text" data-key="${s.key}" data-fmt="md" ${has ? '' : 'disabled'}>${ico('file-text')} MD</button>
+        </div>
+      </div>`;
+    }).join('');
+    grid.querySelectorAll('button[data-key]').forEach((btn) => {
+      btn.onclick = () => {
+        closeModal();
+        if (btn.dataset.fmt === 'json') exportTemplatesAsJson(btn.dataset.key);
+        else exportTemplatesAsMarkdown(btn.dataset.key);
+      };
+    });
+    box.querySelector('#tplExpJson').onclick = () => { closeModal(); exportTemplatesAsJson(); };
+    box.querySelector('#tplExpMd').onclick = () => { closeModal(); exportTemplatesAsMarkdown(); };
+    box.querySelector('#tplExpCancel').onclick = closeModal;
+  });
+});
+
+$('#promptImportBtn')?.addEventListener('click', () => {
+  showModal(`<h3>导入提示词模板</h3>
+    <p class="modal-sub">选择 JSON 文件导入。合并模式只补齐缺失内容，不覆盖你已写的模板；覆盖模式会替换同名模板。</p>
+    <div class="field-label">导入模式
+      <select class="select" id="tplImpMode" style="margin-top:5px">
+        <option value="merge">合并（保留现有，只补缺失）</option>
+        <option value="overwrite">覆盖（替换同名模板）</option>
+      </select>
+    </div>
+    <div class="field-label" style="margin-top:10px">选择文件
+      <input type="file" id="tplImpFile" accept=".json,application/json" style="margin-top:5px" />
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-primary" id="tplImpOk">导入</button>
+      <button class="btn btn-text" id="tplImpCancel">取消</button>
+    </div>`,
+  (box) => {
+    const fileInput = box.querySelector('#tplImpFile');
+    const modeSelect = box.querySelector('#tplImpMode');
+    box.querySelector('#tplImpCancel').onclick = closeModal;
+    box.querySelector('#tplImpOk').onclick = async () => {
+      const file = fileInput.files?.[0];
+      if (!file) return toast('请选择文件', 'err');
+      let templates;
+      try {
+        templates = parseTemplatePackage(await file.text());
+      } catch (e) {
+        return toast(`导入失败：${e.message}`, 'err');
+      }
+      closeModal();
+      const overwrite = modeSelect.value === 'overwrite';
+      try {
+        const r = await applyTemplatePackage(templates, { merge: !overwrite, overwrite });
+        const parts = [];
+        if (r.added) parts.push(`新增 ${r.added}`);
+        if (r.updated) parts.push(`${overwrite ? '覆盖' : '合并'} ${r.updated}`);
+        if (r.skipped) parts.push(`跳过 ${r.skipped}`);
+        toast(`已导入模板：${parts.join('，') || '无变化'}`, 'ok');
+      } catch (e) {
+        toast(`导入失败：${e.message}`, 'err');
+      }
+    };
+  });
+});
+
 function renderModelSelect() {
   const cfg = S.config;
   const models = new Set();
@@ -8182,6 +8396,8 @@ function cmdkSource() {
   op('新建一卷（从当前章起）', 'layers', newVolumeFromCurrent);
   op('导出设定库', 'download', () => { if (!S.novel) return toast('先打开一部作品', 'err'); setView('studio'); setView('bible'); document.querySelector('#bibleExportBtn')?.click(); });
   op('导入设定库', 'upload', () => { if (!S.novel) return toast('先打开一部作品', 'err'); setView('studio'); setView('bible'); document.querySelector('#bibleImportBtn')?.click(); });
+  op('导出提示词模板', 'download', () => { setView('settings'); document.querySelector('#promptExportBtn')?.click(); });
+  op('导入提示词模板', 'upload', () => { setView('settings'); document.querySelector('#promptImportBtn')?.click(); });
 
   const go = (label, icon, v) => out.push({ g: '前往', label, icon, run: () => setView(v) });
   go('书架', 'book', 'shelf');

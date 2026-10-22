@@ -443,6 +443,9 @@
           <div class="card">
             <div class="card-head">
               <h2>AI 提示词模板</h2>
+              <span style="flex:1"></span>
+              <button class="btn btn-sm btn-text" id="promptExportBtn" title="导出提示词模板（JSON / Markdown）"><svg class="ico"><use href="#i-download" /></svg>导出模板</button>
+              <button class="btn btn-sm btn-text" id="promptImportBtn" title="导入提示词模板"><svg class="ico"><use href="#i-upload" /></svg>导入模板</button>
             </div>
             <p class="desc">自定义各任务的 AI 提示词模板。留空即使用内置模板；模板里可用 <code>${变量名}</code> 引用当前上下文（如 <code>${novel.title}</code>、<code>${chapter.title}</code>、<code>${target}</code>）。保存后立即生效。</p>
             <div class="field-label">
