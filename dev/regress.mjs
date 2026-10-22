@@ -485,10 +485,19 @@ async function main() {
   {
     const n2 = await post(`${BASE}/api/novels`, { title: '附带材料测试' });
     const nid = n2.novel?.id;
-    // 一卷一章纲 + 一个人物
+    // 一卷一章纲 + 三个人物（关系覆盖新格式 / 老字符串 / 反向补全）
     await put(`${BASE}/api/novels/${nid}`, {
       outline: { notes: '', volumes: [{ id: 'v_r1', name: '第一卷', desc: '本卷定位', chapters: [{ id: 'o_r1', title: '起手', scene: '城南雨夜', characters: '甲、乙', summary: '主角动身', hook: '门开了' }] }] },
-      bible: { characters: [{ name: '甲', role: '主角', identity: '剑客', goal: '找到师父' }], world: [], timeline: [] },
+      bible: {
+        characters: [
+          { name: '甲', role: '主角', identity: '剑客', goal: '找到师父', relations: [{ to: '乙', type: '师徒', note: '同门师兄' }] },
+          { name: '乙', role: '配角', relations: [{ to: '甲', type: '同门' }] },
+          { name: '丙', role: '反派', relations: '甲：对手、丁：旧识' },
+          { name: '丁', role: '路人' },
+          { name: '戊', role: '路人' },
+        ],
+        world: [], timeline: [],
+      },
     });
     const ch = await post(`${BASE}/api/novels/${nid}/chapters`, { title: '第一章 起手', content: '正文内容。', outlineId: 'o_r1' });
     check('建章时可以挂上章纲', ch.chapter?.outlineId === 'o_r1', ch.chapter?.outlineId);
@@ -502,6 +511,19 @@ async function main() {
     check('大纲里有章纲内容', mdExtra.includes('场景：城南雨夜') && mdExtra.includes('章末钩子：门开了'));
     check('Markdown 能带上人物小传', mdExtra.includes('## 人物小传') && mdExtra.includes('核心目标：找到师父'));
     check('附带材料时正文还在', mdExtra.includes('正文内容。'));
+    // 关系：新格式、老字符串格式、反向补全
+    check('人物小传里有关系', mdExtra.includes('与 乙（师徒 · 同门师兄）'), mdExtra.slice(mdExtra.indexOf('### 甲'), mdExtra.indexOf('### 甲') + 200));
+    check('老格式的关系也解析了', mdExtra.includes('与 甲（对手）'));
+    check('反向关系会补到对方身上', mdExtra.includes('与 丙（对手）'));
+    check('自己写过的关系不被覆盖', mdExtra.includes('与 甲（同门）'));
+    {
+      // 戊：谁都没提过他，所以不该有关系行
+      const secE = mdExtra.match(/### 戊\n([\s\S]*?)(?=\n### |\n---|$)/)?.[1] || '';
+      check('没人提过的人不写关系行', !secE.includes('- 关系'), secE.slice(0, 120));
+      // 丁：丙提过他，所以反向补一条
+      const secD = mdExtra.match(/### 丁\n([\s\S]*?)(?=\n### |\n---|$)/)?.[1] || '';
+      check('别人提过他就有关系行', secD.includes('- 关系') && secD.includes('与 丙（旧识）'), secD.slice(0, 160));
+    }
 
     const epubPlain = unzip((await req('GET', `${BASE}/api/novels/${nid}/export?format=epub`)).buf);
     check('EPUB 默认没有大纲页', !epubPlain['OEBPS/outline.xhtml'] && !epubPlain['OEBPS/characters.xhtml']);
@@ -514,6 +536,8 @@ async function main() {
     check('目录里有入口', epubExtra['OEBPS/nav.xhtml'].toString('utf8').includes('全书大纲'));
     const olXml = epubExtra['OEBPS/outline.xhtml'].toString('utf8');
     check('大纲页内容正确', olXml.includes('城南雨夜') && olXml.includes('第一卷'));
+    const chXml = epubExtra['OEBPS/characters.xhtml'].toString('utf8');
+    check('人物页里有关系', chXml.includes('<b>关系</b>') && chXml.includes('与 乙（师徒 · 同门师兄）'));
     // 上面故意造了一章挂不上章纲的，缺章纲的章数应该是 1 而不是 2
     check('缺章纲的章数算得对', olXml.includes('另有 1 章还没写章纲'), olXml.slice(-140));
 

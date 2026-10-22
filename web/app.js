@@ -7899,7 +7899,15 @@ function exportBook() {
       const charactersEl = box.querySelector('#exCharacters');
       const extrasHint = box.querySelector('#exExtrasHint');
       const hasOutline = (S.novel.outline?.volumes || []).some((v) => (v.chapters || []).length);
-      const hasCharacters = (S.novel.bible?.characters || []).length > 0;
+      const charList = S.novel.bible?.characters || [];
+      const hasCharacters = charList.length > 0;
+      // 关系条数：新数据是数组，老数据是「对象：关系」的字符串
+      const relCount = charList.reduce((sum, c) => {
+        const r = c.relations;
+        if (Array.isArray(r)) return sum + r.filter((x) => x?.to).length;
+        if (typeof r === 'string' && r.trim()) return sum + r.split(/[、,，;；\n]/).filter((s) => /[：:]/.test(s)).length;
+        return sum;
+      }, 0);
       outlineEl.checked = hasOutline;
       charactersEl.checked = hasCharacters;
       outlineEl.disabled = !hasOutline;
@@ -7934,7 +7942,9 @@ function exportBook() {
         extrasHint.textContent = !hasOutline && !hasCharacters
           ? '这部作品还没写章纲和人物卡，填了才有得附带。'
           : picked.length
-            ? `会附在正文后面：${picked.join('、')}。`
+            ? `会附在正文后面：${picked.join('、')}`
+              + (charactersEl.checked ? `（${charList.length} 人${relCount ? ` · ${relCount} 条关系` : ''}）` : '')
+              + '。'
             : '勾上的会附在正文后面。';
       };
       fmtEl.onchange = sync;

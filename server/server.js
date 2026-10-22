@@ -1152,6 +1152,9 @@ function exportMarkdown(n, chapters, extras = {}) {
       for (const c of rows) {
         lines.push(`### ${c.name}\n`);
         for (const f of c.fields) lines.push(`- ${f.label}：${f.value}`);
+        if (c.relations.length) {
+          lines.push(`- 关系：${c.relations.map((r) => `与 ${r.to}（${r.type}${r.note ? ` · ${r.note}` : ''}）`).join('；')}`);
+        }
         lines.push('');
       }
     }

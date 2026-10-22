@@ -74,18 +74,56 @@ export function outlineRows(novel, chapters = []) {
 }
 
 /**
+ * 某个人物在设定库里写下的关系。
+ * 新数据是 { to, type, note } 数组；老数据是「对象：关系」用顿号分开的字符串。
+ */
+function relationsOf(c) {
+  const out = [];
+  if (Array.isArray(c?.relations)) {
+    for (const r of c.relations) {
+      const to = String(r?.to || '').trim();
+      if (!to) continue;
+      out.push({ to, type: String(r?.type || '').trim() || '关联', note: String(r?.note || '').trim() });
+    }
+  } else if (typeof c?.relations === 'string' && c.relations.trim()) {
+    for (const s of c.relations.split(/[、,，;；\n]/)) {
+      const m = s.trim().match(/^(.+?)[：:]\s*(.+)$/);
+      if (m) out.push({ to: m[1].trim(), type: m[2].trim() || '关联', note: '' });
+    }
+  }
+  return out;
+}
+
+/**
  * 人物小传：只留写过内容的字段。
+ * 关系两个方向都收：A 写了「与 B 是师徒」，B 的小传里也该有这一条。
  */
 export function characterRows(novel) {
   const list = novel?.bible?.characters || [];
+  const own = new Map(list.map((c) => [String(c?.name || '').trim(), relationsOf(c)]));
   return list
-    .map((c) => ({
-      name: str(c.name) || '（未命名）',
-      fields: CHARACTER_FIELDS
-        .map((f) => ({ label: f.label, value: str(c[f.key]) }))
-        .filter((f) => f.value),
-    }))
-    .filter((c) => c.name || c.fields.length);
+    .map((c) => {
+      const name = str(c.name) || '（未命名）';
+      const merged = new Map();
+      // 自己写下的关系优先
+      for (const r of own.get(name) || []) merged.set(r.to, { ...r });
+      // 别人写向自己的关系补上（对方没自己写才补，避免重复）
+      for (const other of list) {
+        const on = String(other?.name || '').trim();
+        if (!on || on === name) continue;
+        for (const r of own.get(on) || []) {
+          if (r.to === name && !merged.has(on)) merged.set(on, { ...r });
+        }
+      }
+      return {
+        name,
+        fields: CHARACTER_FIELDS
+          .map((f) => ({ label: f.label, value: str(c[f.key]) }))
+          .filter((f) => f.value),
+        relations: [...merged.entries()].map(([to, r]) => ({ to, type: r.type, note: r.note })),
+      };
+    })
+    .filter((c) => c.name || c.fields.length || c.relations.length);
 }
 
 /** 整本有没有可附带的材料（没有就别在界面上显示这个选项） */

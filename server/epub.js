@@ -157,6 +157,7 @@ function charactersPage(novel) {
 <section class="ol-entry">
 <h3>${esc(c.name)}</h3>
 ${c.fields.map((f) => `<p class="ol-field"><b>${esc(f.label)}</b>${esc(f.value)}</p>`).join('\n')}
+${c.relations.length ? `<p class="ol-field"><b>关系</b>${esc(c.relations.map((r) => `与 ${r.to}（${r.type}${r.note ? ` · ${r.note}` : ''}）`).join('；'))}</p>` : ''}
 </section>`).join('\n');
   return `<section epub:type="chapter" class="ol-page">
 <h1>人物小传</h1>
