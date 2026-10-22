@@ -392,6 +392,18 @@ async function main() {
     check('预览不会把选择改掉', stillPicked.meta?.coverStyle === 'band' && stillPicked.meta?.coverPalette === 3,
       `${stillPicked.meta?.coverStyle}/${stillPicked.meta?.coverPalette}`);
 
+    // 腰封：作品简介印在封面上
+    await put(`${BASE}/api/novels/${id}`, { meta: { logline: '一句话故事测试' } });
+    const tagSvg = (await req('GET', `${BASE}/api/novels/${id}/cover`)).buf.toString('utf8');
+    check('封面带上了作品简介', tagSvg.includes('一句话故事测试'), tagSvg.slice(0, 120));
+    const tagEpub = unzip((await req('GET', `${BASE}/api/novels/${id}/export?format=epub`)).buf);
+    check('导出的 EPUB 封面也带简介', tagEpub['OEBPS/cover.svg']?.toString('utf8').includes('一句话故事测试'));
+    await put(`${BASE}/api/novels/${id}`, { meta: { logline: '' } });
+    const noTagSvg = (await req('GET', `${BASE}/api/novels/${id}/cover`)).buf.toString('utf8');
+    const countText = (s) => (s.match(/<text/g) || []).length;
+    check('没有简介时封面少一段字', countText(noTagSvg) === countText(tagSvg) - 1,
+      `${countText(noTagSvg)} vs ${countText(tagSvg)}`);
+
     await put(`${BASE}/api/novels/${id}`, { meta: { coverPalette: '', coverStyle: '' } });
 
     const png = tinyPng();

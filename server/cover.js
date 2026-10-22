@@ -222,6 +222,20 @@ function pickPalette(value, title) {
 }
 
 /**
+ * 腰封（一句话故事）：折成最多两行，放不下就截断加省略号。
+ * 封面上的话只能当装饰，截断比溢出好看。
+ */
+function fitTagline(text, boxW, size, maxLines = 2) {
+  const lines = wrapTitle(String(text || '').trim(), boxW / size);
+  if (!lines.length) return [];
+  if (lines.length <= maxLines) return lines;
+  const out = lines.slice(0, maxLines);
+  const last = out[maxLines - 1];
+  out[maxLines - 1] = `${last.slice(0, Math.max(1, last.length - 1))}…`;
+  return out;
+}
+
+/**
  * 生成封面 SVG。
  * @param {object} novel 作品
  * @param {{words?: number, chapters?: number}} info 章节数与总字数
@@ -231,6 +245,7 @@ export function coverSvg(novel = {}, info = {}, opts = {}) {
   const title = String(novel.title || '').trim() || '未命名作品';
   const author = String(novel.author || '').trim();
   const genre = String(novel.genre || '').trim();
+  const logline = String(novel.meta?.logline || '').trim();
   const words = Number(info.words) || 0;
   const chapters = Number(info.chapters) || 0;
 
@@ -245,7 +260,9 @@ export function coverSvg(novel = {}, info = {}, opts = {}) {
   // 标题排版：三套版式的标题框大小和位置都不一样
   const boxW = style === 'band' ? 1200 : 980;
   const boxH = style === 'minimal' ? 1000 : 900;
-  const cy = style === 'band' ? 880 : style === 'minimal' ? 1060 : 1130;
+  // 有腰封时标题往上让一让，给那句话腾地方
+  const cy0 = style === 'band' ? 880 : style === 'minimal' ? 1060 : 1130;
+  const cy = logline ? cy0 - (style === 'band' ? 60 : 150) : cy0;
   const maxSize = style === 'minimal' ? 190 : 168;
   const fit = fitTitle(title, boxW, boxH, maxSize, 58);
   // 标题整体垂直居中：首行基线 = 中心 - 上半 + 字高的一部分
@@ -258,6 +275,24 @@ export function coverSvg(novel = {}, info = {}, opts = {}) {
     .map((ln, i) => `<text x="${W / 2}" y="${(firstBase + i * fit.lh).toFixed(1)}" text-anchor="middle" font-family="${FONT}" font-size="${fit.size}" fill="${pal.ink}" letter-spacing="${(fit.size * 0.02).toFixed(1)}">${esc(ln)}</text>`)
     .join('\n');
 
+  // 腰封：一句话故事。最多两行，放不下就截断
+  const tagSize = style === 'band' ? 38 : 42;
+  const tagLines = logline ? fitTagline(logline, boxW, tagSize) : [];
+  const tagLineH = tagSize * 1.55;
+  // 腰封落位：三套版式各有一个固定高度；标题太长就往下让，但不许压到下面的分隔线
+  const tagPos = {
+    classic: { fixed: 1380, max: 1420 },
+    minimal: { fixed: 1310, max: 1350 },
+    band: { fixed: 1160, max: 1200 },
+  }[style];
+  const titleBottom = firstBase + (fit.lines.length - 1) * fit.lh + fit.size * 0.72;
+  const tagFirstBase = tagPos ? Math.min(tagPos.max, Math.max(tagPos.fixed, titleBottom + 60)) : 0;
+  const tagFill = style === 'band' ? pal.bg[0] : pal.ink;
+  const tagOpacity = style === 'band' ? '0.78' : '0.52';
+  const tagText = tagLines
+    .map((ln, i) => `<text x="${W / 2}" y="${(tagFirstBase + i * tagLineH).toFixed(1)}" text-anchor="middle" font-family="${FONT}" font-size="${tagSize}" fill="${tagFill}" opacity="${tagOpacity}">${esc(ln)}</text>`)
+    .join('\n');
+
   const genreText = text(W / 2, 632, 44, pal.accent, genre, 'opacity="0.92" letter-spacing="18" dx="9"');
   const authorText = text(W / 2, 1768, 56, pal.ink, author, 'opacity="0.88"');
   const footText = text(W / 2, 2098, 34, pal.ink, foot, 'opacity="0.42" letter-spacing="3"');
@@ -268,6 +303,7 @@ export function coverSvg(novel = {}, info = {}, opts = {}) {
     body = `
 ${text(W / 2, 700, 40, pal.accent, genre, 'opacity="0.9" letter-spacing="16" dx="8"')}
 ${titleText}
+${tagText}
 <line x1="${W / 2 - 50}" y1="1620" x2="${W / 2 + 50}" y2="1620" stroke="${pal.accent}" stroke-width="2" opacity="0.6"/>
 ${authorText}
 ${footText}`;
@@ -282,6 +318,7 @@ ${footText}`;
 <rect x="0" y="0" width="${W}" height="${bandBottom}" fill="${pal.accent}"/>
 ${text(W / 2, 420, 42, dark, genre, 'opacity="0.72" letter-spacing="18" dx="9"')}
 ${bandTitle}
+${tagText}
 ${text(W / 2, 1740, 56, pal.ink, author, 'opacity="0.88"')}
 ${text(W / 2, 2060, 34, pal.ink, foot, 'opacity="0.42" letter-spacing="3"')}`;
   } else {
@@ -292,6 +329,7 @@ ${text(W / 2, 2060, 34, pal.ink, foot, 'opacity="0.42" letter-spacing="3"')}`;
 <line x1="${W / 2 - 60}" y1="516" x2="${W / 2 + 60}" y2="516" stroke="${pal.accent}" stroke-width="3" opacity="0.75"/>
 ${genreText}
 ${titleText}
+${tagText}
 <line x1="${W / 2 - 70}" y1="1610" x2="${W / 2 + 70}" y2="1610" stroke="${pal.accent}" stroke-width="2" opacity="0.55"/>
 ${authorText}
 ${footText}`;
