@@ -1562,6 +1562,49 @@ kbd {
 .cover-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .cover-actions .btn { padding: 4px 10px; font-size: 11.5px; }
 
+/* ---------------- 模型对比 ---------------- */
+.cmp-pickers { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.cmp-pick { display: flex; flex-direction: column; gap: 6px; }
+.cmp-note { margin-top: 8px; min-height: 1em; color: var(--warning); }
+
+.cmp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.cmp-head h3 { margin: 0; }
+.cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.cmp-col {
+  display: flex; flex-direction: column; min-width: 0;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface-1); overflow: hidden;
+}
+.cmp-col-head {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 9px 12px; border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.cmp-name {
+  font-size: 12.5px; font-weight: 500; color: var(--text-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cmp-stat {
+  margin-left: auto; flex: 0 0 auto;
+  font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums;
+}
+.cmp-body {
+  flex: 1; min-height: 220px; max-height: 46vh; overflow-y: auto;
+  padding: 12px; font-size: 13px; line-height: 1.85; color: var(--text-1);
+  white-space: pre-wrap; word-break: break-word;
+}
+.cmp-body p { margin: 0 0 .9em; text-indent: 2em; }
+.cmp-body p:last-child { margin-bottom: 0; }
+.cmp-body .md-h { font-weight: 600; margin: .8em 0 .4em; }
+.cmp-stopped {
+  margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border-2);
+  font-size: 11px; color: var(--text-3);
+}
+.cmp-foot {
+  display: flex; gap: 6px; padding: 9px 12px;
+  border-top: 1px solid var(--border); background: var(--surface-2);
+}
+
 /* ---------------- 导入文稿 ---------------- */
 .import-drop {
   display: flex; flex-direction: column; align-items: center; gap: 6px;

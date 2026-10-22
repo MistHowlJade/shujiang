@@ -49,6 +49,35 @@ const get = async (u) => (await req('GET', u)).json;
 const post = async (u, b) => (await req('POST', u, b)).json;
 const put = async (u, b) => (await req('PUT', u, b)).json;
 
+/** 发一次流式请求，把正文攒出来（用来验证模型对比时两个模型各自跑各自的） */
+async function streamOnce(providerId, model, novelId, chapterId) {
+  const r = await fetch(`${BASE}/api/ai/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task: 'chapter', novelId, chapterId, providerId, model, payload: { targetWords: 300 } }),
+  });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    return { ok: false, error: j.error || `HTTP ${r.status}`, text: '', model: '' };
+  }
+  const raw = await r.text();
+  let text = '';
+  let meta = null;
+  for (const line of raw.split('\n')) {
+    const t = line.trim();
+    if (!t.startsWith('data:')) continue;
+    const p = t.slice(5).trim();
+    if (!p || p === '[DONE]') continue;
+    let j;
+    try { j = JSON.parse(p); } catch { continue; }
+    if (j.shu_meta) { meta = j.shu_meta; continue; }
+    if (j.error || j.shu_error) return { ok: false, error: j.shu_error || JSON.stringify(j.error), text, model: meta?.model || '' };
+    const d = j.choices?.[0]?.delta || {};
+    if (typeof d.content === 'string') text += d.content;
+  }
+  return { ok: true, text, model: meta?.model || '' };
+}
+
 /** 手搓一张 4x5 的 PNG，当假封面用（不引第三方库） */
 function tinyPng(w = 4, h = 5) {
   const crcTable = (() => {
@@ -355,6 +384,38 @@ async function main() {
     const epub3 = await req('GET', `${BASE}/api/novels/${id}/export?format=epub`);
     const files3 = unzip(epub3.buf);
     check('移除后又回到自动生成的封面', !!files3['OEBPS/cover.svg'] && !files3['OEBPS/cover.png']);
+  }
+
+  // ---------------------------------------------------------------
+  group('模型对比（同一段上下文跑两个模型）');
+  {
+    // 这一项要假模型服务在跑；没起就跳过，别让自检红一片
+    const mockBase = 'http://127.0.0.1:8890/v1';
+    const mockUp = await fetch(`${mockBase}/models`).then((r) => r.ok).catch(() => false);
+    if (!mockUp) {
+      console.log('  SKIP 假模型服务没起（tools\\node\\node.exe dev\\mock-openai.js），跳过模型对比检查');
+    } else {
+      const before = (await get(`${BASE}/api/config`)) || {};
+      const origProviders = before.providers || [];
+      const testProv = { id: 'p_regress_mock', name: '自检假模型', baseUrl: mockBase, apiKey: 'sk-regress', models: ['mock-writer', 'mock-alt'] };
+      try {
+        // 只加一个服务商；原来的按 id 合并，密钥不会被清掉，测完原样还回去
+        await post(`${BASE}/api/config`, { providers: [...origProviders, testProv] });
+        const [a, b] = await Promise.all([
+          streamOnce(testProv.id, 'mock-writer', id, cid),
+          streamOnce(testProv.id, 'mock-alt', id, cid),
+        ]);
+        check('两个模型都能跑出内容', a.ok && b.ok, `${a.error || ''} | ${b.error || ''}`);
+        check('两边跑的是各自的模型', a.model === 'mock-writer' && b.model === 'mock-alt', `${a.model} / ${b.model}`);
+        check('两个模型给的是不同的正文', !!a.text && !!b.text && a.text !== b.text);
+        check('正文不是空的', (a.text || '').length > 20 && (b.text || '').length > 20, `${(a.text || '').length} / ${(b.text || '').length}`);
+      } finally {
+        await post(`${BASE}/api/config`, { providers: origProviders });
+      }
+      const after = (await get(`${BASE}/api/config`)) || {};
+      check('自检完服务商列表还原了', (after.providers || []).length === origProviders.length,
+        `${(after.providers || []).length} vs ${origProviders.length}`);
+    }
   }
 
   const beforeTrash = (await get(`${BASE}/api/novels/${id}`)).novel?.chapters?.length || 0;

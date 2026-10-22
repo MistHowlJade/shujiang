@@ -10,11 +10,12 @@
 // 在书匠「设置 → 模型服务」里这样填：
 //   Base URL : http://127.0.0.1:8890/v1
 //   API Key  : 随便填几个字符（不能为空）
-//   已知模型 : mock-writer, mock-reasoner, mock-error
+//   已知模型 : mock-writer, mock-alt, mock-reasoner, mock-error
 //
 // 两个彩蛋，用来验证错误提示与思考过程：
 //   模型名带 reasoner → 先流式吐思考过程，再吐正文（测「思考中」折叠区）
 //   模型名带 error    → 上游直接返回 401（测错误提示是否人话）
+//   模型名带 alt      → 同一任务换个写法（测「模型对比」并排显示）
 //
 // 可用环境变量：MOCK_PORT / MOCK_DELAY（每片间隔毫秒）/ MOCK_CHUNK（每片字数）
 // ===========================================================================
@@ -54,8 +55,28 @@ const CHAPTER = `夜色压下来的时候，青石巷里只剩他一个人的脚
 
 "进去吧。"他说，"长老等你很久了。"`;
 
-const CONTINUE = `谢迟迈过门槛时，听见身后传来门轴转动的声音。
+// 同一个任务换个模型就该换个写法：mock-alt 走这份，用来验证「模型对比」并排显示
+const CHAPTER_ALT = `雨是傍晚落下来的，落到第七天，青石巷的青石就再也认不出本色。
 
+谢迟站在巷口没有进去。他把剑鞘横在身前，像抱着一截湿透的木头。鞘口的漆早掉光了，露出里头像骨头一样的白。
+
+"你还要试多少次？"
+
+声音从巷子深处传出来，不高不低，像有人在隔着一层布说话。
+
+"够了。"谢迟说，"最后一次。"
+
+他往里走。雨水顺着瓦沟淌下来，在他脚边分成两股。走到第七盏灯下时，灯灭了。
+
+黑暗里有人笑了一声："那就继续。"
+
+谢迟停下。他知道这句话的意思——今夜没有长老在等，也没有院门可以进。这条巷子是死的，走进第七盏灯，就再没有回头的地方。
+
+但他还是把手按在了剑柄上。
+
+缠着布条的地方已经磨得起了毛，他数过，一共十七圈。第十七圈是师傅系的，系的当晚下了雨，跟今晚一样。`;
+
+const CONTINUE = `谢迟迈过门槛时，听见身后传来门轴转动的声音。
 青衫人把门关上了，动作很轻，像是怕惊动什么。
 
 院子比他想的要小。正中一口枯井，井沿上坐着个女人，正在借着月光补一件衣裳。针脚很密，一下一下，扎得极慢。她没有抬头，却开口说了话："你师傅临走前，也是坐在这个位置。"
@@ -274,8 +295,10 @@ function decide(text) {
   return 'chapter';
 }
 
-function buildReply(text) {
+function buildReply(text, model = '') {
   const kind = decide(text);
+  // 模型名带 alt → 换一份写法，用来验证「模型对比」时两边确实不同
+  const alt = /alt/i.test(String(model));
   switch (kind) {
     case 'memory':
       return { kind, content: JSON.stringify(MEMORY) };
@@ -303,7 +326,7 @@ function buildReply(text) {
     case 'continue':
       return { kind, content: CONTINUE };
     default:
-      return { kind, content: CHAPTER };
+      return { kind, content: alt ? CHAPTER_ALT : CHAPTER };
   }
 }
 
@@ -323,7 +346,7 @@ const server = http.createServer(async (req, res) => {
     const body = JSON.stringify({
       object: 'list',
       data: [
-        { id: 'mock-writer' }, { id: 'mock-reasoner' }, { id: 'mock-error' },
+        { id: 'mock-writer' }, { id: 'mock-alt' }, { id: 'mock-reasoner' }, { id: 'mock-error' },
         ...VARIANTS.filter((v) => v !== 'normal').map((v) => ({ id: `mock-${v}` })),
       ],
     });
@@ -352,7 +375,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   const conv = conversation(payload);
-  const { content } = buildReply(conv);
+  const { content } = buildReply(conv, model);
   const kind = variantOf(model);
   const reasoning = /reasoner|reason/i.test(model) && kind !== 'reason'
     ? '用户在写网文，需要一段有悬念的开场。\n先确定视角：第三人称限知，贴主角。\n开头用一个动作切入，别写景。\n钩子放在对白里——"剑出得了鞘吗"。\n'

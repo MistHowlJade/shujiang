@@ -98,11 +98,20 @@ function showModal(html, onMount, opts = {}) {
   const box = $('#modal');
   box.classList.toggle('modal-wide', !!opts.wide);
   box.innerHTML = html;
+  // 关掉弹窗时能回调一次（模型对比要用它停掉还在跑的流）
+  box._onClose = opts.onClose || null;
   mask.hidden = false;
   onMount?.(box);
   return box;
 }
-function closeModal() { $('#modalMask').hidden = true; $('#modal').innerHTML = ''; }
+function closeModal() {
+  const box = $('#modal');
+  const fn = box._onClose;
+  box._onClose = null;
+  try { fn?.(); } catch (err) { console.warn('[modal] onClose 出错', err); }
+  $('#modalMask').hidden = true;
+  box.innerHTML = '';
+}
 $('#modalMask').addEventListener('mousedown', (e) => {
   if (e.target.id === 'modalMask' && !S.batchController) closeModal();
 });
@@ -3506,6 +3515,7 @@ function setBusy(busy) {
   $('#stopBtn2').hidden = !busy;
   $('#genChapterBtn').disabled = busy;
   $('#contBtn').disabled = busy;
+  $('#cmpBtn').disabled = busy;
   $('#consistencyBtn').disabled = busy;
   $('#reviewBtn').disabled = busy;
   $$('[data-quick]').forEach((b) => { b.disabled = busy; });
@@ -3619,6 +3629,288 @@ $('#applyReplace').addEventListener('click', async () => {
   toast('已替换 · Ctrl+Z 可撤销，原稿也在「版本历史」里', 'ok');
 });
 $('#applyInsert').addEventListener('click', () => { if (S.out) { insertIntoContent(S.out, 'insert'); toast('已插入光标处 · 按 Ctrl+Z 可撤销', 'ok'); } });
+
+/* ============================================================
+ * 6.5 模型对比：同一段上下文跑两个模型，并排看，选一个采用
+ * ============================================================
+ * 为什么值得做：换模型之前只能「切过去 → 重新生成 → 凭记忆比」，
+ * 两份结果没法摆在一起看。这个功能让「哪个模型写这段更合适」变成一眼的事。
+ * 服务端不用改 —— 前端并行发两次 /api/ai/stream，只是 providerId / model 不同。
+ */
+
+/** 配置里能用的服务商（没密钥的选了也是白选，先剔掉） */
+function cmpCandidates() {
+  const cfg = S.config || {};
+  const out = [];
+  for (const p of cfg.providers || []) {
+    if (!p.apiKeySet && !p.apiKey) continue;
+    out.push({ providerId: p.id, provider: p.name || p.baseUrl || '未命名', models: p.models || [] });
+  }
+  return out;
+}
+
+/** 挑一个跟 A 不同的候选当 B：先换服务商，同一家里换模型也行 */
+function otherCandidate(cand, a) {
+  const other = cand.find((c) => c.providerId !== a.providerId);
+  if (other) return { providerId: other.providerId, model: (other.models || [])[0] || '' };
+  const same = cand.find((c) => c.providerId === a.providerId && (c.models || []).some((m) => m !== a.model));
+  if (same) return { providerId: same.providerId, model: (same.models || []).find((m) => m !== a.model) };
+  return { providerId: a.providerId, model: '' };
+}
+
+/** 对比支持的三个任务：都是出正文的，模型差别最明显 */
+function cmpTaskList() {
+  const ch = currentChapter();
+  if (!ch) return [];
+  const out = [{ key: 'chapter', label: '生成本章' }];
+  const content = ($('#chContent')?.value || '').trim();
+  if (content) out.push({ key: 'continue', label: '续写' });
+  const ta = $('#chContent');
+  const sel = ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd) : '';
+  if (sel.trim().length > 1) out.push({ key: 'polish', label: '润色选中段落' });
+  return out;
+}
+
+/** 按任务拼出要发给服务端的请求体（跟各自单独跑时完全一致，两边才公平） */
+function cmpTaskBody(task) {
+  const ch = currentChapter();
+  const req = ($('#genReq')?.value || '').trim();
+  const words = Number($('#genWords')?.value) || 0;
+  if (task === 'continue') {
+    const content = ($('#chContent')?.value || '');
+    return {
+      task: 'continue',
+      novelId: S.novel.id,
+      chapterId: ch.id,
+      payload: {
+        tail: content,
+        targetWords: Math.min(1500, Math.max(300, words || 800)),
+        instruction: req || undefined,
+        extraQuery: req || undefined,
+      },
+    };
+  }
+  if (task === 'polish') {
+    const ta = $('#chContent');
+    const text = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+    return { task: 'polish', novelId: S.novel.id, chapterId: ch.id, payload: { text } };
+  }
+  return {
+    task: 'chapter',
+    novelId: S.novel.id,
+    chapterId: ch.id,
+    payload: {
+      instruction: req || undefined,
+      targetWords: words || undefined,
+      extraQuery: req || undefined,
+    },
+  };
+}
+
+/** 打开模型对比的选型弹窗 */
+function openModelCompare() {
+  if (!S.novel) return toast('先打开作品', 'err');
+  const cand = cmpCandidates();
+  if (!cand.length) return toast('还没有配置模型服务商，去「设置」里加一个', 'err');
+  const tasks = cmpTaskList();
+  if (!tasks.length) return toast('先建一章', 'err');
+
+  const genModel = ($('#genModel')?.value || '').trim();
+  const active = cand.find((c) => c.providerId === S.config?.activeProviderId) || cand[0];
+  const defA = { providerId: active.providerId, model: genModel || (active.models || [])[0] || '' };
+  const defB = otherCandidate(cand, defA);
+
+  const picker = (side, def) => `
+    <div class="cmp-pick">
+      <label class="field-label">模型 ${side}</label>
+      <select class="select" data-prov="${side}">
+        ${cand.map((c) => `<option value="${esc(c.providerId)}"${c.providerId === def.providerId ? ' selected' : ''}>${esc(c.provider)}</option>`).join('')}
+      </select>
+      <input class="input" data-model="${side}" list="cmpList${side}" value="${esc(def.model)}" placeholder="模型名，留空用服务商默认" />
+      <datalist id="cmpList${side}"></datalist>
+    </div>`;
+
+  showModal(`
+    <h3>模型对比</h3>
+    <p class="modal-sub">同一段上下文跑两个模型，结果并排摆出来，选一个采用。用的是左栏那套「本章要求 / 目标字数」。</p>
+    <div class="cmp-pickers">
+      ${picker('A', defA)}
+      ${picker('B', defB)}
+    </div>
+    <label class="field-label" style="margin-top:12px">对比什么
+      <select class="select" id="cmpTask">
+        ${tasks.map((t) => `<option value="${t.key}">${esc(t.label)}</option>`).join('')}
+      </select>
+    </label>
+    <div class="dim small cmp-note" id="cmpNote"></div>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="cmpCancel">取消</button>
+      <button class="btn btn-primary" id="cmpRun">开始对比</button>
+    </div>`, (box) => {
+      const provA = box.querySelector('[data-prov="A"]');
+      const provB = box.querySelector('[data-prov="B"]');
+      const modelA = box.querySelector('[data-model="A"]');
+      const modelB = box.querySelector('[data-model="B"]');
+      const note = box.querySelector('#cmpNote');
+      const fill = (provEl, listEl, modelEl) => {
+        const c = cand.find((x) => x.providerId === provEl.value);
+        listEl.innerHTML = (c?.models || []).map((m) => `<option value="${esc(m)}"></option>`).join('');
+        if (!modelEl.value && c?.models?.length) modelEl.value = c.models[0];
+      };
+      fill(provA, box.querySelector('#cmpListA'), modelA);
+      fill(provB, box.querySelector('#cmpListB'), modelB);
+      const check = () => {
+        const same = provA.value === provB.value && modelA.value.trim() === modelB.value.trim();
+        note.textContent = same ? '两边选了同一个模型，结果会一模一样 —— 换一个再比。' : '';
+        return !same;
+      };
+      const onProv = () => {
+        modelA.value = '';
+        modelB.value = '';
+        fill(provA, box.querySelector('#cmpListA'), modelA);
+        fill(provB, box.querySelector('#cmpListB'), modelB);
+        check();
+      };
+      provA.onchange = onProv;
+      provB.onchange = onProv;
+      modelA.oninput = check;
+      modelB.oninput = check;
+      check();
+      box.querySelector('#cmpCancel').onclick = closeModal;
+      box.querySelector('#cmpRun').onclick = () => {
+        if (!check()) return toast('两边得是两个不同的模型', 'err');
+        const pick = (provEl, modelEl) => {
+          const p = cand.find((c) => c.providerId === provEl.value);
+          const m = modelEl.value.trim();
+          return { providerId: provEl.value, model: m, label: `${p?.provider || ''}${m ? ' · ' + m : ' · 默认模型'}` };
+        };
+        const task = box.querySelector('#cmpTask').value;
+        closeModal();
+        runModelCompare([pick(provA, modelA), pick(provB, modelB)], task);
+      };
+    }, { wide: true });
+}
+
+/** 并排跑两个模型，边流边显示，跑完挑一个采用 */
+async function runModelCompare(picks, task) {
+  if (S.controller || S.batchController) { toast('已有任务在跑，先停止', 'err'); return; }
+  const body = cmpTaskBody(task);
+  const md = MD_OUT_TASKS.has(task);
+  const ac = new AbortController();
+  const state = picks.map((p, i) => ({ ...p, side: i === 0 ? 'A' : 'B', text: '', err: '', ms: 0, done: false }));
+
+  showModal(`
+    <div class="cmp-head">
+      <h3>模型对比</h3>
+      <button class="btn btn-sm btn-text" id="cmpStop"><svg class="ico"><use href="#i-stop" /></svg>停止</button>
+    </div>
+    <div class="cmp-grid">
+      ${state.map((s, i) => `
+        <section class="cmp-col">
+          <header class="cmp-col-head">
+            <span class="cmp-name">${esc(s.label)}</span>
+            <span class="cmp-stat" id="cmpStat${i}">排队中</span>
+          </header>
+          <div class="cmp-body" id="cmpBody${i}"></div>
+          <footer class="cmp-foot">
+            <button class="btn btn-sm btn-primary" data-use="${i}" disabled>采用</button>
+            <button class="btn btn-sm" data-copy="${i}" disabled>复制</button>
+          </footer>
+        </section>`).join('')}
+    </div>`, (box) => {
+      box.querySelector('#cmpStop').onclick = () => ac.abort();
+      box.querySelectorAll('[data-use]').forEach((btn) => {
+        btn.onclick = () => {
+          const s = state[Number(btn.dataset.use)];
+          if (!s.text) return;
+          S.out = s.text;
+          S.reasoning = '';
+          S.outMd = md;
+          S.outModel = s.label;
+          renderOut();
+          closeModal();
+          toast('已采用这个结果，可以用「追加到正文 / 替换正文」了', 'ok');
+        };
+      });
+      box.querySelectorAll('[data-copy]').forEach((btn) => {
+        btn.onclick = () => {
+          navigator.clipboard.writeText(state[Number(btn.dataset.copy)].text);
+          toast('已复制', 'ok');
+        };
+      });
+    }, { wide: true, onClose: () => ac.abort() });
+
+  const renderCol = (i) => {
+    const s = state[i];
+    const bodyEl = document.getElementById(`cmpBody${i}`);
+    if (!bodyEl) return;
+    const stopped = s.err === '已停止';
+    if (s.err && !stopped) {
+      bodyEl.innerHTML = `<span class="status-err">${esc(s.err)}</span>`;
+    } else if (s.text) {
+      // 手动停掉的：已经写出来的那部分要留住，别白生成
+      bodyEl.innerHTML = (md ? mdLite(s.text) : esc(s.text)) + (stopped ? '<div class="cmp-stopped">已停止</div>' : '');
+    } else {
+      bodyEl.innerHTML = '<span class="dim">…</span>';
+    }
+    const statEl = document.getElementById(`cmpStat${i}`);
+    if (statEl) {
+      statEl.textContent = s.err
+        ? (stopped ? `已停止 · ${countWords(s.text)} 字` : '失败')
+        : s.done
+          ? `${countWords(s.text)} 字 · ${(s.ms / 1000).toFixed(1)} 秒`
+          : `生成中… ${countWords(s.text)} 字`;
+    }
+    const use = document.querySelector(`[data-use="${i}"]`);
+    if (use) use.disabled = !s.text;
+    const cp = document.querySelector(`[data-copy="${i}"]`);
+    if (cp) cp.disabled = !s.text;
+  };
+
+  // 流式时别每个字都重排 DOM，攒一帧刷一次
+  let rafId = 0;
+  const dirty = new Set();
+  const schedule = (i) => {
+    dirty.add(i);
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+      rafId = 0;
+      for (const k of dirty) renderCol(k);
+      dirty.clear();
+    });
+  };
+
+  const runOne = async (s, i) => {
+    const t0 = performance.now();
+    try {
+      await streamAI({ ...body, providerId: s.providerId, model: s.model || undefined }, {
+        signal: ac.signal,
+        onDelta: (d) => { s.text += d; schedule(i); },
+      });
+      s.ms = performance.now() - t0;
+    } catch (err) {
+      s.ms = performance.now() - t0;
+      s.err = err?.name === 'AbortError' ? '已停止' : (err.message || '生成失败');
+    }
+    s.done = true;
+    renderCol(i);
+  };
+
+  // 借用全局的忙状态：这样左下角的「停止」和别处的按钮都跟着一起禁用
+  S.controller = ac;
+  setBusy(true);
+  try {
+    await Promise.all(state.map((s, i) => runOne(s, i)));
+  } finally {
+    // 只有还是自己在跑的时候才收尾，别把用户后来新开的任务状态搅乱
+    if (S.controller === ac) {
+      S.controller = null;
+      setBusy(false);
+    }
+  }
+}
+
+$('#cmpBtn')?.addEventListener('click', openModelCompare);
 
 /* ============================================================
  * 章节记忆查看 / 线索追踪
@@ -7883,6 +8175,7 @@ function cmdkSource() {
     op('继续阅读', 'book-open', () => continueReading(S.novel.id));
     op(S.focusMode ? '退出专注写作' : '进入专注写作', 'focus', toggleFocus, 'Ctrl+Alt+F');
     op('续写当前章', 'pen', () => { setView('studio'); showAssistTab('write'); continueWriting(); }, 'Ctrl+↵');
+    op('对比两个模型', 'columns', () => { setView('studio'); showAssistTab('write'); openModelCompare(); });
     op('一致性检查', 'shield', () => { setView('studio'); showAssistTab('check'); $('#consistencyBtn').click(); });
     op('责编评审', 'stamp', () => { setView('studio'); showAssistTab('check'); $('#reviewBtn').click(); });
     op('导入文稿', 'upload', () => { setView('studio'); openImportModal(); });
@@ -8277,5 +8570,5 @@ async function boot() {
   }
 }
 
-window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, openChapterTargetModal, toggleFocus, openGlobalSearch, openTrash, restoreNovelBackup, applyFragmentData, openStatsModal, openRevisionInbox };
+window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, openChapterTargetModal, toggleFocus, openGlobalSearch, openTrash, restoreNovelBackup, applyFragmentData, openStatsModal, openRevisionInbox, openModelCompare };
 boot();
