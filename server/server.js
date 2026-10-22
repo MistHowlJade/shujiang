@@ -575,12 +575,14 @@ async function handleApi(req, res, url) {
       const body = await readBody(req);
       const n = getNovel(id);
       if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      const meta = { ...n.meta, ...(body.meta || {}) };
+      meta.targetWords = cleanTargetWords(meta.targetWords);
       const merged = {
         ...n,
         ...body,
         id: n.id,
         createdAt: n.createdAt,
-        meta: { ...n.meta, ...(body.meta || {}) },
+        meta,
         bible: { ...n.bible, ...(body.bible || {}) },
         outline: { ...n.outline, ...(body.outline || {}) },
         chapters: body.chapters || n.chapters,

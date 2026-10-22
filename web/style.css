@@ -189,6 +189,14 @@ h1, h2, h3 { letter-spacing: -.021em; }
 }
 .topbar-mid > span:hover { border-color: var(--border-2); color: var(--text-1); }
 .topbar-mid .ico { width: 13px; height: 13px; color: var(--text-4); }
+/* 全书目标的进度：跟在书名后面 */
+.top-goal {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 7px; border-radius: var(--r-full);
+  background: var(--accent-bg); color: var(--accent-hover);
+  font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.top-goal.done { background: var(--success-bg); color: var(--success); }
 .topbar-right { display: flex; align-items: center; gap: 8px; }
 
 .save-pill {
@@ -623,6 +631,19 @@ kbd {
   margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);
   font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums;
 }
+/* 书架卡片上的全书目标进度 */
+.book .bk-goal {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 9px; font-size: 10.5px; color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+}
+.bk-goal-bar {
+  flex: 1; min-width: 0; height: 3px; border-radius: var(--r-full);
+  background: var(--border-2); overflow: hidden;
+}
+.bk-goal-bar i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.bk-goal-text { flex: 0 0 auto; }
+.bk-goal-pct { flex: 0 0 auto; color: var(--text-3); }
 .book .bk-del {
   position: absolute; top: 9px; right: 9px; width: 26px; height: 26px;
   display: grid; place-items: center; cursor: pointer; opacity: 0;
@@ -1628,6 +1649,11 @@ kbd {
   border-radius: 2px;
 }
 .cmp-empty { padding: 30px 12px; text-align: center; color: var(--text-3); font-size: 12.5px; }
+
+/* ---------------- 全书目标字数 ---------------- */
+.goal-set { align-items: start; }
+.goal-set .field-label { display: block; }
+.goal-hint { margin-top: 8px; min-height: 1.6em; }
 .cmp-foot {
   display: flex; gap: 6px; padding: 9px 12px;
   border-top: 1px solid var(--border); background: var(--surface-2);

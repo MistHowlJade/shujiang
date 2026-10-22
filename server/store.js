@@ -298,6 +298,7 @@ export function blankNovel({ title = '未命名作品', genre = '', author = '' 
       tense: '过去时',
       tone: '',
       platform: '',
+      targetWords: 0,
       targetWordsPerChapter: 3000,
       styleNotes: '',
       styleRefs: [],
@@ -337,6 +338,7 @@ export function listNovels() {
       updatedAt: n.updatedAt || n.createdAt || 0,
       createdAt: n.createdAt || 0,
       logline: n.meta?.logline || '',
+      targetWords: cleanTargetWords(n.meta?.targetWords),
     });
   }
   out.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -369,6 +371,8 @@ export function getNovel(id) {
     c.targetWords = cleanTargetWords(c.targetWords);
   });
   n.meta = { ...blankNovel().meta, ...(n.meta || {}) };
+  // 全书目标字数：0 表示没定；只用于算进度，不限制写作
+  n.meta.targetWords = cleanTargetWords(n.meta.targetWords);
   // 记下磁盘上的字数，saveNovel 用它判断这次落盘是不是「骤降」
   lastWrittenWords.set(n.id, (n.chapters || []).reduce((s, c) => s + (c.words || countWords(c.content || '')), 0));
   return n;

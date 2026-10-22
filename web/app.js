@@ -350,6 +350,32 @@ function coverOf(title) {
   return COVERS[h % COVERS.length];
 }
 
+/**
+ * 全书目标：设了就报进度，没设返回 null。
+ * 书架卡片拿的是列表数据（words + targetWords），工作台拿的是完整作品（meta + chapters），两种都认。
+ */
+function bookGoalOf(n) {
+  if (!n) return null;
+  const target = Math.floor(Number(n.meta?.targetWords ?? n.targetWords) || 0);
+  if (!target) return null;
+  const words = Array.isArray(n.chapters)
+    ? n.chapters.reduce((s, c) => s + countWords(c.content || ''), 0)
+    : (Number(n.words) || 0);
+  return {
+    target,
+    words,
+    pct: Math.min(100, Math.round((words / target) * 100)),
+    left: Math.max(0, target - words),
+    done: words >= target,
+  };
+}
+
+/** 目标字数用「万」更顺眼：300000 → 30 万 */
+function fmtGoal(n) {
+  const v = Math.floor(Number(n) || 0);
+  return v >= 10000 ? `${Math.round(v / 10000)} 万` : String(v);
+}
+
 function renderShelf() {
   const q = ($('#shelfSearch').value || '').trim().toLowerCase();
   const list = S.novels.filter((n) => !q
@@ -367,6 +393,7 @@ function renderShelf() {
   for (const n of list) {
     const prog = getReaderProgress(n.id);
     const hasProgress = !!prog;
+    const goal = bookGoalOf(n);
     const div = document.createElement('div');
     div.className = 'book';
     div.style.setProperty('--cover', coverOf(n.title));
@@ -379,7 +406,12 @@ function renderShelf() {
       <div class="bk-line">
         <span>${n.chapterCount} 章 · ${fmtWords(n.words)} 字${todayOf(n.id) ? ` · <em class="bk-today">今日 ${fmtWords(todayOf(n.id))} 字</em>` : ''}</span>
         <span>${esc(fmtDate(n.updatedAt).slice(5, 10))}</span>
-      </div>`;
+      </div>
+      ${goal ? `<div class="bk-goal" title="全书目标 ${fmtGoal(goal.target)} 字 · 已完成 ${goal.pct}%${goal.done ? ' · 已达成' : ` · 还差 ${fmtWords(goal.left)} 字`}">
+        <div class="bk-goal-bar"><i style="width:${goal.pct}%"></i></div>
+        <span class="bk-goal-text">${goal.done ? '已达成目标' : `目标 ${fmtGoal(goal.target)} 字`}</span>
+        <span class="bk-goal-pct">${goal.pct}%</span>
+      </div>` : ''}`;
     div.addEventListener('click', (e) => {
       if (e.target.closest('.bk-del') || e.target.closest('.bk-read')) return;
       openNovel(n.id);
@@ -2192,7 +2224,11 @@ function renderTopbarActions() {
   const mid = $('#topbarMid');
   if (!S.novel) { mid.textContent = ''; mid.onclick = null; return; }
   const total = S.novel.chapters.reduce((s, c) => s + countWords(c.content), 0);
-  mid.innerHTML = `<span title="点击导出这部作品">${ico('book')}《${esc(S.novel.title)}》<span class="dim-text">${S.novel.chapters.length} 章 · ${fmtWords(total)} 字</span>${ico('download')}</span>`;
+  const goal = bookGoalOf(S.novel);
+  const goalTag = goal
+    ? `<span class="top-goal${goal.done ? ' done' : ''}" title="全书目标 ${fmtGoal(goal.target)} 字，已完成 ${goal.pct}%${goal.done ? ' · 已达成' : ` · 还差 ${fmtWords(goal.left)} 字`}">目标 ${fmtGoal(goal.target)} 字 · ${goal.pct}%</span>`
+    : '';
+  mid.innerHTML = `<span title="点击导出这部作品">${ico('book')}《${esc(S.novel.title)}》<span class="dim-text">${S.novel.chapters.length} 章 · ${fmtWords(total)} 字</span>${goalTag}${ico('download')}</span>`;
   mid.onclick = exportBook;
 }
 
@@ -6868,6 +6904,22 @@ function renderStyleTab(host, n) {
           <input class="input" type="number" data-key="targetWordsPerChapter" value="${m.targetWordsPerChapter || 3000}" />
         </label>
       </div>
+      <div class="grid2 goal-set">
+        <label class="field-label">全书目标字数<span class="field-hint">留空表示不定</span>
+          <input class="input" type="number" data-key="targetWords" value="${m.targetWords || ''}" placeholder="例：300000" min="0" step="10000" list="goalPresets" />
+          <datalist id="goalPresets">
+            ${[50000, 100000, 200000, 300000, 500000].map((v) => `<option value="${v}"></option>`).join('')}
+          </datalist>
+        </label>
+        <div>
+          <span class="field-label">常见长度</span>
+          <div class="btn-row wrap">
+            ${[50000, 100000, 200000, 300000, 500000].map((v) => `<button type="button" class="btn btn-sm" data-goal="${v}">${fmtGoal(v)}</button>`).join('')}
+            <button type="button" class="btn btn-sm btn-text" data-goal="0">不设</button>
+          </div>
+          <p class="dim small goal-hint" id="goalHint"></p>
+        </div>
+      </div>
       ${field('文风要求（会逐字进入提示词）', 'styleNotes', m, { area: true, rows: 4, ph: '例：多用短句与白描，对白占比高，不用网络梗，战斗节奏快，心理描写点到即止。' })}
       ${field('去 AI 味补充规则（在默认负面清单之上追加）', 'antiAiNotes', m, { area: true, rows: 3, ph: '例：禁止出现「嘴角勾起一抹弧度」；禁止用「仿佛」开头的比喻句。' })}
       ${field('禁忌：绝对不能出现的内容', 'taboos', m, { area: true, rows: 2, ph: '例：不写露骨暴力；不出现现实政治人物。' })}
@@ -6885,7 +6937,41 @@ function renderStyleTab(host, n) {
       <p class="dim small">写清楚「学谁的什么」，比笼统要求「要有文采」有用得多。</p>
       <div class="entry-list" id="refList"></div>
     </div>`;
-  bindFields(host, m, () => saveNovelPart({ meta: n.meta }), ['targetWordsPerChapter', 'contextBudget']);
+  bindFields(host, m, () => saveNovelPart({ meta: n.meta }), ['targetWordsPerChapter', 'contextBudget', 'targetWords']);
+  // 全书目标：给几个常见长度，并按每章字数反推大概要写多少章
+  {
+    const input = host.querySelector('[data-key="targetWords"]');
+    const hint = host.querySelector('#goalHint');
+    const perCh = Math.max(0, Number(m.targetWordsPerChapter) || 0);
+    const updateHint = () => {
+      const target = Math.floor(Number(input.value) || 0);
+      const words = (n.chapters || []).reduce((s, c) => s + countWords(c.content || ''), 0);
+      if (!target) { hint.textContent = '不定目标也可以写；这里只是给你看进度。'; return; }
+      const need = perCh ? Math.ceil(target / perCh) : 0;
+      const have = (n.chapters || []).length;
+      const pct = Math.min(100, Math.round((words / target) * 100));
+      hint.textContent = `已写 ${fmtWords(words)} 字（${pct}%）`
+        + (need ? `；按每章 ${fmtWords(perCh)} 字算，大约要写 ${need} 章，现在 ${have} 章` : '');
+    };
+    // 顶栏标签和书架卡片上的进度条要跟着变
+    const syncUI = () => {
+      const item = S.novels.find((x) => x.id === n.id);
+      if (item) item.targetWords = Math.floor(Number(input.value) || 0);
+      renderTopbarActions();
+      if (S.view === 'shelf') renderShelf();
+    };
+    updateHint();
+    input.addEventListener('input', () => { updateHint(); syncUI(); });
+    host.querySelectorAll('[data-goal]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        input.value = btn.dataset.goal === '0' ? '' : btn.dataset.goal;
+        m.targetWords = Number(input.value) || 0;
+        saveNovelPart({ meta: n.meta });
+        updateHint();
+        syncUI();
+      });
+    });
+  }
   $$('select[data-key]', host).forEach((el) => el.addEventListener('change', () => {
     m[el.dataset.key] = el.value;
     saveNovelPart({ meta: n.meta });

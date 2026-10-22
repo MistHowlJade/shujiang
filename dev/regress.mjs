@@ -509,6 +509,36 @@ async function main() {
   }
 
   // ---------------------------------------------------------------
+  group('全书目标字数');
+  {
+    const before = (await get(`${BASE}/api/novels/${id}`)).novel;
+    const list0 = (await get(`${BASE}/api/novels`)).novels || [];
+    const item0 = list0.find((n) => n.id === id);
+    check('没设目标时是 0', !item0?.targetWords, item0?.targetWords);
+
+    const set = await put(`${BASE}/api/novels/${id}`, { meta: { targetWords: 300000 } });
+    check('全书目标能保存', set.novel?.meta?.targetWords === 300000, set.novel?.meta?.targetWords);
+    const list = (await get(`${BASE}/api/novels`)).novels || [];
+    const item = list.find((n) => n.id === id);
+    check('书架列表带得出目标', item?.targetWords === 300000, item?.targetWords);
+    check('列表里也有当前字数', typeof item?.words === 'number' && item.words >= 0, item?.words);
+
+    // 非法值要夹住
+    const bad = await put(`${BASE}/api/novels/${id}`, { meta: { targetWords: 'abc' } });
+    check('非法目标被夹成 0', bad.novel?.meta?.targetWords === 0, bad.novel?.meta?.targetWords);
+    const big = await put(`${BASE}/api/novels/${id}`, { meta: { targetWords: 99999999 } });
+    check('超上限的目标被夹住', big.novel?.meta?.targetWords === 1000000, big.novel?.meta?.targetWords);
+    const neg = await put(`${BASE}/api/novels/${id}`, { meta: { targetWords: -1 } });
+    check('负数目标被夹成 0', neg.novel?.meta?.targetWords === 0, neg.novel?.meta?.targetWords);
+    // 存一次目标不能把别的 meta 字段弄丢
+    check('其它 meta 字段没丢',
+      neg.novel?.meta?.targetWordsPerChapter === before.meta?.targetWordsPerChapter
+      && neg.novel?.meta?.logline === before.meta?.logline,
+      `${neg.novel?.meta?.targetWordsPerChapter} / ${neg.novel?.meta?.logline}`);
+    await put(`${BASE}/api/novels/${id}`, { meta: { targetWords: 0 } });
+  }
+
+  // ---------------------------------------------------------------
   group('导入已有文稿');
   await checkManuscript(id);
 
