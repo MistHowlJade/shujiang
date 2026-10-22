@@ -16,7 +16,7 @@ import { buildTask, TASKS, TEMPLATE_SLOTS, TEMPLATE_VARS } from './prompts.js';
 import { buildEpub } from './epub.js';
 import { coverSvg, readCoverImage, saveCoverImage, deleteCoverImage } from './cover.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
-import { addWords, setGoal, statsSummary } from './stats.js';
+import { addWords, setGoal, statsSummary, statsDay } from './stats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.join(ROOT, 'web');
@@ -409,7 +409,7 @@ function writeChapter(n, index, cid, body) {
   const grown = countWords(n.chapters[index].content) - before;
   const hint = Math.floor(Number(counted));
   const delta = Number.isFinite(hint) && hint >= 0 ? Math.min(hint, COUNTED_MAX) : Math.max(0, grown);
-  if (delta > 0) addWords(n.id, delta);
+  if (delta > 0) addWords(n.id, delta, new Date(), cid);
 }
 
 const OUTLINE_KEYS = ['scene', 'characters', 'summary', 'hook'];
@@ -481,6 +481,11 @@ async function handleApi(req, res, url) {
       if (body.goal !== undefined) setGoal(body.goal);
       return sendJson(res, 200, statsSummary({ days: body.days || 14 }));
     }
+  }
+
+  // 某一天的明细：点开写作日历上的某一天
+  if (seg[1] === 'stats' && seg[2] === 'day' && seg.length === 3 && method === 'GET') {
+    return sendJson(res, 200, statsDay(url.searchParams.get('date')));
   }
 
   // 测试连通性 / 拉取模型列表

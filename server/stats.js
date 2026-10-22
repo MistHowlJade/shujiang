@@ -4,7 +4,7 @@
 // 导入旧稿、恢复快照、全书替换都不走这条路径，所以别人的字不会被算到你今天的产出里。
 // 存成 data/stats.json，一天一条，超过 400 天自动清掉最旧的。
 import path from 'node:path';
-import { DATA_DIR, readJson, writeJson } from './store.js';
+import { DATA_DIR, readJson, writeJson, getNovel } from './store.js';
 
 const STATS_FILE = path.join(DATA_DIR, 'stats.json');
 const KEEP_DAYS = 400;
@@ -36,8 +36,11 @@ function prune(days, now) {
   for (const k of keys) if (k < cutoff) delete days[k];
 }
 
-/** 记一笔「今天写了多少字」。delta <= 0（只删改、字数没涨）不计入 */
-export function addWords(novelId, delta, now = new Date()) {
+/**
+ * 记一笔「今天写了多少字」。delta <= 0（只删改、字数没涨）不计入。
+ * chapterId 给了就顺手记到章上 —— 这样点开日历某一天，能知道那天动的是哪几章。
+ */
+export function addWords(novelId, delta, now = new Date(), chapterId = '') {
   const d = Math.floor(Number(delta) || 0);
   if (d <= 0) return null;
   const s = loadStats();
@@ -46,6 +49,11 @@ export function addWords(novelId, delta, now = new Date()) {
   day.words = (Number(day.words) || 0) + d;
   if (!day.novels || typeof day.novels !== 'object') day.novels = {};
   day.novels[novelId] = (Number(day.novels[novelId]) || 0) + d;
+  if (chapterId) {
+    if (!day.chapters || typeof day.chapters !== 'object') day.chapters = {};
+    const byNovel = day.chapters[novelId] || (day.chapters[novelId] = {});
+    byNovel[chapterId] = (Number(byNovel[chapterId]) || 0) + d;
+  }
   prune(s.days, now);
   writeJson(STATS_FILE, s);
   return day;
@@ -98,4 +106,45 @@ export function statsSummary({ days = 14, now = new Date() } = {}) {
     total,
     byNovelToday: (todayRecord && todayRecord.novels) || {},
   };
+}
+
+/**
+ * 某一天的明细：那天总共写了多少、分到哪几部作品、每部作品动的是哪几章。
+ * 作品或章节后来被删了，这里显示成「已删除」而不是整条丢掉 —— 账本要留着。
+ */
+export function statsDay(date) {
+  const s = loadStats();
+  const raw = String(date || '').trim();
+  const key = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : dayKey();
+  const rec = s.days[key] || null;
+  const words = Number(rec?.words) || 0;
+  const rows = Object.entries(rec?.novels || {})
+    .map(([novelId, w]) => ({ novelId, words: Number(w) || 0 }))
+    .filter((r) => r.words > 0)
+    .sort((a, b) => b.words - a.words);
+
+  const novels = rows.map((row) => {
+    let novel = null;
+    try { novel = getNovel(row.novelId); } catch { novel = null; }
+    const chapterRows = Object.entries(rec?.chapters?.[row.novelId] || {})
+      .map(([chapterId, w]) => ({ chapterId, words: Number(w) || 0 }))
+      .filter((r) => r.words > 0)
+      .sort((a, b) => b.words - a.words);
+    return {
+      novelId: row.novelId,
+      title: novel?.title || '（已删除的作品）',
+      words: row.words,
+      chapters: chapterRows.map((c) => {
+        const ch = novel?.chapters?.find((x) => x.id === c.chapterId);
+        return {
+          chapterId: c.chapterId,
+          title: ch?.title || '（已删除的章节）',
+          no: ch?.no || 0,
+          words: c.words,
+        };
+      }),
+    };
+  });
+
+  return { date: key, words, goal: s.goal, novels };
 }

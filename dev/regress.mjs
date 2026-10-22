@@ -238,6 +238,11 @@ async function checkManuscript(novelId) {
 async function main() {
   console.log('书匠 · 回归自检');
 
+  // 自检会往章节里写字，那些字会记进码字统计 —— 跑之前存一份，跑完原样还回去，
+  // 免得自检把作者真实的日更记录搅乱。
+  const statsFile = path.join('data', 'stats.json');
+  const statsBackup = fs.existsSync(statsFile) ? fs.readFileSync(statsFile) : null;
+
   // 连不上就早点说清楚，别打一屏无意义的 FAIL
   try {
     await fetch(`${BASE}/api/novels`);
@@ -472,6 +477,35 @@ async function main() {
     const set = await post(`${BASE}/api/stats`, { goal: 2500 });
     check('日更目标可设置', set?.goal === 2500, set?.goal);
     await post(`${BASE}/api/stats`, { goal: 3000 });
+
+    // 写作日历点某一天：当天分作品、分章节的明细
+    const day = await get(`${BASE}/api/stats/day?date=2020-01-02`);
+    check('某天明细能取', day && day.date === '2020-01-02' && typeof day.words === 'number', JSON.stringify(day).slice(0, 80));
+    check('没有记录的那天返回 0 字', day.words === 0 && Array.isArray(day.novels) && day.novels.length === 0);
+    const today = await get(`${BASE}/api/stats/day`);
+    const pad = (n) => String(n).padStart(2, '0');
+    const now = new Date();
+    const todayKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    check('不传日期默认就是今天', today?.date === todayKey, `${today?.date} vs ${todayKey}`);
+
+    // 往章节里写字，看统计里能不能追到「哪一章」
+    const novel2 = await post(`${BASE}/api/novels`, { title: '统计明细测试', genre: '古风' });
+    const nid2 = novel2.novel?.id;
+    const ch2 = await post(`${BASE}/api/novels/${nid2}/chapters`, { title: '第一章 起', content: '短' });
+    const cid2 = ch2.chapter?.id;
+    const body = '他在灯下坐了很久，没有写字。'.repeat(20);
+    await req('PUT', `${BASE}/api/novels/${nid2}/chapters/${cid2}`, { title: '第一章 起', content: body });
+    const dayNow = await get(`${BASE}/api/stats/day?date=${todayKey}`);
+    const row = (dayNow.novels || []).find((n) => n.novelId === nid2);
+    check('写字记到了当天', !!row && row.words > 0, JSON.stringify(row));
+    check('当天明细带出了书名', row?.title === '统计明细测试', row?.title);
+    check('当天明细带出了章节', (row?.chapters || []).some((c) => c.chapterId === cid2 && c.words > 0), JSON.stringify(row?.chapters));
+    check('章节字数加起来等于当天字数', row && (row.chapters || []).reduce((sum, c) => sum + c.words, 0) === row.words,
+      `${row?.chapters?.reduce((sum, c) => sum + c.words, 0)} vs ${row?.words}`);
+    await req('DELETE', `${BASE}/api/novels/${nid2}`);
+    const trash2 = (await get(`${BASE}/api/trash`)).items || [];
+    const t2 = trash2.find((t) => t.id === nid2);
+    if (t2?.trashId) await req('DELETE', `${BASE}/api/trash/${t2.trashId}`);
   }
 
   // ---------------------------------------------------------------
@@ -486,6 +520,15 @@ async function main() {
   await req('DELETE', `${BASE}/api/trash`);
   const left = (await get(`${BASE}/api/novels`)).novels || [];
   check('测试作品已清理', left.length === 0, `剩 ${left.length} 部`);
+  // 码字统计还原成跑之前的样子
+  try {
+    if (statsBackup !== null) fs.writeFileSync(statsFile, statsBackup);
+    else if (fs.existsSync(statsFile)) fs.rmSync(statsFile);
+  } catch (err) {
+    console.log('  FAIL 码字统计没还原：' + err.message);
+    fail += 1;
+    fails.push('码字统计没还原');
+  }
 
   report();
 }

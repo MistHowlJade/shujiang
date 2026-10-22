@@ -816,7 +816,8 @@ function statsHeatmap(days, goal, today) {
         ${w.map((d) => {
           if (!d) return '<i class="hm-cell empty"></i>';
           const lv = level(d);
-          return `<i class="hm-cell lv${lv}${d.date === today ? ' today' : ''}" title="${d.date}　${fmtWords(d.words)} 字${goal ? `　目标 ${fmtWords(goal)}` : ''}"></i>`;
+          const tip = `${d.date}　${fmtWords(d.words)} 字${goal ? `　目标 ${fmtWords(goal)}` : ''}　点击看当天明细`;
+          return `<button type="button" class="hm-cell lv${lv}${d.date === today ? ' today' : ''}" data-date="${d.date}" title="${tip}"></button>`;
         }).join('')}
       </div>
     </div>`).join('');
@@ -894,7 +895,66 @@ async function openStatsModal() {
     box.querySelector('#goalSave').addEventListener('click', () => saveGoal(Math.max(0, Math.floor(Number(input.value) || 0))));
     box.querySelector('#goalZero').addEventListener('click', () => saveGoal(0));
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') box.querySelector('#goalSave').click(); });
+    // 日历上点某一天 → 看那天写了什么
+    box.querySelectorAll('.hm-cell[data-date]').forEach((cell) => {
+      cell.addEventListener('click', () => openStatsDay(cell.dataset.date));
+    });
   }, { wide: true });
+}
+
+/** 章节标题已经写着「第N章」就别再补一遍序号 */
+function dayChapterLabel(c) {
+  const title = String(c?.title || '').trim() || '未命名章节';
+  if (/第\s*[0-9零一二三四五六七八九十百千]+\s*[章回节]/.test(title)) return title;
+  return c?.no ? `第 ${c.no} 章　${title}` : title;
+}
+
+/** 点开写作日历上的某一天：那天写了多少、分到哪几部作品、每部动的是哪几章 */
+async function openStatsDay(date) {
+  let d;
+  try {
+    d = await api.get(`/api/stats/day?date=${encodeURIComponent(date)}`);
+  } catch {
+    return toast('这一天的记录读不出来', 'err');
+  }
+  const weekday = ['日', '一', '二', '三', '四', '五', '六'][new Date(`${date}T00:00:00`).getDay()];
+  const goal = Number(d.goal) || 0;
+  const pct = goal ? Math.min(100, Math.round((d.words / goal) * 100)) : 0;
+  const list = d.novels?.length
+    ? d.novels.map((nv) => `
+      <div class="day-novel">
+        <div class="day-novel-head">
+          <span class="day-novel-title">${esc(nv.title)}</span>
+          <span class="day-novel-words">${fmtWords(nv.words)} 字</span>
+        </div>
+        ${nv.chapters.length ? `<ul class="day-chapters">${nv.chapters.map((c) => `
+          <li>
+            <button type="button" class="day-chapter" data-novel="${esc(nv.novelId)}" data-chapter="${esc(c.chapterId)}">
+              <span class="day-chapter-title">${esc(dayChapterLabel(c))}</span>
+              <span class="day-chapter-words">${fmtWords(c.words)} 字</span>
+            </button>
+          </li>`).join('')}</ul>` : '<div class="day-note">这天没有记到具体章节。</div>'}
+      </div>`).join('')
+    : '<div class="day-empty">这一天没有写作记录。</div>';
+
+  showModal(`
+    <h3>${esc(date)} · 周${weekday}</h3>
+    <p class="modal-sub">${d.words ? `当天写了 ${fmtWords(d.words)} 字` : '当天没有写作记录'}${goal ? `，日更目标 ${fmtWords(goal)} 字` : ''}。</p>
+    ${goal && d.words ? `<div class="stat-track big"><i style="width:${pct}%"></i></div>
+      <div class="sh-goal">${pct}% · 目标 ${fmtWords(goal)} 字/天</div>` : ''}
+    <div class="day-list">${list}</div>
+    <div class="modal-foot"><button class="btn btn-text" id="dayClose">关闭</button></div>`, (box) => {
+    box.querySelector('#dayClose').onclick = closeModal;
+    box.querySelectorAll('[data-chapter]').forEach((btn) => {
+      btn.onclick = async () => {
+        const novelId = btn.dataset.novel;
+        const chapterId = btn.dataset.chapter;
+        closeModal();
+        await openNovel(novelId, { chapterId }).catch(() => {});
+        toast('已跳到那一章', 'ok');
+      };
+    });
+  });
 }
 
 function openHealthReport() {
