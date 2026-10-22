@@ -528,6 +528,22 @@ async function main() {
   }
 
   // ---------------------------------------------------------------
+  group('体检的忽略清单');
+  {
+    const ign = [{ key: 'health|gap|甲', label: '人物断档：甲', ts: 1 }];
+    await put(`${BASE}/api/novels/${id}`, { meta: { healthIgnored: ign } });
+    const n2 = (await get(`${BASE}/api/novels/${id}`)).novel;
+    check('体检忽略清单能存住', Array.isArray(n2.meta?.healthIgnored) && n2.meta.healthIgnored.length === 1,
+      JSON.stringify(n2.meta?.healthIgnored));
+    check('忽略项带着说明', n2.meta?.healthIgnored?.[0]?.label === '人物断档：甲');
+    // 两份清单互不干扰
+    check('跟校对的忽略清单互不干扰', (n2.meta?.proofIgnored || []).length === 0);
+    await put(`${BASE}/api/novels/${id}`, { meta: { healthIgnored: [] } });
+    const n3 = (await get(`${BASE}/api/novels/${id}`)).novel;
+    check('体检忽略清单能清空', (n3.meta?.healthIgnored || []).length === 0);
+  }
+
+  // ---------------------------------------------------------------
   group('导出附带材料（大纲 / 人物小传）');
   {
     const n2 = await post(`${BASE}/api/novels`, { title: '附带材料测试' });

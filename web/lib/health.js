@@ -193,8 +193,50 @@ export function buildHealthReport(novel) {
   };
 }
 
-export function healthMarkdown(r) {
-  const out = [];
+/**
+ * 体检项的忽略指纹：种类 + 标识。
+ * 跟校对的忽略机制一样，认的是「哪一类 + 哪一条」，不认位置。
+ */
+export function healthKey(kind, id) {
+  return `health|${kind}|${String(id ?? '')}`;
+}
+
+/**
+ * 按忽略清单过滤体检结果，并把各类计数一起修正。
+ * @param {object} report buildHealthReport 的结果
+ * @param {{key:string}[]} ignored 忽略清单
+ */
+export function applyHealthIgnored(report, ignored = []) {
+  const set = new Set(ignored.map((x) => (typeof x === 'string' ? x : x?.key)).filter(Boolean));
+  const out = { ...report };
+  const hidden = {};
+  const cut = (name, kind, idOf, totalName) => {
+    const before = report[name] || [];
+    const after = before.filter((x) => !set.has(healthKey(kind, idOf(x))));
+    out[name] = after;
+    hidden[kind] = before.length - after.length;
+    if (totalName) out[totalName] = Math.max(0, (report[totalName] || 0) - hidden[kind]);
+  };
+  cut('outliers', 'outlier', (x) => x.id, 'outlierTotal');
+  cut('duplicates', 'dup', (x) => String(x.sample || '').slice(0, 40), 'duplicateTotal');
+  cut('longParagraphs', 'longpara', (x) => x.id, 'longParagraphTotal');
+  cut('gaps', 'gap', (x) => x.name, 'gapTotal');
+  cut('staleThreads', 'thread', (x) => x.text);
+  cut('phrases', 'phrase', (x) => x.text);
+  out.hidden = hidden;
+  // 「有几类可以处理」要按过滤后的重新算，不然忽略了还照样说有 3 类
+  out.issueKinds = [
+    out.outliers.length,
+    out.duplicates.length,
+    out.longParagraphs.length,
+    (out.lowDialogue?.length || 0) + (out.highDialogue?.length || 0),
+    out.gaps.length,
+    out.staleThreads.length,
+  ].filter((n) => n > 0).length;
+  return out;
+}
+
+export function healthMarkdown(r) {  const out = [];
   const push = (s = '') => out.push(s);
   push(`# 《${r.title}》全书体检`);
   push('');

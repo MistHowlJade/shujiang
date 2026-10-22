@@ -11,6 +11,7 @@
 import { diffProse, diffHtml, diffSideHtml, splitSentences, lcsOps } from '../web/lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from '../web/lib/goal.js';
 import { scanProofChapter, buildProofReport } from '../web/lib/proof.js';
+import { buildHealthReport, applyHealthIgnored, healthKey } from '../web/lib/health.js';
 
 let pass = 0;
 let fail = 0;
@@ -250,6 +251,53 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   // 全书报告里也一样带着指纹
   const report = buildProofReport({ id: 'n_x', title: '书', chapters: [ch] }, 'book', null);
   check('全书报告里的问题也有指纹', (report.issues || []).every((i) => !!i.key));
+}
+
+// ---------------- 体检：忽略用的指纹 ----------------
+{
+  // 造一本能触发体检项的作品
+  const novel = {
+    id: 'n_h', title: '体检测试',
+    bible: { characters: [{ name: '甲', role: '主角' }, { name: '乙', role: '配角' }], world: [], timeline: [] },
+    chapters: [],
+  };
+  for (let i = 1; i <= 6; i++) {
+    novel.chapters.push({
+      id: `c_h${i}`, no: i, title: `第${i}章`,
+      content: i === 1 ? '甲站在巷口。'.repeat(60) : `乙走过长街。${'风很大。'.repeat(80)}`,
+      memory: i === 1 ? { summary: '甲在巷口。', characters: ['甲'], events: ['甲出现'], unresolved: ['巷口的剑'] } : null,
+    });
+  }
+  const r = buildHealthReport(novel);
+  check('体检能扫出重复段落', r.duplicates.length >= 1, JSON.stringify(r.duplicates.map((d) => d.sample.slice(0, 12))));
+  check('体检能扫出人物断档', r.gaps.length >= 1, JSON.stringify(r.gaps.map((g) => g.name)));
+  check('体检能扫出未回收线索', r.staleThreads.length >= 1, JSON.stringify(r.staleThreads.map((t) => t.text)));
+
+  // 指纹格式
+  check('体检指纹带种类和标识', healthKey('gap', '甲') === 'health|gap|甲', healthKey('gap', '甲'));
+
+  // 忽略一条人物断档
+  const key = healthKey('gap', r.gaps[0].name);
+  const filtered = applyHealthIgnored(r, [{ key }]);
+  check('忽略后那条不见了', filtered.gaps.length === r.gaps.length - 1, `${filtered.gaps.length} vs ${r.gaps.length}`);
+  check('忽略后计数也改了', filtered.gapTotal === r.gapTotal - 1, `${filtered.gapTotal} vs ${r.gapTotal}`);
+  check('忽略别的类不影响这条', filtered.duplicates.length === r.duplicates.length);
+  check('忽略后「有几类问题」重算了', filtered.issueKinds <= r.issueKinds, `${filtered.issueKinds} vs ${r.issueKinds}`);
+
+  // 全都忽略了 → issueKinds 应该变小
+  const allKeys = [
+    ...r.gaps.map((g) => healthKey('gap', g.name)),
+    ...r.duplicates.map((d) => healthKey('dup', String(d.sample || '').slice(0, 40))),
+    ...r.staleThreads.map((t) => healthKey('thread', t.text)),
+    ...r.outliers.map((o) => healthKey('outlier', o.id)),
+  ].map((k) => ({ key: k }));
+  const cleared = applyHealthIgnored(r, allKeys);
+  check('全忽略后问题类数减少', cleared.issueKinds < r.issueKinds, `${cleared.issueKinds} vs ${r.issueKinds}`);
+  check('全忽略后各列表都空了', cleared.gaps.length === 0 && cleared.duplicates.length === 0 && cleared.staleThreads.length === 0);
+
+  // 忽略清单写成字符串也能认
+  const asStrings = applyHealthIgnored(r, [key]);
+  check('忽略清单用字符串也能认', asStrings.gaps.length === r.gaps.length - 1);
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);

@@ -2244,6 +2244,21 @@ button.hm-cell:focus-visible { outline: 1px solid var(--accent); outline-offset:
 }
 .health-row > span i { flex: 0 0 auto; font-style: normal; font-size: 10px; color: var(--text-4); }
 .health-row > em { flex: 0 0 auto; font-style: normal; font-size: 10.5px; color: var(--text-3); }
+/* 忽略：把这一条从体检里去掉 */
+.health-item { display: flex; align-items: center; gap: 4px; }
+.health-item > .health-row { flex: 1; min-width: 0; }
+.health-item > .health-dup { flex: 1; min-width: 0; }
+.health-ignore {
+  flex: 0 0 auto; width: 22px; height: 22px; padding: 0;
+  display: grid; place-items: center;
+  border: 1px solid transparent; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-4);
+  font-size: 13px; line-height: 1; cursor: pointer; opacity: 0;
+  transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.health-item:hover .health-ignore, .health-ignore:focus-visible { opacity: 1; }
+.health-ignore:hover { background: var(--danger-bg); color: var(--danger); border-color: var(--border); }
+.health-ignore:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-bg); }
 .health-sub { margin-top: 8px; font-size: 10px; color: var(--text-4); }
 .health-chip-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
 .health-chip {

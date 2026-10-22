@@ -3,7 +3,7 @@
 import { $, $$, esc, ico, debounce, toast, countWords, fmtWords, fmtDate, fmtAgo } from './lib/util.js';
 import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads } from './lib/data.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
-import { buildHealthReport, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
+import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
 import { diffProse, diffHtml, diffSideHtml } from './lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from './lib/goal.js';
 
@@ -992,41 +992,53 @@ async function openStatsDay(date) {
 
 function openHealthReport() {
   if (!S.novel) return toast('先打开一部作品', 'err');
-  const r = buildHealthReport(S.novel);
+  // 忽略清单：跟校对的忽略机制一样，跟着作品走
+  const ignoreList = () => (Array.isArray(S.novel.meta?.healthIgnored) ? S.novel.meta.healthIgnored : []);
+  const saveIgnoreList = (list) => {
+    S.novel.meta = { ...(S.novel.meta || {}), healthIgnored: list };
+    saveNovelPart({ meta: S.novel.meta });
+  };
+  const r0 = buildHealthReport(S.novel);
+  const r = applyHealthIgnored(r0, ignoreList());
+  const ignoredCount = ignoreList().length;
   const total = r.chapters.length;
   const written = r.written.length;
   const pct = (v) => `${(v * 100).toFixed(1)}%`;
   const metric = (value, label, sub) => `<div class="health-metric"><b>${value}</b><span>${label}</span>${sub ? `<em>${sub}</em>` : ''}</div>`;
+  // 每一条后面挂一个「忽略」，误报就别再报了
+  const withIgnore = (inner, kind, id, label) => `<div class="health-item">
+    ${inner}
+    <button type="button" class="health-ignore" data-health-ignore="${esc(healthKey(kind, id))}" data-health-label="${esc(label)}" title="忽略这一条（以后不再提示）">×</button>
+  </div>`;
 
   const outlierRows = r.outliers.map((c) => {
     const delta = c.ratio >= 1 ? `偏长 ${Math.round((c.ratio - 1) * 100)}%` : `偏短 ${Math.round((1 - c.ratio) * 100)}%`;
-    return `<button type="button" class="health-row" data-health-chapter="${esc(c.id)}">
+    return withIgnore(`<button type="button" class="health-row" data-health-chapter="${esc(c.id)}">
       <span>第 ${c.no} 章 · ${esc(c.title)}</span><em>${fmtWords(c.words)} 字 · ${delta}</em>
-    </button>`;
+    </button>`, 'outlier', c.id, `第 ${c.no} 章 ${c.title}`);
   }).join('');
 
-  const duplicateRows = r.duplicates.map((d) => `
-    <div class="health-dup">
+  const duplicateRows = r.duplicates.map((d) => withIgnore(`<div class="health-dup">
       <div class="health-quote">${esc(d.sample)}</div>
       <div class="health-dup-meta"><span>${d.count} 次</span>${d.chapters.map((c) => healthChip(c)).join('')}</div>
-    </div>`).join('');
+    </div>`, 'dup', String(d.sample || '').slice(0, 40), `重复段落：${String(d.sample || '').slice(0, 20)}…`)).join('');
 
   const phraseBtns = r.phrases.map((p) => `<button type="button" class="health-phrase" data-health-phrase="${esc(p.text)}" title="出现在 ${p.chapters.length} 章，共 ${p.count} 次；点击去全书查找">${esc(p.text)}<b>${p.count}</b></button>`).join('');
 
-  const longRows = r.longParagraphs.map((c) => `<button type="button" class="health-row" data-health-chapter="${esc(c.id)}">
+  const longRows = r.longParagraphs.map((c) => withIgnore(`<button type="button" class="health-row" data-health-chapter="${esc(c.id)}">
     <span>第 ${c.no} 章 · ${esc(c.title)}</span><em>${c.count} 段 · 最长 ${c.max} 字</em>
-  </button>`).join('');
+  </button>`, 'longpara', c.id, `第 ${c.no} 章 ${c.title}`)).join('');
 
   const gapRows = r.gaps.map((g) => {
     const attr = g.id ? ` data-health-chapter="${esc(g.id)}"` : ' disabled';
     const role = g.role ? `<i>${esc(g.role)}</i>` : '';
     const meta = g.lastNo ? `第 ${g.lastNo} 章后未再出现 · 已隔 ${g.gap} 章` : '尚未在章节记忆中出现';
-    return `<button type="button" class="health-row"${attr}><span>${esc(g.name)}${role}</span><em>${meta}</em></button>`;
+    return withIgnore(`<button type="button" class="health-row"${attr}><span>${esc(g.name)}${role}</span><em>${meta}</em></button>`, 'gap', g.name, `人物断档：${g.name}`);
   }).join('');
 
-  const threadRows = r.staleThreads.map((t) => `<button type="button" class="health-row" data-health-chapter="${esc(t.latest.id)}">
+  const threadRows = r.staleThreads.map((t) => withIgnore(`<button type="button" class="health-row" data-health-chapter="${esc(t.latest.id)}">
     <span><b class="health-thread-kind">未决</b>${esc(t.text)}</span><em>第 ${t.latest.no} 章</em>
-  </button>`).join('');
+  </button>`, 'thread', t.text, `未决线索：${String(t.text || '').slice(0, 20)}`)).join('');
 
   const noMemory = r.written.length > 0 && r.memCount === 0;
   const caution = r.issueKinds > 0 || noMemory;
@@ -1051,6 +1063,15 @@ function openHealthReport() {
     <div class="health-verdict${caution ? '' : ' ok'}">
       <svg class="ico"><use href="#${caution ? 'i-info' : 'i-check'}" /></svg>
       <span>${verdict}${verdictSub ? `<em>${verdictSub}</em>` : ''}</span>
+    </div>
+    <div class="proof-ignored" id="healthIgnoredBox" hidden>
+      <div class="proof-ignored-head">
+        <span id="healthIgnoredTitle">已忽略</span>
+        <span style="flex:1"></span>
+        <button class="btn btn-sm btn-text" id="healthRestoreAll">全部恢复</button>
+        <button class="icon-btn sm" id="healthIgnoredClose" title="收起">${ico('x')}</button>
+      </div>
+      <div class="proof-ignored-list" id="healthIgnoredList"></div>
     </div>
     <div class="health-grid">
       <section class="health-card">
@@ -1110,6 +1131,8 @@ function openHealthReport() {
     box.querySelector('#healthClose').onclick = closeModal;
     box.querySelector('#healthRefresh').onclick = () => openHealthReport();
     box.querySelector('#healthCopy').onclick = () => copyHealthReport(r);
+    box.querySelector('#healthIgnoredClose')?.addEventListener('click', () => { box.querySelector('#healthIgnoredBox').hidden = true; });
+    box.querySelector('#healthRestoreAll')?.addEventListener('click', () => { saveIgnoreList([]); openHealthReport(); });
     box.querySelectorAll('[data-health-chapter]').forEach((el) => {
       el.onclick = () => {
         closeModal();
@@ -1122,6 +1145,39 @@ function openHealthReport() {
         openFind(el.dataset.healthPhrase);
       };
     });
+    // 忽略：点 × 就把这一条记下来，以后体检不再报
+    box.querySelectorAll('[data-health-ignore]').forEach((el) => {
+      el.onclick = (e) => {
+        e.stopPropagation();
+        const list = ignoreList();
+        const key = el.dataset.healthIgnore;
+        if (list.some((x) => x.key === key)) return;
+        list.push({ key, label: el.dataset.healthLabel || '', ts: Date.now() });
+        saveIgnoreList(list.slice(-300));
+        openHealthReport();   // 重新体检，已忽略的自然不见了
+        toast('已忽略这一条', 'ok');
+      };
+    });
+    // 已忽略的清单
+    const ignBox = box.querySelector('#healthIgnoredBox');
+    if (ignBox) {
+      const list = ignoreList();
+      ignBox.hidden = !list.length;
+      if (list.length) {
+        box.querySelector('#healthIgnoredTitle').textContent = `已忽略 ${list.length} 条`;
+        box.querySelector('#healthIgnoredList').innerHTML = list.slice().reverse().map((x) => `
+          <div class="proof-ignored-row">
+            <span class="proof-main"><span class="proof-msg">${esc(x.label || x.key)}</span></span>
+            <button type="button" class="btn btn-sm btn-text" data-health-restore="${esc(x.key)}">恢复</button>
+          </div>`).join('');
+        box.querySelectorAll('[data-health-restore]').forEach((el) => {
+          el.onclick = () => {
+            saveIgnoreList(ignoreList().filter((x) => x.key !== el.dataset.healthRestore));
+            openHealthReport();
+          };
+        });
+      }
+    }
   }, { wide: true });
 }
 
