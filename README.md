@@ -85,6 +85,12 @@ tools\node\node.exe dev\regress.mjs
 
 覆盖 59 项：提示词模板的变量插值、章节落盘字段、11 个板块的片段导入、版本历史与导出、EPUB 的 zip 结构、回收站往返、全局检索、导入已有文稿的章节切分。全部通过时退出码为 0；跑完会自动清掉自己建的测试作品。
 
+还有一个模块引用自检，专门查拆模块后最容易出的错（import 了不存在的名字、忘了 import、lib 里还在摸全局状态）：
+
+```
+tools\node\node.exe dev\check-refs.mjs
+```
+
 ---
 
 ## 功能
@@ -468,10 +474,16 @@ server/
 web/
   index.html   应用骨架 + SVG 图标
   style.css    设计系统（明暗双主题令牌）
-  app.js       前端全部逻辑
+  app.js       前端主逻辑（视图、交互、命令面板）
+  lib/
+    util.js    通用小工具（DOM 选择、转义、格式化、提示条）
+    data.js    纯数据helpers（人物出场索引、线索汇总、修订计数）
+    proof.js   文字校对规则引擎
+    health.js  全书体检统计
 dev/
   mock-openai.js      假模型调试服务（可选，不联网）
   regress.mjs         回归自检（改完代码跑一遍）
+  check-refs.mjs      模块引用自检（拆模块后跑一遍）
   gen-large-novel.js  生成大稿用于性能测试（120 章 × 3000 字只需几秒）
 tools/node/    项目内便携 Node 运行时（可删，改用系统 Node）
 ```
