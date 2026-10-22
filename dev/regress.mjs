@@ -11,6 +11,7 @@
 //   - 片段导入 11 个板块按真实导出格式落盘
 //   - 版本历史、章节移动、导出三种格式、回收站往返、全局检索
 //   - EPUB 的 zip 结构（mimetype 不压缩、正文与目录齐全）
+//   - 导入已有文稿的章节切分（第X章 / 第X回 / 序章 / 分卷 / 行文不误切）
 //
 // 全部通过时退出码为 0，可直接挂进 CI 或提交前的手动检查。
 // ===========================================================================
@@ -89,9 +90,51 @@ function checkEpub(buf, chapters) {
   check('EPUB 目录含全部章节', missingNav.length === 0, missingNav.join(','));
 }
 
+/** 导入已有文稿的章节切分 */
+async function checkManuscript(novelId) {
+  const NL = '\n';
+  const parse = async (text) => {
+    // 导入是「追加到现有章节末尾」，所以先清空再导
+    await put(`${BASE}/api/novels/${novelId}`, { chapters: [], outline: { volumes: [], notes: '' } });
+    await post(`${BASE}/api/novels/${novelId}/import`, { text });
+    const n = (await get(`${BASE}/api/novels/${novelId}`)).novel;
+    return {
+      chapters: n.chapters.map((c) => ({ title: c.title, content: c.content || '' })),
+      volumes: (n.outline?.volumes || []).map((v) => v.name),
+    };
+  };
+
+  let t = await parse(['第一章 落霜', '正文一', '第二章 归途', '正文二'].join(NL));
+  check('文稿切成 2 章', t.chapters.length === 2, JSON.stringify(t.chapters.map((c) => c.title)));
+  check('章节内容对得上', t.chapters[0]?.content === '正文一');
+
+  t = await parse(['第一回', '甲', '第二回', '乙'].join(NL));
+  check('「第X回」也算章节', t.chapters.length === 2);
+
+  t = await parse(['序章', '甲', '第一章', '乙', '番外', '丙'].join(NL));
+  check('序章 / 番外算章节', t.chapters.length === 3, JSON.stringify(t.chapters.map((c) => c.title)));
+
+  t = await parse(['第一卷 少年游', '第一章', '甲', '第二卷 江湖路', '第二章', '乙'].join(NL));
+  check('文稿分出 2 卷', t.volumes.length === 2, JSON.stringify(t.volumes));
+
+  t = await parse(['就是一段普通文字', '第二行'].join(NL));
+  check('没有章节标记时整篇当一章', t.chapters.length === 1);
+
+  t = await parse('');
+  check('空文稿不报错', t.chapters.length === 0);
+
+  // 正文里以「第N章 / 第N卷」开头的行不是标题，不能误切
+  const many = [];
+  for (let i = 1; i <= 12; i++) many.push(`第${i}章 第${i}节`, `第${i}章的内容`);
+  t = await parse(many.join(NL));
+  check('正文里的「第N章」不误切', t.chapters.length === 12, `切出 ${t.chapters.length} 章`);
+
+  t = await parse(['第一卷 少年游', '第一章', '第1卷的结局让人意外', '第2章', '乙'].join(NL));
+  check('正文里的「第N卷」不误切', t.chapters.length === 2 && t.volumes.length === 1, `章=${t.chapters.length} 卷=${t.volumes.length}`);
+}
+
 async function main() {
   console.log('书匠 · 回归自检');
-  console.log('目标：', BASE);
 
   // 连不上就早点说清楚，别打一屏无意义的 FAIL
   try {
@@ -219,6 +262,10 @@ async function main() {
 
   const search = await get(`${BASE}/api/library-search?q=${encodeURIComponent('正文')}`);
   check('全局搜索能搜到', (search.hits?.length || search.results?.length || 0) >= 1);
+
+  // ---------------------------------------------------------------
+  group('导入已有文稿');
+  await checkManuscript(id);
 
   // ---------------------------------------------------------------
   group('清理');

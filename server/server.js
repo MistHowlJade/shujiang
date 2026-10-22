@@ -1208,18 +1208,41 @@ function cleanHeading(line) {
     .trim();
 }
 
+/**
+ * 紧凑写法很容易把行文误判成标题：「第1章的内容」「第2卷的结局」这类句子
+ * 长得和标题一模一样。中文标题极少以这些虚词开头，所以标题若以它们开头，
+ * 基本可以断定这是行文，不该切章。
+ */
+const PROSE_LEAD_RE = /^[的了地得着之是在这那我你他她它们把被从向对给让说就也都还又很不要会能可以个已将更最只]/;
+
 /** 判断一行是不是卷 / 章标题；是就返回结构化信息，不是返回 null */
 function headingInfo(line) {
   const t = cleanHeading(line);
   if (!t) return null;
   let m = t.match(VOLUME_RE) || t.match(VOLUME_SHORT_RE);
-  if (m) return { kind: 'volume', name: (m[1] || '').trim(), raw: t };
+  if (m) {
+    const name = (m[1] || '').trim();
+    if (name && PROSE_LEAD_RE.test(name)) return null;
+    return { kind: 'volume', name, raw: t };
+  }
   m = t.match(VOLUME_TIGHT_RE) || t.match(VOLUME_SHORT_TIGHT_RE);
-  if (m) return { kind: 'volume', name: (m[2] || '').trim(), raw: t };
+  if (m) {
+    const name = (m[2] || '').trim();
+    if (name && PROSE_LEAD_RE.test(name)) return null;   // 「第1卷的结局」是行文
+    return { kind: 'volume', name, raw: t };
+  }
   m = t.match(CHAPTER_RE);
-  if (m) return { kind: 'chapter', title: (m[1] || '').trim() || t, raw: t };
+  if (m) {
+    const title = (m[1] || '').trim();
+    if (title && PROSE_LEAD_RE.test(title)) return null;  // 「第1章 的内容」是行文
+    return { kind: 'chapter', title: title || t, raw: t };
+  }
   m = t.match(CHAPTER_TIGHT_RE);
-  if (m) return { kind: 'chapter', title: (m[2] || '').trim() || t, raw: t };
+  if (m) {
+    const title = (m[2] || '').trim();
+    if (title && PROSE_LEAD_RE.test(title)) return null;  // 「第1章的内容」是行文
+    return { kind: 'chapter', title: title || t, raw: t };
+  }
   if (CHAPTER_ALT_RE.test(t)) return { kind: 'chapter', title: t, raw: t };
   return null;
 }
