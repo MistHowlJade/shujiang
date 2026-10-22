@@ -5,6 +5,7 @@ import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryC
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
 import { diffProse, diffHtml, diffSideHtml } from './lib/diff.js';
+import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase } from './lib/goal.js';
 
 /* 阅读进度只存在本浏览器，不写作品 JSON，也不走服务端 */
 const READER_PROGRESS_KEY = 'shu.reader.progress.v1';
@@ -307,7 +308,7 @@ function setView(v) {
   $$('.view').forEach((el) => el.classList.toggle('on', el.id === `view-${v}`));
   $$('#topnav .tab').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
   if (v === 'studio') renderStudio();
-  if (v === 'bible') renderBible();
+  if (v === 'bible') { renderBible(); loadStats(); }
   if (v === 'shelf') { renderShelf(); loadStats(); }
   if (v === 'settings') renderSettings();
 }
@@ -354,28 +355,6 @@ function coverOf(title) {
  * 全书目标：设了就报进度，没设返回 null。
  * 书架卡片拿的是列表数据（words + targetWords），工作台拿的是完整作品（meta + chapters），两种都认。
  */
-function bookGoalOf(n) {
-  if (!n) return null;
-  const target = Math.floor(Number(n.meta?.targetWords ?? n.targetWords) || 0);
-  if (!target) return null;
-  const words = Array.isArray(n.chapters)
-    ? n.chapters.reduce((s, c) => s + countWords(c.content || ''), 0)
-    : (Number(n.words) || 0);
-  return {
-    target,
-    words,
-    pct: Math.min(100, Math.round((words / target) * 100)),
-    left: Math.max(0, target - words),
-    done: words >= target,
-  };
-}
-
-/** 目标字数用「万」更顺眼：300000 → 30 万 */
-function fmtGoal(n) {
-  const v = Math.floor(Number(n) || 0);
-  return v >= 10000 ? `${Math.round(v / 10000)} 万` : String(v);
-}
-
 function renderShelf() {
   const q = ($('#shelfSearch').value || '').trim().toLowerCase();
   const list = S.novels.filter((n) => !q
@@ -394,6 +373,14 @@ function renderShelf() {
     const prog = getReaderProgress(n.id);
     const hasProgress = !!prog;
     const goal = bookGoalOf(n);
+    const est = finishEstimate(goal, S.stats);
+    const estText = goal
+      ? (goal.done
+        ? ' · 已达成目标'
+        : est?.days
+          ? ` · 还差 ${fmtWords(goal.left)} 字 · 按日均 ${fmtWords(est.rate)} 字算${daysPhrase(est.days)}，预计 ${datePhrase(est.date)}完稿`
+          : ` · 还差 ${fmtWords(goal.left)} 字`)
+      : '';
     const div = document.createElement('div');
     div.className = 'book';
     div.style.setProperty('--cover', coverOf(n.title));
@@ -407,7 +394,7 @@ function renderShelf() {
         <span>${n.chapterCount} 章 · ${fmtWords(n.words)} 字${todayOf(n.id) ? ` · <em class="bk-today">今日 ${fmtWords(todayOf(n.id))} 字</em>` : ''}</span>
         <span>${esc(fmtDate(n.updatedAt).slice(5, 10))}</span>
       </div>
-      ${goal ? `<div class="bk-goal" title="全书目标 ${fmtGoal(goal.target)} 字 · 已完成 ${goal.pct}%${goal.done ? ' · 已达成' : ` · 还差 ${fmtWords(goal.left)} 字`}">
+      ${goal ? `<div class="bk-goal" title="全书目标 ${fmtGoal(goal.target)} 字 · 已完成 ${goal.pct}%${esc(estText)}">
         <div class="bk-goal-bar"><i style="width:${goal.pct}%"></i></div>
         <span class="bk-goal-text">${goal.done ? '已达成目标' : `目标 ${fmtGoal(goal.target)} 字`}</span>
         <span class="bk-goal-pct">${goal.pct}%</span>
@@ -768,6 +755,8 @@ async function loadStats({ force = false } = {}) {
     return S.stats;                 // 统计读不到不影响写作，静默跳过
   }
   renderStats();
+  // 完稿预测要用到日均产出；统计回来后书架上的目标提示要跟着更新
+  if (S.view === 'shelf') renderShelf();
   return S.stats;
 }
 
@@ -2225,8 +2214,14 @@ function renderTopbarActions() {
   if (!S.novel) { mid.textContent = ''; mid.onclick = null; return; }
   const total = S.novel.chapters.reduce((s, c) => s + countWords(c.content), 0);
   const goal = bookGoalOf(S.novel);
+  const est = finishEstimate(goal, S.stats);
+  const goalTip = goal
+    ? `全书目标 ${fmtGoal(goal.target)} 字，已完成 ${goal.pct}%`
+      + (goal.done ? ' · 已达成' : ` · 还差 ${fmtWords(goal.left)} 字`)
+      + (est?.days ? ` · 按日均 ${fmtWords(est.rate)} 字算${daysPhrase(est.days)}，预计 ${datePhrase(est.date)}完稿` : '')
+    : '';
   const goalTag = goal
-    ? `<span class="top-goal${goal.done ? ' done' : ''}" title="全书目标 ${fmtGoal(goal.target)} 字，已完成 ${goal.pct}%${goal.done ? ' · 已达成' : ` · 还差 ${fmtWords(goal.left)} 字`}">目标 ${fmtGoal(goal.target)} 字 · ${goal.pct}%</span>`
+    ? `<span class="top-goal${goal.done ? ' done' : ''}" title="${esc(goalTip)}">目标 ${fmtGoal(goal.target)} 字 · ${goal.pct}%</span>`
     : '';
   mid.innerHTML = `<span title="点击导出这部作品">${ico('book')}《${esc(S.novel.title)}》<span class="dim-text">${S.novel.chapters.length} 章 · ${fmtWords(total)} 字</span>${goalTag}${ico('download')}</span>`;
   mid.onclick = exportBook;
@@ -6950,8 +6945,12 @@ function renderStyleTab(host, n) {
       const need = perCh ? Math.ceil(target / perCh) : 0;
       const have = (n.chapters || []).length;
       const pct = Math.min(100, Math.round((words / target) * 100));
+      const left = Math.max(0, target - words);
+      const g = { target, words, pct, left, done: words >= target };
+      const est = finishEstimate(g, S.stats);
       hint.textContent = `已写 ${fmtWords(words)} 字（${pct}%）`
-        + (need ? `；按每章 ${fmtWords(perCh)} 字算，大约要写 ${need} 章，现在 ${have} 章` : '');
+        + (need ? `；按每章 ${fmtWords(perCh)} 字算，大约要写 ${need} 章，现在 ${have} 章` : '')
+        + (est?.days ? `。${daysPhrase(est.days)}，预计 ${datePhrase(est.date)}完稿` : est && !est.done ? '。最近没动笔，算不出还要多久' : '');
     };
     // 顶栏标签和书架卡片上的进度条要跟着变
     const syncUI = () => {

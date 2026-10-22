@@ -9,6 +9,7 @@
 // ===========================================================================
 
 import { diffProse, diffHtml, diffSideHtml, splitSentences, lcsOps } from '../web/lib/diff.js';
+import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase } from '../web/lib/goal.js';
 
 let pass = 0;
 let fail = 0;
@@ -114,6 +115,69 @@ check('空文本不炸', splitSentences('').length === 0);
   check('长文本找出了多出来的那一句', d.added === 4 && d.removed === 0, `added=${d.added} removed=${d.removed}`);
   check('长文本的其余部分全判为相同', d.same === 12000, `same=${d.same}`);
 }
+
+// ---------------- 全书目标与完稿预测 ----------------
+
+// 目标字数格式
+check('30 万显示成「30 万」', fmtGoal(300000) === '30 万', fmtGoal(300000));
+check('小于一万不换算', fmtGoal(8000) === '8000', fmtGoal(8000));
+
+// 没设目标
+check('没设目标返回 null', bookGoalOf({ chapters: [{ content: 'abc' }] }) === null);
+check('空对象返回 null', bookGoalOf(null) === null);
+
+// 完整作品（有 chapters）
+{
+  const n = { meta: { targetWords: 100000 }, chapters: [{ content: '字'.repeat(25000) }, { content: '字'.repeat(25000) }] };
+  const g = bookGoalOf(n);
+  check('进度按正文算', g.words === 50000, String(g.words));
+  check('百分比对得上', g.pct === 50, String(g.pct));
+  check('还差多少对得上', g.left === 50000, String(g.left));
+  check('没写完就是没完成', g.done === false);
+}
+
+// 书架列表数据（只有 words / targetWords）
+{
+  const g = bookGoalOf({ words: 20000, targetWords: 100000 });
+  check('列表数据也能算', g && g.pct === 20 && g.left === 80000, JSON.stringify(g));
+}
+
+// 写超了
+{
+  const g = bookGoalOf({ words: 150000, targetWords: 100000 });
+  check('写超了封顶 100%', g.pct === 100, String(g.pct));
+  check('写超了还差 0', g.left === 0, String(g.left));
+  check('写超了算已完成', g.done === true);
+}
+
+// 完稿预测
+{
+  const g = { target: 100000, words: 20000, pct: 20, left: 80000, done: false };
+  const est = finishEstimate(g, { dailyRate: 2000 }, new Date(2026, 0, 1));
+  check('按日均算出还要多少天', est.days === 40, String(est.days));
+  check('预计完稿日期对得上', datePhrase(est.date) === '2 月 10 日', datePhrase(est.date));
+  check('天数说法像人话', daysPhrase(40) === '还要 6 周（约 40 天）', daysPhrase(40));
+}
+
+// 没动笔就估不出来
+{
+  const g = { target: 100000, words: 0, pct: 0, left: 100000, done: false };
+  const est = finishEstimate(g, { dailyRate: 0 });
+  check('日均为 0 就算不出', est.days === null && est.rate === 0, JSON.stringify(est));
+  check('算不出时也有话说', daysPhrase(null) === '还不知道要多久', daysPhrase(null));
+}
+
+// 写完了
+{
+  const g = { target: 100000, words: 100000, pct: 100, left: 0, done: true };
+  const est = finishEstimate(g, { dailyRate: 2000 });
+  check('写完了就完稿了', est.done === true && est.days === 0, JSON.stringify(est));
+}
+
+// 天数说法
+check('不到两周按天说', daysPhrase(9) === '还要 9 天', daysPhrase(9));
+check('几个月按月说', daysPhrase(90) === '还要 3 个月（约 90 天）', daysPhrase(90));
+check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天）', daysPhrase(500));
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
 process.exit(fail ? 1 : 0);

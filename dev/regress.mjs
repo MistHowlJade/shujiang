@@ -473,6 +473,13 @@ async function main() {
     const s = await get(`${BASE}/api/stats?days=364`);
     check('统计能取一年区间', Array.isArray(s?.days) && s.days.length === 364, `days=${s?.days?.length}`);
     check('统计带目标与连续天数', typeof s?.goal === 'number' && typeof s?.streak === 'number');
+    check('统计带日均产出', typeof s?.dailyRate === 'number' && s.dailyRate >= 0, s?.dailyRate);
+    // 日均 = 最近 14 天的总和 ÷ 14（没写的日子也算进分母）
+    {
+      const last14 = (s.days || []).slice(-14);
+      const expect = Math.round(last14.reduce((sum, d) => sum + (d.words || 0), 0) / Math.max(1, last14.length));
+      check('日均产出的算法对得上', s.dailyRate === expect, `${s.dailyRate} vs ${expect}`);
+    }
     // 改目标后能读回来
     const set = await post(`${BASE}/api/stats`, { goal: 2500 });
     check('日更目标可设置', set?.goal === 2500, set?.goal);

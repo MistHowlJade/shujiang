@@ -20,6 +20,7 @@ const FILES = [
   'web/lib/proof.js',
   'web/lib/health.js',
   'web/lib/diff.js',
+  'web/lib/goal.js',
 ];
 
 const all = FILES.map((f) => [f.replace(/\\/g, '/'), fs.readFileSync(f, 'utf8')]);

@@ -96,6 +96,9 @@ export function statsSummary({ days = 14, now = new Date() } = {}) {
   let total = 0;
   for (const k of Object.keys(s.days)) total += Number(s.days[k]?.words) || 0;
   const todayRecord = s.days[today.date];
+  // 最近 14 天的日均产出（含没写的日子）——用来估「这本书还要写多久」
+  const recent = list.slice(-14);
+  const dailyRate = Math.round(recent.reduce((sum, d) => sum + d.words, 0) / Math.max(1, recent.length));
   return {
     today: today.date,
     todayWords: today.words,
@@ -104,6 +107,7 @@ export function statsSummary({ days = 14, now = new Date() } = {}) {
     week,
     streak: streakOf(s.days, now),
     total,
+    dailyRate,
     byNovelToday: (todayRecord && todayRecord.novels) || {},
   };
 }
