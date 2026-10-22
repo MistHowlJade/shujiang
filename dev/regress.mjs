@@ -514,6 +514,33 @@ async function main() {
   }
 
   // ---------------------------------------------------------------
+  group('写作节奏（30 天对比 / 最长连续 / 最多的一天）');
+  {
+    // 这几项要拿确定的记录来算：临时造一份，跑完还原
+    const orig = fs.readFileSync(statsFile, 'utf8');
+    try {
+      const days = {};
+      const pad = (x) => String(x).padStart(2, '0');
+      const now = new Date();
+      const k = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      // 最近 10 天各 1000 字，其中第 3 天写 4000
+      for (let i = 0; i < 10; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+        days[k(d)] = { words: i === 3 ? 4000 : 1000, novels: {}, chapters: {} };
+      }
+      fs.writeFileSync(statsFile, JSON.stringify({ goal: 3000, days }));
+      const s2 = await get(`${BASE}/api/stats?days=30`);
+      check('最近 30 天的总和算得对', s2.last30 === 13000, String(s2.last30));
+      check('前 30 天没记录时是 0', s2.prev30 === 0, String(s2.prev30));
+      check('最长连续算得对', s2.bestStreak?.days === 10, JSON.stringify(s2.bestStreak));
+      check('最长连续的结束日期对得上', s2.bestStreak?.to === k(now), `${s2.bestStreak?.to} vs ${k(now)}`);
+      check('写得最多的一天算得对', s2.bestDay?.words === 4000 && !!s2.bestDay?.date, JSON.stringify(s2.bestDay));
+    } finally {
+      fs.writeFileSync(statsFile, orig);
+    }
+  }
+
+  // ---------------------------------------------------------------
   group('校对的忽略清单');
   {
     const ign = [{ key: 'typo|c_x|的的', type: 'typo', message: '疑似叠字「的的」', no: 1, title: '第一章', ts: 1 }];

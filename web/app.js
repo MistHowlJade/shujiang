@@ -878,6 +878,28 @@ async function openStatsModal() {
   const heat = statsHeatmap((year && year.days) || st.days, goal, st.today);
   // 全书目标与完稿预测：打开作品时才有
   const bookBlock = goalPanelHtml(S.novel, st);
+  // 节奏：最近 30 天 vs 前 30 天、最长连续、写得最多的一天
+  const wide = year || st;
+  const last30 = Number(wide.last30) || 0;
+  const prev30 = Number(wide.prev30) || 0;
+  const delta = prev30 ? Math.round(((last30 - prev30) / prev30) * 100) : null;
+  const bestStreak = wide.bestStreak || { days: 0, to: '' };
+  const bestDay = wide.bestDay || { date: '', words: 0 };
+  const paceBlock = `
+    <div class="pace-block">
+      <div class="pace-cell">
+        <b>${fmtWords(last30)}</b><span>最近 30 天</span>
+        ${delta === null ? '<em>上一个 30 天没有记录</em>' : `<em class="${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '↑' : '↓'} 比前 30 天 ${Math.abs(delta)}%</em>`}
+      </div>
+      <div class="pace-cell">
+        <b>${bestStreak.days}</b><span>最长连续</span>
+        <em>${bestStreak.to ? `到 ${bestStreak.to.slice(5).replace('-', ' 月 ')} 日` : '还没开始'}</em>
+      </div>
+      <div class="pace-cell">
+        <b>${bestDay.words ? fmtWords(bestDay.words) : '—'}</b><span>写得最多的一天</span>
+        <em>${bestDay.date ? bestDay.date.slice(5).replace('-', ' 月 ') + ' 日' : '还没有记录'}</em>
+      </div>
+    </div>`;
   showModal(`
     <h3>写作统计</h3>
     <p class="modal-sub">只算你真的写进正文的字。删字、撤销重做还原、导入旧稿、恢复快照、全书替换都不算今天的产出。</p>
@@ -895,6 +917,8 @@ async function openStatsModal() {
     <div class="stat-cap">最近 14 天</div>
     <div class="stat-chart">${bars}</div>
     <div class="stat-foot">最近 7 天 ${fmtWords(st.week)} 字　·　连续 ${st.streak} 天　·　累计 ${fmtWords(st.total)} 字</div>
+    <div class="stat-cap" style="margin-top:22px">节奏</div>
+    ${paceBlock}
     <div class="stat-cap" style="margin-top:22px">写作日历（近一年）</div>
     ${heat}
     <div class="modal-foot">

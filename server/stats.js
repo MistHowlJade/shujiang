@@ -79,6 +79,46 @@ function streakOf(days, now) {
   return streak;
 }
 
+/**
+ * 历史最长连续写了多少天。
+ * days 里只存了「写过」的日子，所以不能只看键挨得近不近 —— 得按真实日期一天天走。
+ */
+function bestStreakOf(days, now) {
+  const keys = Object.keys(days).sort();
+  if (!keys.length) return { days: 0, to: '' };
+  const start = new Date(`${keys[0]}T00:00:00`);
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let best = 0;
+  let bestTo = '';
+  let cur = 0;
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    if (Number(days[dayKey(d)]?.words) > 0) {
+      cur += 1;
+      if (cur > best) {
+        best = cur;
+        bestTo = dayKey(d);
+      }
+    } else {
+      cur = 0;
+    }
+  }
+  return { days: best, to: bestTo };
+}
+
+/** 写得最多的那一天 */
+function bestDayOf(days) {
+  let date = '';
+  let words = 0;
+  for (const k of Object.keys(days)) {
+    const w = Number(days[k]?.words) || 0;
+    if (w > words) {
+      words = w;
+      date = k;
+    }
+  }
+  return { date, words };
+}
+
 /** 面向前端的汇总：最近 N 天（含今天）+ 目标 + 周合计 + 连续天数 + 累计 */
 export function statsSummary({ days = 14, now = new Date() } = {}) {
   const s = loadStats();
@@ -99,6 +139,17 @@ export function statsSummary({ days = 14, now = new Date() } = {}) {
   // 最近 14 天的日均产出（含没写的日子）——用来估「这本书还要写多久」
   const recent = list.slice(-14);
   const dailyRate = Math.round(recent.reduce((sum, d) => sum + d.words, 0) / Math.max(1, recent.length));
+  // 最近 30 天 vs 前 30 天：跟自己的上一个周期比，看的是势头
+  const sumRange = (offset, count) => {
+    let sum = 0;
+    for (let i = offset; i < offset + count; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      sum += Number(s.days[dayKey(d)]?.words) || 0;
+    }
+    return sum;
+  };
+  const last30 = sumRange(0, 30);
+  const prev30 = sumRange(30, 30);
   return {
     today: today.date,
     todayWords: today.words,
@@ -106,6 +157,10 @@ export function statsSummary({ days = 14, now = new Date() } = {}) {
     days: list,
     week,
     streak: streakOf(s.days, now),
+    bestStreak: bestStreakOf(s.days, now),
+    bestDay: bestDayOf(s.days),
+    last30,
+    prev30,
     total,
     dailyRate,
     byNovelToday: (todayRecord && todayRecord.novels) || {},
