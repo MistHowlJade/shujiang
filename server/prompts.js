@@ -427,9 +427,10 @@ function buildTemplateVars(ctx) {
 }
 
 // 替换 ${变量名}。未定义的变量换成空串，避免把占位符原样发给模型。
+// 变量名允许中文：用户随手写成 ${书名} 也不该原样发给模型。
 function renderTemplate(text, vars) {
   if (typeof text !== 'string' || !text) return '';
-  return text.replace(/\$\{([a-zA-Z0-9_.]+)\}/g, (m, name) => {
+  return text.replace(/\$\{([a-zA-Z0-9_.\u4e00-\u9fa5]+)\}/g, (m, name) => {
     const v = vars[name];
     return v === undefined || v === null ? '' : String(v);
   });

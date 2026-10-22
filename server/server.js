@@ -641,7 +641,9 @@ async function handleApi(req, res, url) {
           summary: body.summary || '',
           content: body.content || '',
           status: 'draft',
-          stage: 'draft',
+          // 写作阶段：拆分本章时新章要继承原章的阶段（见 web/app.js 的 openSplitChapterModal），
+          // 传了合法值就照用，没传才算草稿。
+          stage: CHAPTER_STAGES.has(body.stage) ? body.stage : 'draft',
           targetWords: cleanTargetWords(body.targetWords),
           outline: body.outline || null,
           memory: null,

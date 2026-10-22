@@ -75,6 +75,16 @@ tools\node\node.exe dev\mock-openai.js
 
 > 假模型返回的是固定示例文本，只用于验证流程与界面，不能当真稿。
 
+### 回归自检
+改完代码想确认没把别的功能弄坏，可以跑一遍自检：
+
+```
+tools\node\node.exe server\server.js     # 另开一个窗口启动服务
+tools\node\node.exe dev\regress.mjs
+```
+
+覆盖 40 多项：提示词模板的变量插值、章节落盘字段、11 个板块的片段导入、版本历史与导出、回收站往返、全局检索。全部通过时退出码为 0；跑完会自动清掉自己建的测试作品。
+
 ---
 
 ## 功能
@@ -461,6 +471,7 @@ web/
   app.js       前端全部逻辑
 dev/
   mock-openai.js      假模型调试服务（可选，不联网）
+  regress.mjs         回归自检（改完代码跑一遍）
   gen-large-novel.js  生成大稿用于性能测试（120 章 × 3000 字只需几秒）
 tools/node/    项目内便携 Node 运行时（可删，改用系统 Node）
 ```
