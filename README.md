@@ -91,6 +91,16 @@ tools\node\node.exe dev\regress.mjs
 tools\node\node.exe dev\check-refs.mjs
 ```
 
+### 性能压测
+长篇（几十万字）最容易卡住。可以自己造一部大稿再量一遍关键路径：
+
+```
+tools\node\node.exe dev\gen-large-novel.js 400 4000   # 400 章 × 4000 字 ≈ 160 万字
+tools\node\node.exe dev\perf.mjs                    # 量打开、组装上下文、检索、导出、保存的耗时
+```
+
+实测 400 章 / 160 万字：服务端全部接口在 110 ms 以内（EPUB 导出 104 ms），浏览器端打开整本 329 ms、体检统计 173 ms，其余操作都在 100 ms 以内，没有出现随章数非线性变慢的情况。
+
 ---
 
 ## 功能
@@ -484,6 +494,7 @@ dev/
   mock-openai.js      假模型调试服务（可选，不联网）
   regress.mjs         回归自检（改完代码跑一遍）
   check-refs.mjs      模块引用自检（拆模块后跑一遍）
+  perf.mjs            性能压测（配合 gen-large-novel.js）
   gen-large-novel.js  生成大稿用于性能测试（120 章 × 3000 字只需几秒）
 tools/node/    项目内便携 Node 运行时（可删，改用系统 Node）
 ```

@@ -264,6 +264,32 @@ async function main() {
   check('全局搜索能搜到', (search.hits?.length || search.results?.length || 0) >= 1);
 
   // ---------------------------------------------------------------
+  group('章节状态');
+  {
+    // 新建章节时 stage 会被尊重（拆分本章继承原章阶段靠这个）
+    const c1 = await post(`${BASE}/api/novels/${id}/chapters`, { title: '阶段测试', content: 'x', stage: 'done' });
+    check('新建章节尊重传入的 stage', c1.chapter?.stage === 'done', c1.chapter?.stage);
+    const c2 = await post(`${BASE}/api/novels/${id}/chapters`, { title: '阶段测试2', content: 'x', stage: '乱填' });
+    check('非法 stage 退回草稿', c2.chapter?.stage === 'draft', c2.chapter?.stage);
+    // 改内容时不能顺手把状态改了
+    const c3 = await put(`${BASE}/api/novels/${id}/chapters/${c1.chapter.id}`, {
+      title: '阶段测试', content: '改过的正文', stage: 'done', targetWords: 0,
+    });
+    check('保存时 stage 保持不变', c3.chapter?.stage === 'done', c3.chapter?.stage);
+    // 老作品只有 status 没有 stage：读出来按草稿，别把 status 当成定稿
+    const legacy = await post(`${BASE}/api/novels`, { title: '老数据' });
+    const legacyId = legacy.novel.id;
+    const legacyCh = await post(`${BASE}/api/novels/${legacyId}/chapters`, { title: '老章节', content: '正文' });
+    // 模拟老数据：只有 status，没有 stage
+    await put(`${BASE}/api/novels/${legacyId}/chapters/${legacyCh.chapter.id}`, {
+      title: '老章节', content: '正文', stage: undefined, status: 'done',
+    });
+    const legacyNovel = await get(`${BASE}/api/novels/${legacyId}`);
+    check('无 stage 的老章节按草稿处理', legacyNovel.novel.chapters[0]?.stage === 'draft', legacyNovel.novel.chapters[0]?.stage);
+    await req('DELETE', `${BASE}/api/novels/${legacyId}?permanent=1`);
+  }
+
+  // ---------------------------------------------------------------
   group('导入已有文稿');
   await checkManuscript(id);
 
