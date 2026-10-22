@@ -60,7 +60,6 @@ export const FRAGMENT_TYPES = [
   { key: 'beats', label: '结构/节拍' },
   { key: 'arcs', label: '人物弧光' },
   { key: 'relations', label: '关系图谱' },
-  { key: 'threads', label: '线索/伏笔' },
   { key: 'style', label: '文风与规则' },
   { key: 'annotations', label: '批注/高亮' },
 ];
@@ -81,6 +80,58 @@ export function mergeById(existing, incoming) {
   return Array.from(map.values());
 }
 
+/** 把若干字段写回人物卡里对应的角色（按 id 匹配；没有 id 的按名字匹配）。
+ *  返回实际写上的条数。 */
+function applyToCharacters(novel, data, fields, overwrite) {
+  const chars = novel?.bible?.characters;
+  if (!Array.isArray(chars) || !Array.isArray(data)) return 0;
+  let applied = 0;
+  for (const item of data) {
+    if (!item || typeof item !== 'object') continue;
+    const target = item.id
+      ? chars.find((c) => c.id === item.id)
+      : chars.find((c) => c.name && c.name === item.name);
+    if (!target) continue;
+    for (const f of fields) {
+      if (item[f] === undefined) continue;
+      const cur = target[f];
+      // 空串/空数组也算「还没填」：新人物这些字段本来就是空的，
+      // 不这么判的话导入永远写不进去。
+      const empty = cur === undefined || cur === null || cur === '' || (Array.isArray(cur) && !cur.length);
+      if (overwrite || empty) target[f] = item[f];
+    }
+    applied++;
+  }
+  return applied;
+}
+
+/**
+ * 从片段包里取出「这一板块真正的数据」。
+ * 列表型板块（人物卡、世界观、时间线、节拍、弧光、关系）导出时就是数组；
+ * 单板块型（大纲、场景、记忆、批注）导出时包了一层对象，
+ * 比如 {outline:{volumes,notes}}、{scenes:[…]}、{memories:[…]}。
+ * 「文风与规则」则是平铺的作品文风字段，没有包装层。
+ * 两种形状都认，兼容手写的导入文件。
+ */
+function unwrapFragmentData(raw, typeKey) {
+  // 文风与规则：导出的是平铺字段，直接当对象用
+  if (typeKey === 'style') {
+    if (raw && !Array.isArray(raw) && typeof raw === 'object') return raw;
+    return {};
+  }
+  if (Array.isArray(raw)) return raw;
+  if (!raw || typeof raw !== 'object') return [];
+  // 单板块的键名与 FRAGMENT_TYPES 的 key 一致
+  const keys = ['outline', 'scenes', 'memories', 'annotations'];
+  for (const k of keys) {
+    if (raw[k] === undefined) continue;
+    const v = raw[k];
+    if (Array.isArray(v)) return v;
+    if (v && typeof v === 'object') return v;
+  }
+  return [];
+}
+
 export async function applyFragmentData(novel, pkg, opts = {}) {
   // 合并策略
   const merge = (opts?.merge !== false);
@@ -90,57 +141,108 @@ export async function applyFragmentData(novel, pkg, opts = {}) {
   const type = FRAGMENT_TYPES.find(t => t.key === pkg.type);
   if (!type) throw new Error('未知的片段类型：' + pkg.type);
 
-  // 备份
-  const backup = {};
+  // 各板块的实际导出形状（见 web/app.js 的 FRAGMENT_TYPES.get）：
+  //   单板块类型包一层对象（{outline:{…}} / {scenes:[…]} / {style:{…}} …）
+  //   列表类型直接是数组（人物卡、世界观、时间线、节拍、弧光、关系、线索）
+  // 这里统一取出「这一板块真正的数据」，后面的合并逻辑就不用再关心包不包。
+  const data = unwrapFragmentData(pkg.data, type.key);
+
+  // 记录「落上了多少 / 因为对不上而跳过多少」，导入完要告诉用户，
+  // 否则「导入成功」但什么都没变，是最让人困惑的失败方式。
+  let applied = 0;
+  let skipped = 0;
+
   if (type.key === 'outline') {
-    backup.outline = JSON.parse(JSON.stringify(novel.outline || { volumes: [], notes: '' }));
     if (overwrite) {
-      novel.outline = { volumes: pkg.data.volumes || [], notes: pkg.data.notes || '' };
+      novel.outline = { volumes: data.volumes || [], notes: data.notes || '' };
     } else {
-      novel.outline.volumes = mergeById(novel.outline.volumes || [], pkg.data.volumes || []);
-      novel.outline.notes = pkg.data.notes || novel.outline.notes || '';
+      novel.outline ||= { volumes: [], notes: '' };
+      novel.outline.volumes = mergeById(novel.outline.volumes || [], data.volumes || []);
+      novel.outline.notes = data.notes || novel.outline.notes || '';
     }
+    applied = (data.volumes || []).length;
   } else if (type.key === 'scenes') {
-    pkg.data.forEach(s => { if (!novel.scenesByChapter[s.chapterId]) novel.scenesByChapter[s.chapterId] = []; novel.scenesByChapter[s.chapterId].push(s); });
-  } else if (type.key === 'memories') {
-    pkg.data.forEach(m => {
-      const ch = novel.chapters.find(c => c.id === m.chapterId);
-      if (ch) ch.memory = m.memory;
-    });
-  } else if (type.key === 'characters') {
-    if (overwrite) novel.bible.characters = pkg.data;
-    else novel.bible.characters = mergeById(novel.bible.characters || [], pkg.data);
-  } else if (type.key === 'world') {
-    if (overwrite) novel.bible.world = pkg.data;
-    else novel.bible.world = mergeById(novel.bible.world || [], pkg.data);
-  } else if (type.key === 'timeline') {
-    if (overwrite) novel.bible.timeline = pkg.data;
-    else novel.bible.timeline = mergeById(novel.bible.timeline || [], pkg.data);
-  } else if (type.key === 'beats') {
-    if (overwrite) novel.beats = { items: pkg.data };
-    else novel.beats = { items: mergeById(novel.beats?.items || [], pkg.data) };
-  } else if (type.key === 'arcs') {
-    if (overwrite) novel.arcs = { items: pkg.data };
-    else novel.arcs = { items: mergeById(novel.arcs?.items || [], pkg.data) };
-  } else if (type.key === 'relations') {
-    if (overwrite) novel.relations = pkg.data;
-    else novel.relations = [...new Set([...(novel.relations || []).map(JSON.stringify), ...pkg.data.map(JSON.stringify)])].map(JSON.parse);
-  } else if (type.key === 'threads') {
-    if (overwrite) novel.threads = { items: pkg.data };
-    else novel.threads = { items: mergeById(novel.threads?.items || [], pkg.data) };
-  } else if (type.key === 'style') {
-    if (overwrite) novel.style = { ...pkg.data };
-    else novel.style = { ...novel.style, ...pkg.data };
-  } else if (type.key === 'annotations') {
-    // annotations are stored per chapter
-    novel.chapters.forEach(c => {
-      if (pkg.annotationsByChapter[c.id]) {
-        if (overwrite) c.annotations = pkg.annotationsByChapter[c.id];
-        else c.annotations = [...(c.annotations || []), ...pkg.annotationsByChapter[c.id]];
+    // 场景卡片挂在各章的 scenes 上：按 chapterId 归位
+    const byChapter = new Map();
+    for (const s of data) {
+      if (!s?.chapterId) continue;
+      if (!byChapter.has(s.chapterId)) byChapter.set(s.chapterId, []);
+      byChapter.get(s.chapterId).push(s);
+    }
+    for (const ch of novel.chapters || []) {
+      const incoming = byChapter.get(ch.id);
+      if (!incoming) continue;
+      // 场景卡片没有稳定 id，合并时按「同位置覆盖、其余追加」处理
+      if (overwrite) ch.scenes = incoming;
+      else {
+        const base = Array.isArray(ch.scenes) ? ch.scenes.slice() : [];
+        incoming.forEach((s, i) => {
+          if (i < base.length) base[i] = { ...base[i], ...s };
+          else base.push(s);
+        });
+        ch.scenes = base;
       }
-    });
+      applied += incoming.length;
+    }
+    skipped = data.length - applied;
+  } else if (type.key === 'memories') {
+    for (const m of data) {
+      const ch = (novel.chapters || []).find(c => c.id === m?.chapterId);
+      if (!ch) continue;
+      ch.memory = m.memory;
+      applied++;
+    }
+    skipped = data.length - applied;
+  } else if (type.key === 'characters') {
+    if (overwrite) novel.bible.characters = data;
+    else novel.bible.characters = mergeById(novel.bible.characters || [], data);
+    applied = data.length;
+  } else if (type.key === 'world') {
+    if (overwrite) novel.bible.world = data;
+    else novel.bible.world = mergeById(novel.bible.world || [], data);
+    applied = data.length;
+  } else if (type.key === 'timeline') {
+    if (overwrite) novel.bible.timeline = data;
+    else novel.bible.timeline = mergeById(novel.bible.timeline || [], data);
+    applied = data.length;
+  } else if (type.key === 'beats') {
+    if (overwrite) novel.beats = { items: data };
+    else novel.beats = { items: mergeById(novel.beats?.items || [], data) };
+    applied = data.length;
+  } else if (type.key === 'arcs') {
+    // 人物弧光：写回人物卡的 arc / goal / flaw（界面上「人物弧光」页签就是读这两个）
+    applied = applyToCharacters(novel, data, ['arc', 'goal', 'flaw'], overwrite);
+  } else if (type.key === 'relations') {
+    // 关系图谱：写回人物卡的 relations（界面上「关系图谱」页签就是读这个）
+    applied = applyToCharacters(novel, data, ['relations'], overwrite);
+  } else if (type.key === 'style') {
+    // 文风与规则：真正生效的是作品 meta 里的文风字段
+    novel.meta ||= {};
+    for (const [k, v] of Object.entries(data)) {
+      // 新作品这些字段默认是空串/空数组，也算「还没填」，否则永远导不进去
+      const cur = novel.meta[k];
+      const empty = cur === undefined || cur === null || cur === '' || (Array.isArray(cur) && !cur.length);
+      if (overwrite || empty) novel.meta[k] = v;
+    }
+    applied = 1;
+  } else if (type.key === 'annotations') {
+    // 批注挂在各章的 annotations 上：按 chapterId 归位
+    const byChapter = new Map();
+    for (const a of data) {
+      if (!a?.chapterId) continue;
+      if (!byChapter.has(a.chapterId)) byChapter.set(a.chapterId, []);
+      byChapter.get(a.chapterId).push(a);
+    }
+    for (const ch of novel.chapters || []) {
+      const incoming = byChapter.get(ch.id);
+      if (!incoming) continue;
+      if (overwrite) ch.annotations = incoming;
+      else ch.annotations = mergeById(ch.annotations || [], incoming);
+      applied += incoming.length;
+    }
+    skipped = data.length - applied;
   }
-  return { ok: true };
+  return { ok: true, applied, skipped };
 }
 
 // 原子写：先写 .tmp 再 rename，避免断电/崩溃写坏文件

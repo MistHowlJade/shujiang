@@ -2800,6 +2800,7 @@ function chapterSavePayload(ch) {
     memory: ch.memory, status: ch.status, outline: ch.outline, outlineId: ch.outlineId,
     revisions: Array.isArray(ch.revisions) ? ch.revisions : undefined,
     annotations: ch.annotations,
+    scenes: Array.isArray(ch.scenes) ? ch.scenes : undefined,   // 场景卡片：不带上就会在刷新后消失
     counted: peekCounted(ch.id),        // 这次该给今日码字量记多少（见「码字量计数」）
   };
 }
@@ -5119,10 +5120,6 @@ function collectBibleData() {
     bible: n.bible || { characters: [], world: [], timeline: [] },
     outline: n.outline || { volumes: [], notes: '' },
     beats: n.beats || { items: [] },
-    arcs: n.arcs || { items: [] },
-    relations: n.relations || [],
-    threads: n.threads || { items: [] },
-    style: n.style || { guide: '', banned: '', tone: '' },
     version: 1,
     exportedAt: Date.now(),
     sourceTitle: n.title,
@@ -5352,33 +5349,12 @@ async function applyBibleData(data, opts = {}) {
     if (overwrite) n.beats = { ...data.beats };
     else n.beats = { ...n.beats, ...data.beats, items: merge ? mergeById(n.beats?.items || [], data.beats.items || []) : (data.beats.items || []) };
   }
-  if (data.arcs) {
-    if (overwrite) n.arcs = { ...data.arcs };
-    else n.arcs = { ...n.arcs, ...data.arcs, items: merge ? mergeById(n.arcs?.items || [], data.arcs.items || []) : (data.arcs.items || []) };
-  }
-  if (data.relations) {
-    if (overwrite) n.relations = [...data.relations];
-    else n.relations = [...new Set([...(n.relations || []).map(JSON.stringify), ...data.relations.map(JSON.stringify)])].map(JSON.parse);
-  }
-  if (data.threads) {
-    if (overwrite) n.threads = { ...data.threads };
-    else n.threads = { ...n.threads, ...data.threads, items: merge ? mergeById(n.threads?.items || [], data.threads.items || []) : (data.threads.items || []) };
-  }
-  if (data.style) {
-    if (overwrite) n.style = { ...data.style };
-    else n.style = { ...n.style, ...data.style };
-  }
-
   // 保存
   await saveNovelPart({
     meta: n.meta,
     bible: n.bible,
     outline: n.outline,
     beats: n.beats,
-    arcs: n.arcs,
-    relations: n.relations,
-    threads: n.threads,
-    style: n.style,
   });
 
   renderBible();
@@ -5470,10 +5446,11 @@ const FRAGMENT_TYPES = [
   { key: 'world', label: '世界观', icon: 'globe', get: (n) => n.bible?.world || [], single: false },
   { key: 'timeline', label: '时间线', icon: 'clock', get: (n) => n.bible?.timeline || [], single: false },
   { key: 'beats', label: '结构/节拍', icon: 'pulse', get: (n) => n.beats?.items || [], single: false },
-  { key: 'arcs', label: '人物弧光', icon: 'arrow-right', get: (n) => n.arcs?.items || [], single: false },
-  { key: 'relations', label: '关系图谱', icon: 'arrow-right', get: (n) => n.relations || [], single: false },
-  { key: 'threads', label: '线索/伏笔', icon: 'search', get: (n) => n.threads?.items || [], single: false },
-  { key: 'style', label: '文风与规则', icon: 'pen', get: (n) => ({ style: n.style || { guide: '', banned: '', tone: '' } }), single: true },
+  // 人物弧光 / 关系图谱：界面上是「人物卡 + 章节记忆」现算的，真正能编辑、能复用的是人物卡里的字段
+  { key: 'arcs', label: '人物弧光', icon: 'arrow-right', get: (n) => (n.bible?.characters || []).filter((c) => c.arc || c.goal || c.flaw).map((c) => ({ id: c.id, name: c.name, arc: c.arc || '', goal: c.goal || '', flaw: c.flaw || '' })), single: false },
+  { key: 'relations', label: '关系图谱', icon: 'arrow-right', get: (n) => (n.bible?.characters || []).filter((c) => (c.relations || []).length).map((c) => ({ id: c.id, name: c.name, relations: c.relations || [] })), single: false },
+  // 文风与规则：真正生效的是作品 meta 里的文风字段
+  { key: 'style', label: '文风与规则', icon: 'pen', get: (n) => ({ styleNotes: n.meta?.styleNotes || '', antiAiNotes: n.meta?.antiAiNotes || '', taboos: n.meta?.taboos || '', extraRules: n.meta?.extraRules || '', styleRefs: n.meta?.styleRefs || [] }), single: true },
   { key: 'annotations', label: '批注/高亮', icon: 'highlighter', get: (n) => ({ annotations: n.chapters.flatMap(c => (c.annotations || []).map(a => ({ ...a, chapterId: c.id, chapterTitle: c.title }))) }), single: true },
 ];
 
@@ -5604,8 +5581,15 @@ async function applyFragmentData(pkg, opts = {}) {
       S.novel = novel;
       renderBible();
       renderStudio();
-      toast(`已导入 ${FRAGMENT_TYPES.find(t => t.key === pkg.type).label}` + (overwrite ? '（覆盖）' : '（合并）'), 'ok');
-      return { backup: null, type: pkg.type };
+      const label = FRAGMENT_TYPES.find(t => t.key === pkg.type).label;
+      const mode = overwrite ? '（覆盖）' : '（合并）';
+      if (response.skipped) {
+        // 有条目没落上：必须说清楚，否则用户以为导入成功了
+        toast(`${label} 已导入${mode}，但 ${response.skipped} 条找不到对应章节被跳过`, 'err');
+      } else {
+        toast(`已导入 ${label}${mode}`, 'ok');
+      }
+      return { backup: null, type: pkg.type, applied: response.applied, skipped: response.skipped };
     } else {
       throw new Error(response.error || '导入失败');
     }

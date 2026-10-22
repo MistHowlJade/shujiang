@@ -479,6 +479,8 @@ export function buildTask(taskName, ctx) {
     const render = (tpl) => (typeof tpl === 'function' ? tpl(ctx) : renderTemplate(tpl, vars));
     const system = custom.system ? render(custom.system) : '';
     const user = custom.user ? render(custom.user) : '';
+    // 模板替换后是空的（比如只写了 ${某个不存在的变量}），就退回内置提示词：
+    // 给模型发一条空提示词比用内置的更糟。
     if (user) {
       return {
         messages: [

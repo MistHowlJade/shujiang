@@ -840,11 +840,19 @@ async function handleApi(req, res, url) {
       try {
         const n = getNovel(id);
         const result = await applyFragmentData(n, pkg, { merge: body.merge !== false, overwrite: body.overwrite === true });
-        if (result?.backup) {
-          // 可以在这里记录备份用于撤销
-        }
         saveNovel(n);
-        return sendJson(res, 200, { ok: true, type: pkg.type, message: `已导入 ${FRAGMENT_TYPES.find(t => t.key === pkg.type).label}` });
+        const label = FRAGMENT_TYPES.find(t => t.key === pkg.type).label;
+        // 有条目因为「找不到对应章节」被跳过时要说明，否则用户会以为导入成功了
+        const skipped = result?.skipped || 0;
+        return sendJson(res, 200, {
+          ok: true,
+          type: pkg.type,
+          applied: result?.applied || 0,
+          skipped,
+          message: skipped
+            ? `已导入 ${label}，但有 ${skipped} 条找不到对应章节被跳过（章节 id 对不上时会这样）`
+            : `已导入 ${label}`,
+        });
       } catch (err) {
         return sendJson(res, 400, { error: `导入失败：${err.message}` });
       }
