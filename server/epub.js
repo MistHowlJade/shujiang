@@ -182,8 +182,14 @@ ${paras ? `<h2>给编辑的话</h2>\n${paras}` : ''}
 </section>`;
 }
 
-function titlePage(novel, chapters, words = 0) {
-  const meta = [novel.genre, `共 ${chapters.length} 章`, `约 ${words.toLocaleString('zh-CN')} 字`]
+function titlePage(novel, chapters, words = 0, extras = {}) {
+  const r = extras.range;
+  // 只导一个区间时别把「共 N 章」写成全书章数，标成节选更不容易被编辑误会
+  const meta = [
+    novel.genre,
+    r ? `节选 · 第 ${r.lo === r.hi ? r.lo : `${r.lo}–${r.hi}`} 章` : `共 ${chapters.length} 章`,
+    `约 ${words.toLocaleString('zh-CN')} 字`,
+  ]
     .filter(Boolean)
     .join(' · ');
   return `<section epub:type="titlepage" class="titlepage">
@@ -367,7 +373,7 @@ export function buildEpub(novel, chapters = novel.chapters || [], extras = {}) {
         'cover-body'
       ),
     },
-    { name: 'OEBPS/title.xhtml', data: page(novel.title || '书名页', titlePage(novel, list, words)) },
+    { name: 'OEBPS/title.xhtml', data: page(novel.title || '书名页', titlePage(novel, list, words, extras)) },
   ];
 
   // 随稿附带的材料：全书大纲、人物小传、投稿附言

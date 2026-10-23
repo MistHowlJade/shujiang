@@ -846,24 +846,30 @@ async function handleApi(req, res, url) {
         return res.end(body);
       }
       const cid = url.searchParams.get('chapterId');
-      // 只导出定稿只作用于「全书」；当前章导出是作者明确指定的，不受状态限制
+      // 章节区间：投稿常常只要「前 30 章」这样的样章，不用为此删章节
+      const range = chapterRange(n, url.searchParams.get('from'), url.searchParams.get('to'));
+      if (range?.empty) return sendJson(res, 400, { error: '这个章节区间里没有章节' });
+      const base = range ? range.chapters : n.chapters;
+      // 只导出定稿只作用于「全书 / 区间」；当前章导出是作者明确指定的，不受状态限制
       const onlyDone = !cid && url.searchParams.get('only') === 'done';
-      const doneList = onlyDone ? n.chapters.filter((c) => c.stage === 'done') : n.chapters;
+      const doneList = onlyDone ? base.filter((c) => c.stage === 'done') : base;
       const list = format === 'epub'
-        ? (onlyDone ? doneList : n.chapters)     // EPUB 始终全书，忽略 chapterId
+        ? doneList                              // EPUB 忽略 chapterId，只认全书 / 区间
         : (cid ? n.chapters.filter((c) => c.id === cid) : doneList);
       // 空书仍可导出（至少保留书名页 / 封面信息）；只有「只导出定稿」没内容时才报错
       if (!list.length && onlyDone) return sendJson(res, 400, { error: '还没有已定稿的章节' });
-      const suffix = onlyDone ? '_定稿版' : '';
+      const suffix = `${range ? (range.lo === range.hi ? `_第${range.lo}章` : `_第${range.lo}-${range.hi}章`) : ''}${onlyDone ? '_定稿版' : ''}`;
       // 随稿附带的材料：extras=outline,characters；note=1 是投稿附言（放在最前面）
       const extras = {
         outline: (url.searchParams.get('extras') || '').split(',').includes('outline'),
         characters: (url.searchParams.get('extras') || '').split(',').includes('characters'),
         note: url.searchParams.get('note') === '1',
+        // 区间导出时在稿件头部 / 书名页标成「节选」
+        range: range ? { lo: range.lo, hi: range.hi } : null,
       };
 
       if (format === 'epub') {
-        // EPUB 始终导出全书：单章电子书没有阅读价值，目录也按全书分卷生成
+        // EPUB 忽略 chapterId（单章电子书没有阅读价值），但认「全书 / 区间」
         const buf = buildEpub(n, list, extras);
         const name = `${safeName(n.title)}${suffix}.epub`;
         res.writeHead(200, {
@@ -1099,6 +1105,37 @@ function bookWords(novel) {
   return (novel.chapters || []).reduce((sum, c) => sum + countWords(c.content), 0);
 }
 
+/**
+ * 导出用的章节区间（按章号，含两端）。
+ * 返回 null 表示没要求区间（导全书）；{ empty: true } 表示这区间里一章都没有。
+ * 填反了自动换过来、超出书本范围的夹回去——导出窗口上不该因为填错就报错。
+ */
+function chapterRange(novel, fromRaw, toRaw) {
+  let lo = Math.floor(Number(fromRaw) || 0);
+  let hi = Math.floor(Number(toRaw) || 0);
+  if (!lo && !hi) return null;
+  const nos = (novel.chapters || []).map((c) => Number(c.no) || 0).filter((x) => x > 0);
+  if (!nos.length) return { empty: true, lo: 0, hi: 0, chapters: [] };
+  const min = Math.min(...nos);
+  const max = Math.max(...nos);
+  if (!lo) lo = min;
+  if (!hi) hi = max;
+  if (lo > hi) [lo, hi] = [hi, lo];
+  // 整段都落在书外就当没这回事，别默默导出最后一章
+  if (hi < min || lo > max) return { empty: true, lo, hi, chapters: [] };
+  lo = Math.max(min, lo);
+  hi = Math.min(max, hi);
+  if (lo > hi) return { empty: true, lo, hi, chapters: [] };
+  return {
+    lo,
+    hi,
+    chapters: (novel.chapters || []).filter((c) => {
+      const no = Number(c.no) || 0;
+      return no >= lo && no <= hi;
+    }),
+  };
+}
+
 /** 投稿附言（TXT）：编辑拆开文件先看到信，再看到稿子 */
 function txtNote(novel, words) {
   const lines = ['创作说明', ''];
@@ -1114,6 +1151,8 @@ function exportTxt(n, chapters, extras = {}) {
     n.author ? `作者：${n.author}` : '',
     n.meta?.contact ? `联系方式：${n.meta.contact}` : '',
     n.genre ? `类型：${n.genre}` : '',
+    // 只导出一段时标成节选，免得被当成全书
+    extras.range ? `节选：第${extras.range.lo === extras.range.hi ? extras.range.lo : `${extras.range.lo}-${extras.range.hi}`}章` : '',
     n.meta?.logline ? `简介：${n.meta.logline}` : '',
   ]
     .filter(Boolean)
@@ -1136,6 +1175,7 @@ function exportMarkdown(n, chapters, extras = {}) {
   if (n.author) lines.push(`作者：${n.author}`);
   if (n.meta?.contact) lines.push(`联系方式：${n.meta.contact}`);
   if (n.genre) lines.push(`类型：${n.genre}`);
+  if (extras.range) lines.push(`节选：第${extras.range.lo === extras.range.hi ? extras.range.lo : `${extras.range.lo}-${extras.range.hi}`}章`);
   if (n.meta?.logline) lines.push(`\n> ${n.meta.logline}`);
   if (n.meta?.synopsis) lines.push(`\n## 作品简介\n\n${n.meta.synopsis}`);
   // 投稿附言：放在正文之前，跟简介同属前置页

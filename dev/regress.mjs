@@ -520,6 +520,69 @@ async function main() {
   }
 
   // ---------------------------------------------------------------
+  group('导出的章节区间');
+  {
+    // 自己造一本六章的书：奇数章定稿，区间跟「只导出定稿」叠加时好对数字
+    const made = await post(`${BASE}/api/novels`, { title: '区间自检稿', author: '自检' });
+    const tid = made.novel.id;
+    for (let i = 1; i <= 6; i++) {
+      await post(`${BASE}/api/novels/${tid}/chapters`, {
+        title: `标题${i}`, content: `这是第${i}章的正文。`, stage: i % 2 === 1 ? 'done' : 'draft',
+      });
+    }
+    const exp = async (q) => {
+      const r = await fetch(`${BASE}/api/novels/${tid}/export?format=txt${q}`);
+      return {
+        status: r.status,
+        text: (await r.text()).replace(/^\uFEFF/, ''),
+        name: decodeURIComponent(r.headers.get('content-disposition') || ''),
+      };
+    };
+    const heads = (t) => [...t.matchAll(/^第(\d+)章 /gm)].map((m) => Number(m[1])).join(',');
+
+    const r1 = await exp('&from=3&to=5');
+    check('区间导出只含这几章', r1.status === 200 && heads(r1.text) === '3,4,5', `${r1.status} ${heads(r1.text)}`);
+    check('区间导出在稿件头部标了节选', r1.text.includes('节选：第3-5章'), r1.text.split('\n')[0]);
+    check('区间导出的文件名带章号', r1.name.includes('_第3-5章'), r1.name);
+
+    const r2 = await exp('&from=5&to=3');
+    check('起始章号填反了自动换过来', heads(r2.text) === '3,4,5', heads(r2.text));
+    const r3 = await exp('&from=3&to=99');
+    check('超出书本范围的章号夹回去', heads(r3.text) === '3,4,5,6', heads(r3.text));
+    check('夹过的文件名用真实章号', r3.name.includes('_第3-6章'), r3.name);
+    check('整段落在书外就报错', (await exp('&from=99&to=99')).status === 400);
+    const r4 = await exp('&from=2&to=2');
+    check('单章区间的文件名不带横杠', heads(r4.text) === '2' && r4.name.includes('_第2章'), r4.name);
+    const r5 = await exp('&from=5');
+    check('只填起始章就到最后一章', heads(r5.text) === '5,6', heads(r5.text));
+    const r6 = await exp('&to=2');
+    check('只填结束章就从第一章起', heads(r6.text) === '1,2', heads(r6.text));
+
+    const whole = await exp('');
+    check('不传区间还是整本', heads(whole.text) === '1,2,3,4,5,6', heads(whole.text));
+    check('整本导出不写节选', !whole.text.includes('节选'), whole.text.split('\n')[0]);
+
+    const done = await exp('&from=3&to=6&only=done');
+    check('区间与只导出定稿叠加', heads(done.text) === '3,5', heads(done.text));
+    check('区间与定稿两个后缀都在', done.name.includes('_第3-6章_定稿版'), done.name);
+
+    const md = (await req('GET', `${BASE}/api/novels/${tid}/export?format=md&from=4&to=5`)).buf.toString('utf8');
+    check('Markdown 也认区间', md.includes('## 第4章') && md.includes('## 第5章') && !md.includes('## 第3章'),
+      (md.match(/^## 第\d+章/gm) || []).join(','));
+
+    const epub = unzip((await req('GET', `${BASE}/api/novels/${tid}/export?format=epub&from=4&to=5`)).buf);
+    const chFiles = Object.keys(epub).filter((n) => /chapter-\d+\.xhtml$/.test(n));
+    const epubText = chFiles.map((n) => epub[n].toString('utf8')).join('\n');
+    check('EPUB 也认区间', chFiles.length === 2 && epubText.includes('第4章') && epubText.includes('第5章') && !epubText.includes('第3章'),
+      chFiles.join(','));
+    const titleXml = epub['OEBPS/title.xhtml']?.toString('utf8') || '';
+    check('EPUB 书名页标成节选', titleXml.includes('节选 · 第 4–5 章') && !titleXml.includes('共 2 章'), titleXml.slice(-120));
+
+    await req('DELETE', `${BASE}/api/novels/${tid}?permanent=1`);
+    check('区间自检稿已清掉', !((await get(`${BASE}/api/novels`)).novels || []).some((n) => n.id === tid));
+  }
+
+  // ---------------------------------------------------------------
   group('写作节奏（30 天对比 / 最长连续 / 最多的一天）');
   {
     // 这几项要拿确定的记录来算：临时造一份，跑完还原

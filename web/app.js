@@ -7925,8 +7925,17 @@ function exportBook() {
         <select id="exFmt" class="input"><option value="txt">TXT（纯文本）</option><option value="md">Markdown</option><option value="epub">EPUB（电子书）</option><option value="json">作品备份（JSON，可恢复）</option></select>
       </label>
       <label class="field-label">范围
-        <select id="exScope" class="input"><option value="all">全书</option><option value="chapter">当前章</option></select>
+        <select id="exScope" class="input"><option value="all">全书</option><option value="range">章节区间</option><option value="chapter">当前章</option></select>
       </label>
+    </div>
+    <div class="export-range" id="exRangeRow" hidden>
+      <span>从</span>
+      <input class="input" id="exFrom" type="number" step="1" inputmode="numeric" aria-label="起始章号" />
+      <span>章</span>
+      <span>到</span>
+      <input class="input" id="exTo" type="number" step="1" inputmode="numeric" aria-label="结束章号" />
+      <span>章</span>
+      <em id="exRangeInfo"></em>
     </div>
     <label class="export-done" id="exDoneRow">
       <input type="checkbox" id="exDone" />
@@ -7934,7 +7943,7 @@ function exportBook() {
       <span class="export-done-count" id="exDoneCount"></span>
     </label>
     <div class="dim small export-done-hint" id="exDoneHint" hidden>章号沿用原书，不会自动重新编号。</div>
-    <div class="dim small" id="exHint" hidden>EPUB 会导出全书，自动生成标题页、目录和分卷结构，适合放进手机 / 阅读器。</div>
+    <div class="dim small" id="exHint" hidden>EPUB 自动生成标题页、目录和分卷结构，适合放进手机 / 阅读器。选了区间就只打包这几章。</div>
     <div class="dim small export-done-hint" id="exContactHint" hidden></div>
     <div class="export-extras" id="exExtras" hidden>
       <span class="export-extras-lbl">随稿附带</span>
@@ -8084,6 +8093,32 @@ function exportBook() {
       const noteText = String(S.novel.meta?.submissionNote || '').trim();
       noteEl.checked = !!noteText;
       noteEl.disabled = !noteText;
+      // 章节区间：投稿常常只要「前 30 章」，默认铺满全书，改结束章号就行
+      const rangeRow = box.querySelector('#exRangeRow');
+      const fromEl = box.querySelector('#exFrom');
+      const toEl = box.querySelector('#exTo');
+      const rangeInfo = box.querySelector('#exRangeInfo');
+      const nos = S.novel.chapters.map((c) => Number(c.no) || 0).filter((x) => x > 0);
+      const minNo = nos.length ? Math.min(...nos) : 1;
+      const maxNo = nos.length ? Math.max(...nos) : 1;
+      fromEl.value = String(minNo);
+      toEl.value = String(maxNo);
+      fromEl.min = toEl.min = String(minNo);
+      fromEl.max = toEl.max = String(maxNo);
+      const rangeValues = () => {
+        const clamp = (v) => Math.max(minNo, Math.min(maxNo, Math.floor(Number(v) || 0) || minNo));
+        let lo = clamp(fromEl.value);
+        let hi = clamp(toEl.value);
+        if (lo > hi) [lo, hi] = [hi, lo];   // 填反了就换过来，不拦人
+        return { lo, hi };
+      };
+      const rangeChapters = () => {
+        const { lo, hi } = rangeValues();
+        return S.novel.chapters.filter((c) => {
+          const no = Number(c.no) || 0;
+          return no >= lo && no <= hi;
+        });
+      };
       // 关系条数：新数据是数组，老数据是「对象：关系」的字符串
       const relCount = charList.reduce((sum, c) => {
         const r = c.relations;
@@ -8099,28 +8134,47 @@ function exportBook() {
         const backup = fmtEl.value === 'json';
         const epub = fmtEl.value === 'epub';
         const md = fmtEl.value === 'md';
-        const whole = epub || backup;
-        scopeEl.disabled = whole;
-        if (whole) scopeEl.value = 'all';
-        hintEl.hidden = !whole;
+        // 备份总是整本；EPUB 能选区间，但没法只导一章
+        scopeEl.disabled = backup;
+        if (backup) scopeEl.value = 'all';
+        scopeEl.querySelector('option[value="chapter"]').disabled = epub;
+        if (epub && scopeEl.value === 'chapter') scopeEl.value = 'all';
+        const scope = scopeEl.value;
+        hintEl.hidden = !(backup || epub);
         hintEl.textContent = backup
           ? '备份是当前作品的完整 JSON：正文、设定、大纲、章节记忆和修订都会保留。恢复时会在书架新建一部作品，不会覆盖现有稿件。'
-          : 'EPUB 会导出全书，自动生成标题页、目录和分卷结构，适合放进手机 / 阅读器。';
+          : 'EPUB 自动生成标题页、目录和分卷结构，适合放进手机 / 阅读器。选了区间就只打包这几章。';
         // 单章导出是作者明确指定的，不受「只导出定稿」影响；备份总是整本
-        const showDone = !backup && scopeEl.value === 'all';
+        const showRange = !backup && scope === 'range';
+        rangeRow.hidden = !showRange;
+        const showDone = !backup && scope !== 'chapter';
         doneRow.hidden = !showDone;
         doneEl.disabled = doneCount === 0;
         doneRow.classList.toggle('disabled', doneCount === 0);
         if (doneCount === 0) doneEl.checked = false;
         doneCountEl.textContent = doneCount ? `已定稿 ${doneCount} / ${total} 章` : '还没有定稿章节';
         doneHintEl.hidden = !(showDone && doneEl.checked);
+        // 区间的实际内容：跟导出时用的是同一套筛选，数字才对得上
+        if (showRange) {
+          const inRange = rangeChapters();
+          const picked = doneEl.checked ? inRange.filter((c) => stageOf(c) === 'done') : inRange;
+          const words = picked.reduce((sum, c) => sum + countWords(c.content || ''), 0);
+          const { lo, hi } = rangeValues();
+          // 输入框里的章号被夹过 / 换过序时先报出真实范围，免得数字对不上
+          const typed = Math.floor(Number(fromEl.value) || 0) === lo && Math.floor(Number(toEl.value) || 0) === hi;
+          const span = typed ? '' : `第 ${lo === hi ? lo : `${lo}–${hi}`} 章 · `;
+          rangeInfo.textContent = picked.length
+            ? `${span}将导出 ${picked.length} 章 · 约 ${fmtWords(words)} 字`
+            : '这个区间里没有可导出的章节';
+          rangeInfo.classList.toggle('warn', !picked.length);
+        }
         // 封面只跟 EPUB 有关
         coverRow.hidden = !epub;
         if (epub) refreshCover();
         // 附带材料：Markdown 与 EPUB 有意义；TXT 是拿来读的，不塞这些
         extrasRow.hidden = !(md || epub);
-        // 投稿附言：三种文稿格式都能放，但只对整本有意义；备份本来就有全部内容
-        noteRow.hidden = !(!backup && scopeEl.value === 'all');
+        // 投稿附言：三种文稿格式都能放；备份本来就有全部内容，单章导出也谈不上附言
+        noteRow.hidden = !(!backup && scope !== 'chapter');
         noteEl.disabled = !noteText;
         if (!noteText) noteEl.checked = false;
         if (!noteRow.hidden) {
@@ -8168,12 +8222,29 @@ function exportBook() {
       doneEl.onchange = sync;
       outlineEl.onchange = sync;
       charactersEl.onchange = sync;
+      fromEl.oninput = sync;
+      toEl.oninput = sync;
+      // 离开输入框时把夹过 / 换过序的章号写回输入框，让人看见真实会导出哪几章
+      const settleRange = () => {
+        const { lo, hi } = rangeValues();
+        fromEl.value = String(lo);
+        toEl.value = String(hi);
+        sync();
+      };
+      fromEl.onchange = settleRange;
+      toEl.onchange = settleRange;
       sync();
       box.querySelector('#exCancel').onclick = closeModal;
       box.querySelector('#exOk').onclick = () => {
         const fmt = fmtEl.value;
         const scope = scopeEl.value;
         const onlyDone = !doneRow.hidden && doneEl.checked;
+        // 区间里一章都没有时别让用户吃一个 400 的 JSON 页面
+        if (scope === 'range') {
+          const inRange = rangeChapters();
+          if (!inRange.length) return toast('这个区间里没有章节', 'err');
+          if (onlyDone && !inRange.some((c) => stageOf(c) === 'done')) return toast('这个区间里没有已定稿的章节', 'err');
+        }
         if (onlyDone && doneCount === 0) return toast('还没有已定稿的章节', 'err');
         if (fmt === 'json') {
           window.location.href = `/api/novels/${S.novel.id}/export?format=json`;
@@ -8181,12 +8252,17 @@ function exportBook() {
           return;
         }
         const q = `${fmt !== 'epub' && scope === 'chapter' && S.chapterId ? `&chapterId=${S.chapterId}` : ''}${onlyDone ? '&only=done' : ''}`;
+        let rangeQ = '';
+        if (scope === 'range') {
+          const { lo, hi } = rangeValues();
+          rangeQ = `&from=${lo}&to=${hi}`;
+        }
         const extras = [];
         if (!extrasRow.hidden && outlineEl.checked) extras.push('outline');
         if (!extrasRow.hidden && charactersEl.checked) extras.push('characters');
         const extraQ = extras.length ? `&extras=${extras.join(',')}` : '';
         const noteQ = !noteRow.hidden && noteEl.checked && noteText ? '&note=1' : '';
-        window.location.href = `/api/novels/${S.novel.id}/export?format=${fmt}${q}${extraQ}${noteQ}`;
+        window.location.href = `/api/novels/${S.novel.id}/export?format=${fmt}${q}${rangeQ}${extraQ}${noteQ}`;
         closeModal();
       };
     });
