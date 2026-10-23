@@ -251,6 +251,12 @@ async function main() {
     process.exit(2);
   }
 
+  // 自检会建一批测试作品再删掉。只删自己建的：库里原有的作品一个都不能碰，
+  // 万一删错了，作者几年的稿子就没了。回收站里的也算「原有的」。
+  const beforeIds = new Set(((await get(`${BASE}/api/novels`)).novels || []).map((n) => n.id));
+  const beforeTrashIds = new Set((((await get(`${BASE}/api/trash`)).items) || []).map((t) => t.id));
+  const isOurs = (id) => !beforeIds.has(id) && !beforeTrashIds.has(id);
+
   // ---------------------------------------------------------------
   group('提示词模板');
   const slots = await get(`${BASE}/api/prompt-slots`);
@@ -486,8 +492,8 @@ async function main() {
   const backNovel = (await get(`${BASE}/api/novels/${id}`)).novel;
   const expectChapters = beforeTrash;
   check('恢复后章节完整', backNovel.chapters.length === expectChapters, `chapters=${backNovel.chapters.length} 期望 ${expectChapters}`);
-  const trash2 = await get(`${BASE}/api/trash`);
-  check('回收站已空', (trash2.items || trash2.trash || []).length === 0);
+  const trash2 = (await get(`${BASE}/api/trash`)).items || [];
+  check('恢复后就不在回收站里了', !trash2.some((i) => i.id === id));
 
   const search = await get(`${BASE}/api/library-search?q=${encodeURIComponent('正文')}`);
   check('全局搜索能搜到', (search.hits?.length || search.results?.length || 0) >= 1);
@@ -804,11 +810,22 @@ async function main() {
   // ---------------------------------------------------------------
   group('清理');
   for (const n of (await get(`${BASE}/api/novels`)).novels || []) {
+    if (!isOurs(n.id)) continue;            // 作者原有的作品，不碰
     await req('DELETE', `${BASE}/api/novels/${n.id}?permanent=1`);
   }
-  await req('DELETE', `${BASE}/api/trash`);
-  const left = (await get(`${BASE}/api/novels`)).novels || [];
+  // 回收站里也只清本次建的，别把作者自己删掉的作品清空
+  for (const t of (await get(`${BASE}/api/trash`)).items || []) {
+    if (!isOurs(t.id)) continue;
+    if (t.trashId) await req('DELETE', `${BASE}/api/trash/${t.trashId}`);
+  }
+  const left = ((await get(`${BASE}/api/novels`)).novels || []).filter((n) => isOurs(n.id));
   check('测试作品已清理', left.length === 0, `剩 ${left.length} 部`);
+  const stillThere = new Set(((await get(`${BASE}/api/novels`)).novels || []).map((n) => n.id));
+  const lost = [...beforeIds].filter((x) => !stillThere.has(x));
+  check('原有的作品一部都没少', lost.length === 0, lost.join(','));
+  const trashAfter = new Set((((await get(`${BASE}/api/trash`)).items) || []).map((t) => t.id));
+  const lostTrash = [...beforeTrashIds].filter((x) => !trashAfter.has(x));
+  check('回收站里原有的也还在', lostTrash.length === 0, lostTrash.join(','));
   // 码字统计还原成跑之前的样子
   try {
     if (statsBackup !== null) fs.writeFileSync(statsFile, statsBackup);
