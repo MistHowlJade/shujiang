@@ -22,6 +22,7 @@ const FILES = [
   'web/lib/diff.js',
   'web/lib/goal.js',
   'web/lib/submit.js',
+  'web/lib/paper.js',
 ];
 
 const all = FILES.map((f) => [f.replace(/\\/g, '/'), fs.readFileSync(f, 'utf8')]);
@@ -77,7 +78,7 @@ const BUILTIN = new Set([
   'ArrayBuffer', 'Uint8Array', 'Uint16Array', 'Uint32Array', 'Int8Array', 'Int16Array', 'Int32Array',
   'Float32Array', 'Float64Array', 'DataView', 'FileReader', 'Event', 'CustomEvent', 'MouseEvent',
   'KeyboardEvent', 'Image', 'Audio', 'AudioContext', 'OfflineAudioContext', 'DOMParser',
-  'XMLSerializer', 'Node', 'Element', 'HTMLElement', 'Storage',
+  'XMLSerializer', 'Node', 'Element', 'HTMLElement', 'Storage', 'getComputedStyle',
 ]);
 
 let bad = 0;
@@ -133,7 +134,7 @@ console.log('\n【app.js 的 import 是否齐全】');
   }
   const called = new Set();
   const code = stripStrings(app);
-  for (const m of code.matchAll(/(^|[^.\w$])([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g)) called.add(m[2]);
+  for (const m of code.matchAll(/(?<![.\w$])([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g)) called.add(m[1]);
   for (const [f, c] of all) {
     if (f === 'web/app.js') continue;
     for (const n of topLevelDefs(c)) {
@@ -162,7 +163,8 @@ console.log('\n【app.js 里的调用都有定义】');
   }
   const called = new Set();
   const code = stripStrings(app);
-  for (const m of code.matchAll(/(^|[^.\w$])([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g)) called.add(m[2]);
+  // 用负向后顾，别「吃掉」前一个字符：否则 parseFloat(getComputedStyle(…)) 里的内层调用会被漏掉
+  for (const m of code.matchAll(/(?<![.\w$])([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g)) called.add(m[1]);
   const missing = [...called].filter((n) => !local.has(n) && !imported.has(n) && !libDefs.has(n) && !BUILTIN.has(n));
   if (missing.length) fail('app.js 里用到但找不到定义：' + missing.join(', '));
 }

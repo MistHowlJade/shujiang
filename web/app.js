@@ -7,6 +7,7 @@ import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk,
 import { diffProse, diffHtml, diffSideHtml } from './lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from './lib/goal.js';
 import { buildSubmitCheck, submitCheckHtml } from './lib/submit.js';
+import { PAPER_DEFAULTS, normalizePaper, nextPaperSize, paperVars, paperLabel } from './lib/paper.js';
 
 /* 阅读进度只存在本浏览器，不写作品 JSON，也不走服务端 */
 const READER_PROGRESS_KEY = 'shu.reader.progress.v1';
@@ -3642,6 +3643,18 @@ function updateAnnotation(ch, annotationId, updates) {
   }
 }
 
+/** 估算光标在正文里的纵向位置：按段落 + 折行算，行高取实际值（稿纸可调，不能写死 28px） */
+function editorCaretTop(ta, pos) {
+  const cs = getComputedStyle(ta);
+  const lh = parseFloat(cs.lineHeight) || 28;
+  const fs = parseFloat(cs.fontSize) || 16;
+  const textW = Math.max(1, ta.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0));
+  const perLine = Math.max(1, Math.floor(textW / (fs + 0.2))); // 中文一字大约一个字号宽
+  const before = ta.value.slice(0, Math.max(0, pos));
+  const lines = before.split('\n').reduce((n, para) => n + Math.max(1, Math.ceil(para.length / perLine)), 0);
+  return Math.max(0, (lines - 1) * lh);
+}
+
 function jumpToAnnotation(ch, annotationId) {
   const ta = $('#chContent');
   const annotations = getChapterAnnotations(ch);
@@ -3656,11 +3669,8 @@ function jumpToAnnotation(ch, annotationId) {
   if (typeof start === 'number' && typeof end === 'number') {
     ta.setSelectionRange(start, end);
     ta.focus({ preventScroll: true });
-    // 滚动到可见区域
-    const lineHeight = 28; // 大约行高
-    const charsPerLine = Math.max(1, Math.floor(ta.clientWidth / 9)); // 粗略估算
-    const line = Math.floor(start / charsPerLine);
-    ta.scrollTop = line * lineHeight;
+    // 滚到视线里，别让批注跳过去却停在半屏之外
+    ta.scrollTop = Math.max(0, editorCaretTop(ta, start) - ta.clientHeight * 0.32);
   }
 }
 
@@ -4774,11 +4784,9 @@ function locateRevision(id) {
   if (!ta) return;
   const at = nearestQuoteIndex(ta.value, quote, rev.at);
   if (at < 0) return toast('正文里已经找不到这段引文了', 'err');
-  const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 26;
-  const line = ta.value.slice(0, at).split('\n').length - 1;
   ta.focus({ preventScroll: true });
   ta.setSelectionRange(at, at + quote.length);
-  ta.scrollTop = Math.max(0, line * lineHeight - ta.clientHeight * 0.32);
+  ta.scrollTop = Math.max(0, editorCaretTop(ta, at) - ta.clientHeight * 0.32);
 }
 
 function jumpToRevision(chapterId, revId) {
@@ -7256,6 +7264,57 @@ const PRESETS = [
   { name: 'Ollama 本地', baseUrl: 'http://127.0.0.1:11434/v1', models: ['qwen2.5:14b'] },
 ];
 
+/* ---------------- 稿纸排版 ---------------- */
+// 只作用于写作页正文（#chContent）；阅读模式有自己的字号，互不影响。
+let paperPref = { ...PAPER_DEFAULTS };
+
+/** 把排版挂到 body 的 CSS 变量上，设置页的控件与预览跟着同步 */
+function applyPaper(pref = paperPref) {
+  paperPref = normalizePaper(pref);
+  for (const [k, v] of Object.entries(paperVars(paperPref))) document.body.style.setProperty(k, v);
+  syncPaperControls();
+  return paperPref;
+}
+
+// 改一项就落盘，连续拖动滑块时只发最后一次
+const savePaper = debounce(() => {
+  S.config = S.config || {};
+  S.config.ui = { ...(S.config.ui || {}), editor: { ...paperPref } };
+  api.send('/api/config', { ui: { editor: { ...paperPref } } }).catch(() => {});
+}, 500);
+
+function setPaper(patch, msg = '') {
+  applyPaper({ ...paperPref, ...patch });
+  savePaper();
+  if (msg) toast(msg, 'ok');
+}
+
+function syncPaperControls() {
+  const sizeEl = $('#paperSize');
+  if (!sizeEl) return;
+  sizeEl.value = String(paperPref.size);
+  $('#paperSizeVal').textContent = `${paperPref.size} px`;
+  $$('#paperLh button').forEach((b) => b.classList.toggle('on', Number(b.dataset.lh) === paperPref.lh));
+  $$('#paperFont button').forEach((b) => b.classList.toggle('on', b.dataset.font === paperPref.font));
+  $('#paperHint').textContent = paperLabel(paperPref);
+}
+
+/** 快捷放大 / 缩小；到头给个提示，别让人以为坏了 */
+function paperStep(delta) {
+  const next = nextPaperSize(paperPref.size, delta);
+  if (next === paperPref.size) return toast(`稿纸字号已经${delta > 0 ? '最大' : '最小'}（${next} px）`);
+  setPaper({ size: next }, `稿纸字号 ${next} px`);
+}
+
+function paperReset() {
+  setPaper(PAPER_DEFAULTS, '稿纸已恢复默认');
+}
+
+$('#paperSize').addEventListener('input', (e) => setPaper({ size: Number(e.target.value) }));
+$$('#paperLh button').forEach((b) => b.addEventListener('click', () => setPaper({ lh: Number(b.dataset.lh) })));
+$$('#paperFont button').forEach((b) => b.addEventListener('click', () => setPaper({ font: b.dataset.font })));
+$('#paperReset').addEventListener('click', paperReset);
+
 function renderSettings() {
   const cfg = S.config;
   if (!cfg) return;
@@ -8895,6 +8954,21 @@ document.addEventListener('keydown', (e) => {
     toggleFocus();
     return;
   }
+  if (e.altKey && (e.key === '=' || e.key === '+')) {
+    e.preventDefault();
+    paperStep(1);
+    return;
+  }
+  if (e.altKey && (e.key === '-' || e.key === '_')) {
+    e.preventDefault();
+    paperStep(-1);
+    return;
+  }
+  if (e.altKey && e.key === '0') {
+    e.preventDefault();
+    paperReset();
+    return;
+  }
   if (e.key === 's') {
     e.preventDefault();
     manualSave();
@@ -8965,6 +9039,9 @@ function cmdkSource() {
   }
   op('立即保存', 'check', manualSave, 'Ctrl+S');
   op('切换明暗主题', 'moon', () => $('#themeBtn').click());
+  op('放大稿纸字号', 'plus', () => paperStep(1), 'Ctrl+Alt+=');
+  op('缩小稿纸字号', 'minus', () => paperStep(-1), 'Ctrl+Alt+-');
+  op('稿纸恢复默认', 'refresh', () => paperReset());
   op('写作统计 / 日更目标', 'stamp', () => openStatsModal());
   op('写作冲刺计时器', 'clock', () => sprintToggle(true), 'Ctrl+Alt+S');
   op('新建一卷（从当前章起）', 'layers', newVolumeFromCurrent);
@@ -9321,6 +9398,7 @@ async function boot() {
   } catch (err) {
     toast(`无法读取配置：${err.message}`, 'err');
   }
+  applyPaper(S.config?.ui?.editor);
   sprintInit();
   renderThemeIcon();
   try { await loadNovels(); } catch { S.novels = []; }

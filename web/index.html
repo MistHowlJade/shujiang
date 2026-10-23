@@ -19,6 +19,7 @@
   <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 5h16l-6 7v6l-4 2v-8z"/></symbol>
 <symbol id="i-columns" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="6.5" height="15" rx="1.5"/><rect x="14" y="4.5" width="6.5" height="15" rx="1.5"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m8 8 4-4 4 4"/><path d="M12 4v12"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m8 12 4 4 4-4"/><path d="M12 16V4"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
@@ -421,6 +422,47 @@
             <div class="btn-row">
               <button class="btn btn-primary" id="saveCfgBtn">保存设置</button>
               <span class="dim-text" id="cfgMsg"></span>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>稿纸</h2>
+              <span class="tag">立即生效</span>
+            </div>
+            <p class="desc">写作页正文的字号、行距和字体；阅读模式有自己的字号。记在 <code>data/config.json</code> 的 <code>ui.editor</code>。</p>
+            <div class="paper-opts">
+              <label class="paper-row">
+                <span class="paper-lbl">字号</span>
+                <input type="range" id="paperSize" min="14" max="22" step="1" aria-label="正文字号" />
+                <span class="paper-val" id="paperSizeVal">16 px</span>
+              </label>
+              <div class="paper-row">
+                <span class="paper-lbl">行距</span>
+                <div class="segmented" id="paperLh">
+                  <button type="button" data-lh="1.6">1.6</button>
+                  <button type="button" data-lh="1.8">1.8</button>
+                  <button type="button" data-lh="2">2.0</button>
+                  <button type="button" data-lh="2.2">2.2</button>
+                  <button type="button" data-lh="2.4">2.4</button>
+                </div>
+              </div>
+              <div class="paper-row">
+                <span class="paper-lbl">字体</span>
+                <div class="segmented" id="paperFont">
+                  <button type="button" data-font="serif">宋体</button>
+                  <button type="button" data-font="sans">黑体</button>
+                  <button type="button" data-font="kai">楷体</button>
+                </div>
+              </div>
+            </div>
+            <div class="paper-sample" id="paperSample">
+              <p>那一年，山里的雪下得比往常都早。他背着剑走出山门时，天还没亮，石阶上只有一行新踩出来的脚印。</p>
+              <p>“你要走？”师父在身后问，声音被风吹散了一半。</p>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-sm btn-text" id="paperReset">恢复默认</button>
+              <span class="dim-text" id="paperHint">16 px · 2.0 倍行距 · 宋体</span>
             </div>
           </div>
 

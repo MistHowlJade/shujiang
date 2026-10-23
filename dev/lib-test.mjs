@@ -8,12 +8,14 @@
 // 全通过时退出码为 0。
 // ===========================================================================
 
+import fs from 'node:fs';
 import { diffProse, diffHtml, diffSideHtml, splitSentences, lcsOps } from '../web/lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from '../web/lib/goal.js';
 import { scanProofChapter, buildProofReport } from '../web/lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey } from '../web/lib/health.js';
 import { submissionFacts, submissionNote } from '../server/manuscript.js';
 import { buildSubmitCheck, submitCheckHtml, wan, pickNos, SUBMIT_MIN_WORDS } from '../web/lib/submit.js';
+import { PAPER_DEFAULTS, PAPER_SIZE_MIN, PAPER_SIZE_MAX, PAPER_LH_STEPS, PAPER_FONTS, PAPER_FONT_KEYS, normalizePaper, nextPaperSize, paperVars, paperLabel } from '../web/lib/paper.js';
 
 let pass = 0;
 let fail = 0;
@@ -432,6 +434,73 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('有动作才渲染按钮', submitCheckHtml(noAuthor).includes('data-sub-act="author"'));
   check('没动作就不渲染按钮', !submitCheckHtml(withOutline).includes('data-sub-act='));
   check('三万字门槛常量没被改', SUBMIT_MIN_WORDS === 30000);
+}
+
+// ---------------------------------------------------------------
+// 稿纸排版
+{
+  check('没设置过时用默认 16 / 2.0 / 宋体',
+    JSON.stringify(normalizePaper()) === JSON.stringify({ size: 16, lh: 2, font: 'serif' }), JSON.stringify(normalizePaper()));
+  check('默认值就是老版本写死的样子', PAPER_DEFAULTS.size === 16 && PAPER_DEFAULTS.lh === 2 && PAPER_DEFAULTS.font === 'serif');
+  check('字号边界是 14–22', PAPER_SIZE_MIN === 14 && PAPER_SIZE_MAX === 22);
+  check('行距五档且含 2.0', PAPER_LH_STEPS.length === 5 && PAPER_LH_STEPS.includes(2), PAPER_LH_STEPS.join(','));
+
+  // 字号：夹取 + 取整 + 字符串也认
+  check('字号太小夹到 14', normalizePaper({ size: 9 }).size === 14, String(normalizePaper({ size: 9 }).size));
+  check('字号太大夹到 22', normalizePaper({ size: 40 }).size === 22, String(normalizePaper({ size: 40 }).size));
+  check('字号小数四舍五入', normalizePaper({ size: 17.6 }).size === 18, String(normalizePaper({ size: 17.6 }).size));
+  check('字号字符串也认', normalizePaper({ size: '18' }).size === 18);
+  check('字号乱写退回 16', normalizePaper({ size: 'big' }).size === 16);
+  check('字号是 null 按没填算', normalizePaper({ size: null }).size === 16);
+  check('整个配置不是对象也不炸', JSON.stringify(normalizePaper('x')) === JSON.stringify({ size: 16, lh: 2, font: 'serif' }));
+  check('行距是空串按没填算', normalizePaper({ lh: '' }).lh === 2);
+
+  // 行距：吸到最近的档，不让设置页出现「没一档选中」
+  check('行距吸到最近的档（2.1 → 2.0）', normalizePaper({ lh: 2.1 }).lh === 2, String(normalizePaper({ lh: 2.1 }).lh));
+  check('行距吸到最近的档（2.15 → 2.2）', normalizePaper({ lh: 2.15 }).lh === 2.2, String(normalizePaper({ lh: 2.15 }).lh));
+  check('行距太小吸到 1.6', normalizePaper({ lh: 0.9 }).lh === 1.6, String(normalizePaper({ lh: 0.9 }).lh));
+  check('行距太大吸到 2.4', normalizePaper({ lh: 9 }).lh === 2.4, String(normalizePaper({ lh: 9 }).lh));
+  check('行距乱写退回 2.0', normalizePaper({ lh: 'wide' }).lh === 2);
+
+  // 字体
+  check('楷体原样保留', normalizePaper({ font: 'kai' }).font === 'kai');
+  check('不认识的字体退回宋体', normalizePaper({ font: 'comic-sans' }).font === 'serif');
+  check('原型上的键不算字体', normalizePaper({ font: 'toString' }).font === 'serif');
+  check('三款字体都有中文名和 font-family',
+    ['serif', 'sans', 'kai'].every((k) => PAPER_FONTS[k].label && /serif|sans-serif/.test(PAPER_FONTS[k].family)));
+
+  // 加减字号
+  check('放大一格', nextPaperSize(16, 1) === 17);
+  check('缩小一格', nextPaperSize(16, -1) === 15);
+  check('最大就停在 22', nextPaperSize(22, 1) === 22 && nextPaperSize(21, 5) === 22);
+  check('最小就停在 14', nextPaperSize(14, -1) === 14 && nextPaperSize(15, -5) === 14);
+  check('乱给一个当前字号按默认走', nextPaperSize('x', 1) === 17);
+  check('当前字号是 null 也按默认走', nextPaperSize(null, 1) === 17);
+
+  // 落成 CSS 变量
+  const vars = paperVars({ size: 18, lh: 2.2, font: 'kai' });
+  check('CSS 变量正好三个', Object.keys(vars).length === 3 && '--ed-size' in vars && '--ed-lh' in vars && '--ed-font' in vars,
+    Object.keys(vars).join(','));
+  check('字号带 px', vars['--ed-size'] === '18px', vars['--ed-size']);
+  check('行距是数字', vars['--ed-lh'] === '2.2', vars['--ed-lh']);
+  check('楷体的 font-family 落到变量上', vars['--ed-font'].includes('KaiTi'), vars['--ed-font']);
+
+  // 给人看的一句话
+  check('标签写清三项', paperLabel({ size: 16, lh: 2, font: 'serif' }) === '16 px · 2.0 倍行距 · 宋体', paperLabel({ size: 16, lh: 2, font: 'serif' }));
+  check('标签用中文行距与字体', paperLabel({ size: 18, lh: 2.2, font: 'kai' }) === '18 px · 2.2 倍行距 · 楷体', paperLabel({ size: 18, lh: 2.2, font: 'kai' }));
+
+  // 设置页的档位是手写在 index.html 里的，靠这几条守住两处不跑偏
+  const indexHtml = fs.readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
+  const sizeInput = indexHtml.match(/id="paperSize"[^>]*min="(\d+)"[^>]*max="(\d+)"/);
+  check('字号滑块的上下限与模块一致',
+    !!sizeInput && Number(sizeInput[1]) === PAPER_SIZE_MIN && Number(sizeInput[2]) === PAPER_SIZE_MAX,
+    sizeInput ? `${sizeInput[1]}–${sizeInput[2]}` : '没找到 #paperSize');
+  check('设置页的行距档与模块一致',
+    PAPER_LH_STEPS.every((v) => indexHtml.includes(`data-lh="${v}"`)),
+    PAPER_LH_STEPS.map((v) => `${v}:${indexHtml.includes(`data-lh="${v}"`)}`).join(' '));
+  check('设置页的字体档与模块一致',
+    PAPER_FONT_KEYS.every((k) => indexHtml.includes(`data-font="${k}"`) && indexHtml.includes(`>${PAPER_FONTS[k].label}<`)),
+    PAPER_FONT_KEYS.join(','));
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
