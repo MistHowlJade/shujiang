@@ -375,6 +375,18 @@ async function main() {
     printDone.status === 200 && printDoneHtml.includes('定稿 1 章')
       && (printDoneHtml.match(/class="chapter"/g) || []).length === 1);
 
+  const docxRes = await fetch(`${BASE}/api/novels/${id}/export?format=docx`);
+  const docxBuf = Buffer.from(await docxRes.arrayBuffer());
+  const docxName = decodeURIComponent(docxRes.headers.get('content-disposition') || '');
+  check('Word 导出 200 且是 zip',
+    docxRes.status === 200 && /wordprocessingml/.test(docxRes.headers.get('content-type') || '')
+      && docxBuf.length > 4 && docxBuf.readUInt32LE(0) === 0x04034b50,
+    `${docxRes.status} ${docxRes.headers.get('content-type')}`);
+  check('Word 文件名是 .docx', docxName.includes('.docx'), docxName);
+  const docxRange = await req('GET', `${BASE}/api/novels/${id}/export?format=docx&from=1&to=999&only=done&note=1`);
+  check('Word 认区间与定稿',
+    docxRange.status === 200 && docxRange.buf.length > 4 && docxRange.buf.readUInt32LE(0) === 0x04034b50);
+
   // ---------------------------------------------------------------
   group('自定义封面');
   {

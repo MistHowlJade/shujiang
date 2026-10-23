@@ -9,6 +9,7 @@
 // ===========================================================================
 
 import fs from 'node:fs';
+import { inflateRawSync } from 'node:zlib';
 import { diffProse, diffHtml, diffSideHtml, splitSentences, lcsOps } from '../web/lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from '../web/lib/goal.js';
 import { scanProofChapter, buildProofReport } from '../web/lib/proof.js';
@@ -17,6 +18,7 @@ import { submissionFacts, submissionNote } from '../server/manuscript.js';
 import { buildSubmitCheck, submitCheckHtml, wan, pickNos, SUBMIT_MIN_WORDS } from '../web/lib/submit.js';
 import { PAPER_DEFAULTS, PAPER_SIZE_MIN, PAPER_SIZE_MAX, PAPER_LH_STEPS, PAPER_FONTS, PAPER_FONT_KEYS, normalizePaper, nextPaperSize, paperVars, paperLabel } from '../web/lib/paper.js';
 import { buildPrintHtml } from '../server/print.js';
+import { buildDocx } from '../server/docx.js';
 
 let pass = 0;
 let fail = 0;
@@ -24,6 +26,25 @@ const check = (name, ok, extra = '') => {
   if (ok) { pass++; console.log('  PASS', name); }
   else { fail++; console.log('  FAIL', name, extra); }
 };
+
+/** 自测用：解开 ZIP 的本地文件头，够验 DOCX 内部 XML 了 */
+function unzipDocx(buf) {
+  const files = {};
+  let i = 0;
+  while (i < buf.length - 4) {
+    if (buf.readUInt32LE(i) !== 0x04034b50) { i += 1; continue; }
+    const method = buf.readUInt16LE(i + 8);
+    const compSize = buf.readUInt32LE(i + 18);
+    const nameLen = buf.readUInt16LE(i + 26);
+    const extraLen = buf.readUInt16LE(i + 28);
+    const name = buf.slice(i + 30, i + 30 + nameLen).toString('utf8');
+    const start = i + 30 + nameLen + extraLen;
+    const raw = buf.slice(start, start + compSize);
+    files[name] = method === 0 ? raw : inflateRawSync(raw);
+    i = start + compSize;
+  }
+  return files;
+}
 
 // 句子切分
 check('按句号切分', splitSentences('他来了。她走了。').length === 2, JSON.stringify(splitSentences('他来了。她走了。')));
@@ -559,6 +580,72 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   const evilCh = { id: 'c3', no: 3, title: '<b>x</b>', content: '<script>alert(1)</script>' };
   const evil = buildPrintHtml({ ...pn, chapters: [evilCh] }, [evilCh]);
   check('章节标题与正文里的尖括号被转义',
+    evil.includes('&lt;b&gt;x&lt;/b&gt;') && evil.includes('&lt;script&gt;alert(1)&lt;/script&gt;') && !evil.includes('<script>alert(1)</script>'));
+}
+
+// ---------------------------------------------------------------
+// Word（.docx）
+{
+  const pn = {
+    title: '雾城 <记>',
+    author: '林三',
+    genre: '悬疑',
+    meta: {
+      contact: 'me@example.com',
+      logline: '一座会遗忘人的城。',
+      submissionNote: '这是第一段。\n这是第二段。',
+    },
+    chapters: [
+      { id: 'c1', no: 1, title: '夜车', content: '第一段。\n第二段「引号」。\n\n第三段。', stage: 'done', outlineId: 'o1' },
+      { id: 'c2', no: 2, title: '', content: '', stage: 'draft', volumeId: 'v2' },
+    ],
+    outline: {
+      volumes: [
+        { id: 'v1', name: '风起', desc: '第一卷的说明', chapters: [{ id: 'o1', title: '夜车' }] },
+        { id: 'v2', name: '第2卷 云涌', chapters: [] },
+      ],
+    },
+  };
+  const buf = buildDocx(pn, pn.chapters, { note: true });
+  const files = unzipDocx(buf);
+  const doc = files['word/document.xml'].toString('utf8');
+  const styles = files['word/styles.xml'].toString('utf8');
+  const footer = files['word/footer1.xml'].toString('utf8');
+  const firstFooter = files['word/footer2.xml'].toString('utf8');
+  const types = files['[Content_Types].xml'].toString('utf8');
+  const rels = files['word/_rels/document.xml.rels'].toString('utf8');
+  check('Word 是 zip 包', buf.length > 1000 && buf.readUInt32LE(0) === 0x04034b50);
+  check('Word 必需部件都在',
+    ['[Content_Types].xml', '_rels/.rels', 'word/document.xml', 'word/styles.xml', 'word/footer1.xml', 'word/footer2.xml']
+      .every((n) => files[n]));
+  check('Word 的 content types 收了正文与页脚', types.includes('/word/document.xml') && types.includes('/word/footer1.xml'));
+  check('Word 的页脚关系都在', rels.includes('footer1.xml') && rels.includes('footer2.xml'));
+  check('Word 书名页与章节', doc.includes('雾城 &lt;记&gt;') && doc.includes('第1章 夜车'));
+  check('Word 书名页有联系方式与篇幅', doc.includes('me@example.com') && doc.includes('全书 2 章') && doc.includes('约 16 字'));
+  check('Word 有创作说明与附言', doc.includes('创作说明') && doc.includes('这是第一段。') && doc.includes('这是第二段。'));
+  check('Word 有分卷与空章提示', doc.includes('第1卷 风起') && doc.includes('第2卷 云涌') && doc.includes('（本章还没有正文）'));
+  check('Word 每节另起一页', (doc.match(/<w:pageBreakBefore\/>/g) || []).length === 5);
+  check('Word 页脚有页码，首页页脚为空', footer.includes('w:instr=" PAGE "') && !firstFooter.includes(' PAGE '));
+  check('Word 用 A4 与宋体', doc.includes('w:w="11906"') && doc.includes('w:h="16838"') && styles.includes('w:eastAsia="宋体"'));
+  check('Word 正文缩进两字与 1.95 行距', styles.includes('w:line="468"') && doc.includes('w:firstLineChars="200"'));
+  check('Word 正文一行一段', doc.includes('第一段。') && doc.includes('第二段「引号」。') && doc.includes('第三段。'));
+  check('Word 没有 undefined / NaN', !doc.includes('undefined') && !doc.includes('NaN'));
+
+  const noNote = unzipDocx(buildDocx(pn, pn.chapters, {}))['word/document.xml'].toString('utf8');
+  check('Word 不勾附言就没有创作说明', !noNote.includes('创作说明'));
+
+  const range = unzipDocx(buildDocx(pn, [pn.chapters[0]], { range: { lo: 1, hi: 3 } }))['word/document.xml'].toString('utf8');
+  check('Word 区间标成节选', range.includes('节选 · 第 1–3 章') && range.includes('共 1 章'));
+
+  const done = unzipDocx(buildDocx(pn, [pn.chapters[0]], { onlyDone: true }))['word/document.xml'].toString('utf8');
+  check('Word 只导出定稿时写清定稿', done.includes('定稿 1 章'));
+
+  const single = unzipDocx(buildDocx(pn, [pn.chapters[1]], { single: true }))['word/document.xml'].toString('utf8');
+  check('Word 单章写清章号', single.includes('第 2 章 · 约 0 字'));
+
+  const evilCh = { id: 'c3', no: 3, title: '<b>x</b>', content: '<script>alert(1)</script>' };
+  const evil = unzipDocx(buildDocx({ ...pn, chapters: [evilCh] }, [evilCh]))['word/document.xml'].toString('utf8');
+  check('Word 标题与正文里的尖括号被转义',
     evil.includes('&lt;b&gt;x&lt;/b&gt;') && evil.includes('&lt;script&gt;alert(1)&lt;/script&gt;') && !evil.includes('<script>alert(1)</script>'));
 }
 

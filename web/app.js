@@ -8048,7 +8048,7 @@ function exportBook() {
   showModal(`<h3>导出 / 备份《${esc(S.novel.title)}》</h3>
     <div class="grid2">
       <label class="field-label">格式
-        <select id="exFmt" class="input"><option value="txt">TXT（纯文本）</option><option value="md">Markdown</option><option value="epub">EPUB（电子书）</option><option value="print">打印稿 / PDF</option><option value="json">作品备份（JSON，可恢复）</option></select>
+        <select id="exFmt" class="input"><option value="txt">TXT（纯文本）</option><option value="md">Markdown</option><option value="epub">EPUB（电子书）</option><option value="docx">Word（.docx）</option><option value="print">打印稿 / PDF</option><option value="json">作品备份（JSON，可恢复）</option></select>
       </label>
       <label class="field-label">范围
         <select id="exScope" class="input"><option value="all">全书</option><option value="range">章节区间</option><option value="chapter">当前章</option></select>
@@ -8292,6 +8292,7 @@ function exportBook() {
         const backup = fmtEl.value === 'json';
         const epub = fmtEl.value === 'epub';
         const md = fmtEl.value === 'md';
+        const docx = fmtEl.value === 'docx';
         const print = fmtEl.value === 'print';
         // 备份总是整本；EPUB 能选区间，但没法只导一章
         scopeEl.disabled = backup;
@@ -8299,12 +8300,14 @@ function exportBook() {
         scopeEl.querySelector('option[value="chapter"]').disabled = epub;
         if (epub && scopeEl.value === 'chapter') scopeEl.value = 'all';
         const scope = scopeEl.value;
-        hintEl.hidden = !(backup || epub || print);
+        hintEl.hidden = !(backup || epub || docx || print);
         hintEl.textContent = backup
           ? '备份是当前作品的完整 JSON：正文、设定、大纲、章节记忆和修订都会保留。恢复时会在书架新建一部作品，不会覆盖现有稿件。'
           : epub
             ? 'EPUB 自动生成标题页、目录和分卷结构，适合放进手机 / 阅读器。选了区间就只打包这几章。'
-            : 'A4 打印预览会在新标签页打开，每章另起一页。点「打印 / 存为 PDF」，在打印对话框里选「另存为 PDF」即可；分页以打印结果为准。';
+            : print
+              ? 'A4 打印预览会在新标签页打开，每章另起一页。点「打印 / 存为 PDF」，在打印对话框里选「另存为 PDF」即可；分页以打印结果为准。'
+              : 'Word 稿每章另起一页，含书名页、可选创作说明和页脚页码；编辑可以直接改。选了区间就只排这几章。';
         // 单章导出是作者明确指定的，不受「只导出定稿」影响；备份总是整本
         const showRange = !backup && scope === 'range';
         rangeRow.hidden = !showRange;
@@ -8332,9 +8335,9 @@ function exportBook() {
         // 封面只跟 EPUB 有关
         coverRow.hidden = !epub;
         if (epub) refreshCover();
-        // 附带材料：Markdown 与 EPUB 有意义；TXT 是拿来读的，不塞这些
+        // 附带材料：Markdown 与 EPUB 有意义；TXT / Word / 打印稿是拿来读 / 交稿的，不塞这些
         extrasRow.hidden = !(md || epub);
-        // 投稿附言：三种文稿格式都能放；备份本来就有全部内容，单章导出也谈不上附言
+        // 投稿附言：文稿格式都能放；备份本来就有全部内容，单章导出也谈不上附言
         noteRow.hidden = !(!backup && scope !== 'chapter');
         noteEl.disabled = !noteText;
         if (!noteText) noteEl.checked = false;

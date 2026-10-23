@@ -15,6 +15,7 @@ import {
 import { buildTask, TASKS, TEMPLATE_SLOTS, TEMPLATE_VARS } from './prompts.js';
 import { buildEpub } from './epub.js';
 import { buildPrintHtml } from './print.js';
+import { buildDocx } from './docx.js';
 import { outlineRows, characterRows, hasExtras, submissionFacts, submissionNote } from './manuscript.js';
 import { coverSvg, readCoverImage, saveCoverImage, deleteCoverImage, coverOptions } from './cover.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
@@ -832,7 +833,7 @@ async function handleApi(req, res, url) {
       const n = getNovel(id);
       if (!n) return sendJson(res, 404, { error: '作品不存在' });
       const raw = url.searchParams.get('format');
-      const format = ['md', 'epub', 'json', 'print'].includes(raw) ? raw : 'txt';
+      const format = ['md', 'epub', 'docx', 'json', 'print'].includes(raw) ? raw : 'txt';
       // 整本作品备份：原样导出作品 JSON，保留正文、设定、大纲、记忆和修订；
       // 恢复时由前端新建一部作品，不覆盖现有稿件。
       if (format === 'json') {
@@ -882,6 +883,20 @@ async function handleApi(req, res, url) {
           'X-Content-Type-Options': 'nosniff',
         });
         return res.end(html);
+      }
+
+      // Word（.docx）：给编辑一份可以直接改的稿子，每章另起一页
+      if (format === 'docx') {
+        const buf = buildDocx(n, list, extras);
+        const name = `${safeName(n.title)}${suffix}${cid && list[0] ? `_第${list[0].no}章` : ''}.docx`;
+        res.writeHead(200, {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+          'Content-Length': buf.length,
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        return res.end(buf);
       }
 
       if (format === 'epub') {
