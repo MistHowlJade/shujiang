@@ -21,6 +21,7 @@ import { buildPrintHtml } from '../server/print.js';
 import { buildDocx } from '../server/docx.js';
 import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
+import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 
 let pass = 0;
 let fail = 0;
@@ -745,6 +746,67 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   let zip64Err = '';
   try { unzipEntry(zip64, 'word/document.xml'); } catch (err) { zip64Err = err.message; }
   check('Word 导入：ZIP64 会被拒', /ZIP64/.test(zip64Err), zip64Err);
+}
+
+// ---------------------------------------------------------------
+// 一致性检查（设定冲突 / 时间线 / 口吻语风）
+{
+  const novel = {
+    title: '测试小说',
+    bible: {
+      world: [
+        { name: '青云宗', type: '宗门', level: '上古大派', location: '东域' },
+        { name: '青云宗', type: '宗门', level: '中型门派', location: '西域' }, // 冲突
+      ],
+      characters: [
+        { name: '林昭', gender: '男', age: '18', cultivation: '练气期', role: '主角' },
+        { name: '林昭', gender: '女', age: '20', cultivation: '筑基期', role: '配角' }, // 冲突
+      ],
+      skills: [
+        { name: '青云剑诀', type: '剑法', level: '地阶上品' },
+        { name: '青云剑诀', type: '剑法', level: '天阶下品' }, // 冲突
+      ],
+      locations: [
+        { name: '青云峰', parent: '青云宗', type: '主峰' },
+        { name: '青云峰', parent: '青云宗', type: '偏殿' }, // 冲突
+      ],
+      timeline: [
+        { time: '第一章', event: '主角入宗' },
+        { time: '第二章', event: '主角试炼' },
+      ],
+    },
+    chapters: [
+      { id: 'c1', no: 1, title: '入宗', content: '林昭清晨来到青云宗。深夜他在想入宗之事。这是一个很长的段落用来测试语风检测功能。林昭站在门前，心中有些忐忑。他在想，这一去可能就回不来了。风吹过树叶，发出沙沙的声音，像是有人在低语。他深吸一口气，推门而入。屋里坐着一个老人，须发皆白，眼神却锐利如鹰。老人淡淡地说：你来了。林昭点点头，没有说话。', memory: { timeline: [{ time: '清晨', event: '入宗' }, { time: '深夜', event: '思考' }] } },
+      { id: 'c2', no: 2, title: '试炼', content: '林昭进入试炼塔。这是一个很长的段落用来测试语风检测功能。林昭站在门前，心中有些忐忑。他在想，这一去可能就回不来了。风吹过树叶，发出沙沙的声音，像是有人在低语。他深吸一口气，推门而入。屋里坐着一个老人，须发皆白，眼神却锐利如鹰。老人淡淡地说：你来了。林昭点点头，没有说话。', memory: { timeline: [{ time: '深夜', event: '试炼' }] } },
+      { id: 'c3', no: 3, title: '初战', content: '我从小就知道自己与众不同。他从小就知道自己与众不同。这是一个很长的段落用来测试语风检测功能。我从小就知道自己与众不同。他从小就知道自己与众不同。这是一个很长的段落用来测试语风检测功能。我从小就知道自己与众不同。他从小就知道自己与众不同。', memory: {} },
+    ],
+    outline: {
+      volumes: [
+        { name: '第一卷', chapters: [{ title: '入宗', time: '清晨', order: 1 }, { title: '试炼', time: '深夜', order: 2 }] }
+      ]
+    },
+  };
+
+  const report = scanConsistency(novel, 'book', null);
+
+  check('一致性检查：发现设定冲突（世界观）', report.byKind.setting >= 1, `setting=${report.byKind.setting}`);
+  check('一致性检查：发现设定冲突（人物）', report.issues.some(i => i.type === 'char_conflict'), `issues=${JSON.stringify(report.issues.filter(i=>i.type==='char_conflict').map(x=>x.message))}`);
+  check('一致性检查：发现设定冲突（功法）', report.issues.some(i => i.type === 'skill_conflict'), `issues=${JSON.stringify(report.issues.filter(i=>i.type==='skill_conflict').map(x=>x.message))}`);
+  check('一致性检查：发现设定冲突（地点）', report.issues.some(i => i.type === 'location_conflict'), `issues=${JSON.stringify(report.issues.filter(i=>i.type==='location_conflict').map(x=>x.message))}`);
+
+  check('一致性检查：时间线跳跃提示', report.issues.some(i => i.kind === 'timeline' && i.type === 'time_jump'), `issues=${JSON.stringify(report.issues.filter(i=>i.kind==='timeline').map(x=>x.message))}`);
+
+  check('一致性检查：人称切换检测', report.issues.some(i => i.kind === 'voice' && i.type === 'person_shift'), `issues=${JSON.stringify(report.issues.filter(i=>i.kind==='voice').map(x=>x.message))}`);
+
+  const fingerprint = report.issues[0]?.fingerprint;
+  if (fingerprint) {
+    const filtered = applyConsistencyIgnored(report, [{ key: report.issues[0].fingerprint }]);
+    check('一致性检查：忽略清单过滤生效', filtered.issues.length === report.issues.length - 1, `before=${report.issues.length} after=${filtered.issues.length}`);
+  }
+
+  check('一致性检查：指纹格式正确', report.issues.every(i => i.fingerprint && i.fingerprint.startsWith('consistency|')), `fingerprints=${report.issues.map(i=>i.fingerprint).join(',')}`);
+
+  check('一致性检查：Markdown 报告生成', consistencyMarkdown({ title: '测试', issues: report.issues, byKind: { setting: 1, timeline: 0, character: 0, voice: 0 } }).includes('一致性检查报告') && consistencyMarkdown({ title: '测试', issues: report.issues, byKind: { setting: 1, timeline: 0, character: 0, voice: 0 } }).includes('设定冲突'), `md=...`);
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);

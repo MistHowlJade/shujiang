@@ -4,6 +4,7 @@ import { $, $$, esc, ico, debounce, toast, countWords, fmtWords, fmtDate, fmtAgo
 import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads } from './lib/data.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
+import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown, CONSISTENCY_KINDS } from './lib/consistency.js';
 import { diffProse, diffHtml, diffSideHtml } from './lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from './lib/goal.js';
 import { buildSubmitCheck, submitCheckHtml } from './lib/submit.js';
@@ -4983,10 +4984,70 @@ function renderIssues(text) {
     </div>`).join('');
 }
 
+function renderConsistencyReport(report) {
+  const box = $('#checkBox');
+  if (!report.issues?.length) {
+    box.innerHTML = '<div class="status-ok">✓ 一致性检查通过，未发现明显矛盾。</div>';
+    return;
+  }
+  const byKind = {};
+  for (const it of report.issues) {
+    if (!byKind[it.kind]) byKind[it.kind] = [];
+    byKind[it.kind].push(it);
+  }
+  const kindLabels = { setting: '设定冲突', timeline: '时间线', character: '人物行为', voice: '口吻/语风' };
+  const sevClass = (s) => s === 'hint' ? 'hint' : '';
+  let html = '<div class="consistency-report">';
+  for (const [kind, list] of Object.entries(byKind)) {
+    html += `<div class="consistency-kind"><h4>${kind === 'setting' ? '🛡️' : kind === 'timeline' ? '🕰️' : kind === 'character' ? '👤' : '🎙️'} ${kind === 'setting' ? '设定冲突' : kind === 'timeline' ? '时间线矛盾' : kind === 'character' ? '人物行为异常' : '口吻/语风差异'} (${list.length})</h4>`;
+    for (const it of list) {
+      const sev = sevClass(it.severity);
+      const fingerprint = it.fingerprint || consistencyKey(it.kind, it.id);
+      const ignored = (S.novel.meta?.consistencyIgnored || []).some(x => x.key === fingerprint || x === fingerprint);
+      html += `
+        <div class="issue ${sev}" data-fingerprint="${esc(fingerprint)}">
+          <div class="is-head"><b>${esc(it.message)}</b>${ignored ? '<span class="ignored-badge">已忽略</span>' : ''}</div>
+          ${it.loc ? `<div class="is-loc">${esc(it.loc)}</div>` : ''}
+          ${!ignored ? `
+            <div class="is-actions">
+              <button class="btn btn-sm btn-text ignore-btn" data-fingerprint="${esc(fingerprint)}" data-kind="${esc(it.kind)}" data-label="${esc(it.message.slice(0, 30))}">忽略此项</button>
+            </div>` : ''}
+        </div>`;
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  box.innerHTML = html;
+  // 绑定忽略按钮
+  box.querySelectorAll('.ignore-btn').forEach(btn => {
+    btn.onclick = async () => {
+      const fp = btn.dataset.fingerprint;
+      const kind = btn.dataset.kind;
+      const label = btn.dataset.label;
+      const ign = (S.novel.meta?.consistencyIgnored || []).slice();
+      ign.push({ key: fp, label: `${kind}: ${label}`, ts: Date.now() });
+      await api.send(`/api/novels/${S.novel.id}`, { meta: { consistencyIgnored: ign } });
+      S.novel.meta.consistencyIgnored = ign;
+      toast('已加入忽略清单', 'ok');
+      // 重新渲染
+      const scope = $('#checkScope').value;
+      const currentChapterId = scope === 'current' ? S.chapterId : null;
+      const report = scanConsistency(S.novel, scope === 'bible' ? 'book' : scope, currentChapterId);
+      const filtered = applyConsistencyIgnored(report, ign);
+      renderConsistencyReport(filtered);
+    };
+  });
+}
+
 $('#consistencyBtn').addEventListener('click', async () => {
   if (!S.novel) return toast('先打开作品', 'err');
-  const text = await runStream({ task: 'consistency', novelId: S.novel.id, chapterId: S.chapterId, payload: scopeForCheck() }, { target: 'check' });
-  if (text) renderIssues(text);
+  const scope = $('#checkScope').value;
+  const currentChapterId = scope === 'current' ? S.chapterId : null;
+  const report = scanConsistency(S.novel, scope === 'bible' ? 'book' : scope, currentChapterId);
+  // 应用忽略清单
+  const ignored = S.novel.meta?.consistencyIgnored || [];
+  const filtered = applyConsistencyIgnored(report, ignored);
+  renderConsistencyReport(filtered);
 });
 
 $('#reviewBtn').addEventListener('click', async () => {

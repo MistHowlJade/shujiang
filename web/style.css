@@ -1242,7 +1242,55 @@ kbd {
 }
 .issue .is-problem { font-size: 12.5px; line-height: 1.68; }
 .issue .is-fix { margin-top: 6px; font-size: 12px; line-height: 1.68; color: var(--success); }
-.md-h { margin: 13px 0 5px; font-size: 12.5px; font-weight: 600; color: var(--text-1); }
+.issue .ignored-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 9px;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  color: var(--text-3);
+  border: 1px solid var(--border);
+}
+.issue .is-actions { margin-top: 8px; }
+.issue.hint { opacity: 0.8; }
+.issue.hint .is-head b { color: var(--text-3) !important; }
+
+.consistency-report { display: flex; flex-direction: column; gap: 16px; }
+.consistency-kind {
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.consistency-kind h4 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.consistency-kind .issue {
+  background: var(--surface-1);
+  border-color: var(--border-2);
+  margin-top: 8px;
+  padding: 10px 12px;
+}
+.consistency-kind .issue:first-child { margin-top: 0; }
+.consistency-report .issue .ignored-badge {
+  background: var(--warning-bg);
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.ignored-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 9px;
+  border-radius: var(--r-full);
+  background: var(--warning-bg);
+  color: var(--warning);
+  border: 1px solid var(--warning);
+}
 .md-h:first-child { margin-top: 0; }
 .output ul { margin: 4px 0; padding-left: 18px; }
 .output li { margin: 2px 0; }
