@@ -8048,7 +8048,7 @@ function exportBook() {
   showModal(`<h3>导出 / 备份《${esc(S.novel.title)}》</h3>
     <div class="grid2">
       <label class="field-label">格式
-        <select id="exFmt" class="input"><option value="txt">TXT（纯文本）</option><option value="md">Markdown</option><option value="epub">EPUB（电子书）</option><option value="json">作品备份（JSON，可恢复）</option></select>
+        <select id="exFmt" class="input"><option value="txt">TXT（纯文本）</option><option value="md">Markdown</option><option value="epub">EPUB（电子书）</option><option value="print">打印稿 / PDF</option><option value="json">作品备份（JSON，可恢复）</option></select>
       </label>
       <label class="field-label">范围
         <select id="exScope" class="input"><option value="all">全书</option><option value="range">章节区间</option><option value="chapter">当前章</option></select>
@@ -8115,6 +8115,7 @@ function exportBook() {
       const fmtEl = box.querySelector('#exFmt');
       const scopeEl = box.querySelector('#exScope');
       const hintEl = box.querySelector('#exHint');
+      const okBtn = box.querySelector('#exOk');
       const doneEl = box.querySelector('#exDone');
       const doneRow = box.querySelector('#exDoneRow');
       const doneCountEl = box.querySelector('#exDoneCount');
@@ -8291,16 +8292,19 @@ function exportBook() {
         const backup = fmtEl.value === 'json';
         const epub = fmtEl.value === 'epub';
         const md = fmtEl.value === 'md';
+        const print = fmtEl.value === 'print';
         // 备份总是整本；EPUB 能选区间，但没法只导一章
         scopeEl.disabled = backup;
         if (backup) scopeEl.value = 'all';
         scopeEl.querySelector('option[value="chapter"]').disabled = epub;
         if (epub && scopeEl.value === 'chapter') scopeEl.value = 'all';
         const scope = scopeEl.value;
-        hintEl.hidden = !(backup || epub);
+        hintEl.hidden = !(backup || epub || print);
         hintEl.textContent = backup
           ? '备份是当前作品的完整 JSON：正文、设定、大纲、章节记忆和修订都会保留。恢复时会在书架新建一部作品，不会覆盖现有稿件。'
-          : 'EPUB 自动生成标题页、目录和分卷结构，适合放进手机 / 阅读器。选了区间就只打包这几章。';
+          : epub
+            ? 'EPUB 自动生成标题页、目录和分卷结构，适合放进手机 / 阅读器。选了区间就只打包这几章。'
+            : 'A4 打印预览会在新标签页打开，每章另起一页。点「打印 / 存为 PDF」，在打印对话框里选「另存为 PDF」即可；分页以打印结果为准。';
         // 单章导出是作者明确指定的，不受「只导出定稿」影响；备份总是整本
         const showRange = !backup && scope === 'range';
         rangeRow.hidden = !showRange;
@@ -8379,6 +8383,8 @@ function exportBook() {
           checkBody.hidden = true;
           checkBtn.textContent = '交稿前检查一下';
         }
+        // 打印稿不是下载文件，按钮上把动作说清楚
+        okBtn.textContent = print ? '打开打印预览' : '下载';
         if (!checkBody.hidden) renderCheck();
       };
       fmtEl.onchange = sync;
@@ -8432,7 +8438,15 @@ function exportBook() {
         if (!extrasRow.hidden && charactersEl.checked) extras.push('characters');
         const extraQ = extras.length ? `&extras=${extras.join(',')}` : '';
         const noteQ = !noteRow.hidden && noteEl.checked && noteText ? '&note=1' : '';
-        window.location.href = `/api/novels/${S.novel.id}/export?format=${fmt}${q}${rangeQ}${extraQ}${noteQ}`;
+        const url = `/api/novels/${S.novel.id}/export?format=${fmt}${q}${rangeQ}${extraQ}${noteQ}`;
+        // 打印稿是打开一页给人看 / 打印，不是下载；弹窗被拦时留在原地，别把导出窗口关了
+        if (fmt === 'print') {
+          const w = window.open(url, '_blank');
+          if (!w) return toast('浏览器拦住了新标签页，允许弹出窗口后再试', 'err');
+          closeModal();
+          return;
+        }
+        window.location.href = url;
         closeModal();
       };
     });

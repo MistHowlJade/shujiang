@@ -358,6 +358,23 @@ async function main() {
   const jsonExp = await req('GET', `${BASE}/api/novels/${id}/export?format=json`);
   check('备份 JSON 可解析', (() => { try { return !!JSON.parse(jsonExp.buf.toString('utf8')); } catch { return false; } })());
 
+  const printExp = await req('GET', `${BASE}/api/novels/${id}/export?format=print`);
+  const printHtml = printExp.buf.toString('utf8');
+  check('打印稿导出 200 且是完整 HTML',
+    printExp.status === 200 && printHtml.startsWith('<!doctype html>') && printHtml.includes('打印 / 存为 PDF'),
+    printHtml.slice(0, 40));
+  check('打印稿有书名页与章节', printHtml.includes('class="titlepage"') && printHtml.includes('class="chapter"'));
+  const printRange = await req('GET', `${BASE}/api/novels/${id}/export?format=print&from=1&to=1`);
+  const printRangeHtml = printRange.buf.toString('utf8');
+  check('打印稿认章节区间',
+    printRange.status === 200 && printRangeHtml.includes('节选 · 第 1 章')
+      && (printRangeHtml.match(/class="chapter"/g) || []).length === 1);
+  const printDone = await req('GET', `${BASE}/api/novels/${id}/export?format=print&only=done`);
+  const printDoneHtml = printDone.buf.toString('utf8');
+  check('打印稿认只导出定稿',
+    printDone.status === 200 && printDoneHtml.includes('定稿 1 章')
+      && (printDoneHtml.match(/class="chapter"/g) || []).length === 1);
+
   // ---------------------------------------------------------------
   group('自定义封面');
   {

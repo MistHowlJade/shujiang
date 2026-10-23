@@ -16,6 +16,7 @@ import { buildHealthReport, applyHealthIgnored, healthKey } from '../web/lib/hea
 import { submissionFacts, submissionNote } from '../server/manuscript.js';
 import { buildSubmitCheck, submitCheckHtml, wan, pickNos, SUBMIT_MIN_WORDS } from '../web/lib/submit.js';
 import { PAPER_DEFAULTS, PAPER_SIZE_MIN, PAPER_SIZE_MAX, PAPER_LH_STEPS, PAPER_FONTS, PAPER_FONT_KEYS, normalizePaper, nextPaperSize, paperVars, paperLabel } from '../web/lib/paper.js';
+import { buildPrintHtml } from '../server/print.js';
 
 let pass = 0;
 let fail = 0;
@@ -501,6 +502,64 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('设置页的字体档与模块一致',
     PAPER_FONT_KEYS.every((k) => indexHtml.includes(`data-font="${k}"`) && indexHtml.includes(`>${PAPER_FONTS[k].label}<`)),
     PAPER_FONT_KEYS.join(','));
+}
+
+// ---------------------------------------------------------------
+// 打印稿 / PDF
+{
+  const pn = {
+    title: '雾城 <记>',
+    author: '林三',
+    genre: '悬疑',
+    meta: {
+      contact: 'me@example.com',
+      logline: '一座会遗忘人的城。',
+      submissionNote: '这是第一段。\n这是第二段。',
+    },
+    chapters: [
+      { id: 'c1', no: 1, title: '夜车', content: '第一段。\n第二段「引号」。\n\n第三段。', stage: 'done', outlineId: 'o1' },
+      { id: 'c2', no: 2, title: '', content: '', stage: 'draft', volumeId: 'v2' },
+    ],
+    outline: {
+      volumes: [
+        { id: 'v1', name: '风起', desc: '第一卷的说明', chapters: [{ id: 'o1', title: '夜车' }] },
+        { id: 'v2', name: '第2卷 云涌', chapters: [] },
+      ],
+    },
+  };
+  const all = buildPrintHtml(pn, pn.chapters, { note: true });
+  check('打印稿是完整 HTML', all.startsWith('<!doctype html>') && all.includes('<html lang="zh-CN">'));
+  check('打印稿标题里带书名并转义', all.includes('<title>《雾城 &lt;记&gt;》· 打印稿</title>') && !all.includes('雾城 <记>'));
+  check('工具栏有打印按钮', all.includes('打印 / 存为 PDF') && all.includes('id="printBtn"'));
+  check('A4 页面与打印样式在', all.includes('@page { size: A4; margin: 22mm 20mm; }') && all.includes('@media print'));
+  check('每章另起一页', all.includes('break-before: page'));
+  check('书名页三项都在', all.includes('class="titlepage"') && all.includes('悬疑') && all.includes('林三') && all.includes('me@example.com'));
+  check('书名页有简介与篇幅', all.includes('一座会遗忘人的城。') && all.includes('全书 2 章') && all.includes('约 16 字'));
+  check('创作说明页在', all.includes('class="note-page"') && all.includes('创作说明') && all.includes('篇幅'));
+  check('附言一行一段', all.includes('<p>这是第一段。</p>') && all.includes('<p>这是第二段。</p>'));
+  check('两个分卷页都在', (all.match(/class="volume"/g) || []).length === 2 && all.includes('第1卷 风起') && all.includes('第2卷 云涌'));
+  check('卷说明进卷页', all.includes('第一卷的说明'));
+  check('章节标题与空章提示', all.includes('第1章 夜车') && all.includes('第2章') && all.includes('（本章还没有正文）'));
+  check('正文一行一段', all.includes('<p>第一段。</p>') && all.includes('<p>第二段「引号」。</p>') && all.includes('<p>第三段。</p>'));
+  check('空行不产生空段', !all.includes('<p></p>'));
+  check('没有 undefined / NaN', !all.includes('undefined') && !all.includes('NaN'));
+
+  const noNote = buildPrintHtml(pn, pn.chapters, {});
+  check('不勾附言就没有创作说明页', !noNote.includes('class="note-page"'));
+
+  const range = buildPrintHtml(pn, [pn.chapters[0]], { range: { lo: 1, hi: 3 } });
+  check('区间打印标成节选', range.includes('节选 · 第 1–3 章') && range.includes('共 1 章'));
+
+  const done = buildPrintHtml(pn, [pn.chapters[0]], { onlyDone: true });
+  check('只打印定稿时写清定稿', done.includes('定稿 1 章'));
+
+  const single = buildPrintHtml(pn, [pn.chapters[1]], { single: true });
+  check('单章打印写清章号', single.includes('第 2 章 · 约 0 字'));
+
+  const evilCh = { id: 'c3', no: 3, title: '<b>x</b>', content: '<script>alert(1)</script>' };
+  const evil = buildPrintHtml({ ...pn, chapters: [evilCh] }, [evilCh]);
+  check('章节标题与正文里的尖括号被转义',
+    evil.includes('&lt;b&gt;x&lt;/b&gt;') && evil.includes('&lt;script&gt;alert(1)&lt;/script&gt;') && !evil.includes('<script>alert(1)</script>'));
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);

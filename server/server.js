@@ -14,6 +14,7 @@ import {
 } from './store.js';
 import { buildTask, TASKS, TEMPLATE_SLOTS, TEMPLATE_VARS } from './prompts.js';
 import { buildEpub } from './epub.js';
+import { buildPrintHtml } from './print.js';
 import { outlineRows, characterRows, hasExtras, submissionFacts, submissionNote } from './manuscript.js';
 import { coverSvg, readCoverImage, saveCoverImage, deleteCoverImage, coverOptions } from './cover.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
@@ -831,7 +832,7 @@ async function handleApi(req, res, url) {
       const n = getNovel(id);
       if (!n) return sendJson(res, 404, { error: '作品不存在' });
       const raw = url.searchParams.get('format');
-      const format = raw === 'md' ? 'md' : raw === 'epub' ? 'epub' : raw === 'json' ? 'json' : 'txt';
+      const format = ['md', 'epub', 'json', 'print'].includes(raw) ? raw : 'txt';
       // 整本作品备份：原样导出作品 JSON，保留正文、设定、大纲、记忆和修订；
       // 恢复时由前端新建一部作品，不覆盖现有稿件。
       if (format === 'json') {
@@ -866,7 +867,22 @@ async function handleApi(req, res, url) {
         note: url.searchParams.get('note') === '1',
         // 区间导出时在稿件头部 / 书名页标成「节选」
         range: range ? { lo: range.lo, hi: range.hi } : null,
+        // 打印稿的书名页要写清是单章还是定稿版
+        single: !!cid,
+        onlyDone,
       };
+
+      // 打印稿 / PDF：返回一份可以直接打印的 HTML，浏览器打印对话框里可另存为 PDF
+      if (format === 'print') {
+        const html = buildPrintHtml(n, list, extras);
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Length': Buffer.byteLength(html),
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        return res.end(html);
+      }
 
       if (format === 'epub') {
         // EPUB 忽略 chapterId（单章电子书没有阅读价值），但认「全书 / 区间」
