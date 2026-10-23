@@ -1,8 +1,0 @@
-润色/改写面板：选中文本弹出工具栏，支持润色/扩写/精简/改写/按指令改/批注
-
-- web/app.js 新增 runSegmentOp 统一入口，调用现有 streamAI + showDiff
-- 选中 >=2 字时在光标下方浮出 selToolbar（润色/扩写/精简/改写/按指令/批注）
-- 按指令处理弹窗可自定义提示词；批注支持 6 色高亮+备注
-- 差异面板左右对照（原文标删除，新文标新增），接受后替换并进撤销栈
-- 复用现有 prompt 模板（polish/expand/shorten/rewrite/custom），零新增后端依赖
-- lib-test +5 测试（230 通过），regress +5 测试（247 通过）
