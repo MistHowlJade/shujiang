@@ -7831,7 +7831,10 @@ $('#openDataBtn').addEventListener('click', () => {
  * 11. 导入 / 导出
  * ============================================================ */
 const IMPORT_LIMIT = 20 * 1024 * 1024;
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const isTextFile = (f) => !!f && (/\.(txt|md|markdown)$/i.test(f.name) || /^text\//i.test(f.type || ''));
+const isDocxFile = (f) => !!f && (/\.docx$/i.test(f.name || '') || f.type === DOCX_MIME);
+const isImportFile = (f) => isTextFile(f) || isDocxFile(f);
 const fmtSize = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
 
 /**
@@ -7862,21 +7865,35 @@ async function readTextFile(file) {
   }
 }
 
+/** Word 只上传到本机服务解析，原文不经过任何第三方 */
+async function readDocxFile(file) {
+  if (file.size > IMPORT_LIMIT) {
+    throw new Error(`Word 文件有 ${fmtSize(file.size)}，超过 20 MB，建议先在 Word 里拆成几份`);
+  }
+  try {
+    return await api.upload('/api/import/docx', file);
+  } catch (err) {
+    if (err?.name === 'TypeError') throw new Error('连不上本地服务（请确认 启动.bat 的窗口还开着）');
+    throw err;
+  }
+}
+
 function openImportModal(file) {
   if (!S.novel) return toast('先打开作品', 'err');
   const more = S.novel.chapters.length ? '追加到现有章节末尾' : '作为这本书的第一批章节';
   showModal(`<h3>导入已有文稿</h3>
-    <p class="modal-sub">导入到《${esc(S.novel.title)}》：支持 .txt / .md，自动识别 UTF-8 / GBK。按「第X章」切分，按「第X卷」分组，${more}。</p>
+    <p class="modal-sub">导入到《${esc(S.novel.title)}》：支持 .txt / .md / .docx，自动识别文本编码；Word 稿按段落还原。按「第X章」切分，按「第X卷」分组，${more}。</p>
     <div class="import-drop" id="impDrop" title="选择文件，或把文件拖到这里" role="button" tabindex="0">
       ${ico('upload')}
       <div><b>选择文件</b><span class="dim">或拖到这里</span></div>
-      <div class="import-file" id="impFileInfo">.txt / .md · 最大 20 MB</div>
-      <input type="file" id="impFile" accept=".txt,.md,text/plain,text/markdown" hidden>
+      <div class="import-file" id="impFileInfo">.txt / .md / .docx · 最大 20 MB</div>
+      <input type="file" id="impFile" accept=".txt,.md,.markdown,.docx,text/plain,text/markdown,${DOCX_MIME}" hidden>
     </div>
     <label class="field-label">也可以直接粘贴
       <textarea id="impText" class="input" placeholder="第一章 落霜&#10;&#10;正文……&#10;&#10;第二章 归途&#10;&#10;正文……"></textarea>
     </label>
     <div class="import-note dim small" id="impNote" hidden></div>
+    <label class="find-check" id="impFrontWrap" style="margin-top:8px" hidden><input type="checkbox" id="impFront" /> 连开头的前置内容一起导入（书名页 / 创作说明）</label>
     <div class="modal-foot"><button class="btn btn-text" id="impCancel">取消</button><button class="btn btn-primary" id="impOk">导入</button></div>`,
     (box) => {
       const drop = box.querySelector('#impDrop');
@@ -7884,22 +7901,70 @@ function openImportModal(file) {
       const ta = box.querySelector('#impText');
       const info = box.querySelector('#impFileInfo');
       const note = box.querySelector('#impNote');
+      const frontWrap = box.querySelector('#impFrontWrap');
+      const frontBox = box.querySelector('#impFront');
+      let docxState = null;
+
+      const resetDocx = () => {
+        docxState = null;
+        frontWrap.hidden = true;
+        frontBox.checked = false;
+      };
+
+      const updateDocxNote = () => {
+        if (!docxState) return;
+        const { meta: r } = docxState;
+        const paraCount = ta.value.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean).length;
+        const headings = (r.headings || 0) + (frontBox.checked ? (r.frontMatterHeadings || 0) : 0);
+        const bits = ['Word 稿', `${paraCount} 段`, `${fmtWords(countWords(ta.value))} 字`];
+        if (headings) bits.push(`${headings} 个标题`);
+        if (r.deleted) bits.push(`忽略 ${r.deleted} 处修订删除`);
+        if (r.inserted) bits.push(`保留 ${r.inserted} 处修订插入`);
+        if (r.frontMatter) bits.push(frontBox.checked ? '含前置内容' : '已跳过前置内容');
+        note.hidden = false;
+        note.innerHTML = esc(bits.join(' · '));
+      };
 
       const loadFile = async (f) => {
         if (!f) return;
-        if (!isTextFile(f)) return toast('只支持 .txt / .md 文件', 'err');
+        if (!isImportFile(f)) return toast('只支持 .txt / .md / .docx 文件', 'err');
         info.textContent = `读取 ${f.name}…`;
+        note.hidden = true;
+        ta.value = '';
         try {
+          if (isDocxFile(f)) {
+            resetDocx();
+            const r = await readDocxFile(f);
+            const body = r.text || '';
+            const front = r.frontMatter || '';
+            docxState = { file: f, meta: r, body, full: [front, body].filter(Boolean).join('\n\n') };
+            ta.value = body;
+            frontBox.checked = false;
+            frontWrap.hidden = !front;
+            info.textContent = `${f.name} · ${fmtSize(f.size)}`;
+            updateDocxNote();
+            return;
+          }
+          resetDocx();
           const r = await readTextFile(f);
           ta.value = r.text;
           info.textContent = `${f.name} · ${fmtSize(f.size)}`;
           note.hidden = false;
           note.innerHTML = `识别为 <b>${esc(r.enc)}</b> · ${fmtWords(countWords(r.text))} 字 · ${r.text.split('\n').length} 行`;
         } catch (err) {
-          info.textContent = '.txt / .md · 最大 20 MB';
+          resetDocx();
+          info.textContent = '.txt / .md / .docx · 最大 20 MB';
+          note.hidden = true;
           toast(err.message || '读不了这个文件', 'err');
         }
       };
+
+      frontBox.onchange = () => {
+        if (!docxState) return;
+        ta.value = frontBox.checked ? docxState.full : docxState.body;
+        updateDocxNote();
+      };
+      ta.addEventListener('input', updateDocxNote);
 
       drop.onclick = () => input.click();
       drop.addEventListener('keydown', (e) => {
@@ -7907,7 +7972,11 @@ function openImportModal(file) {
         e.preventDefault();
         input.click();
       });
-      input.onchange = () => loadFile(input.files[0]);
+      input.onchange = () => {
+        const f = input.files[0];
+        input.value = ''; // 允许再次选同一个文件（比如重新导出后又改了一遍）
+        loadFile(f);
+      };
       drop.addEventListener('dragover', (e) => {
         if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
         e.preventDefault();
@@ -7949,7 +8018,7 @@ function openImportModal(file) {
 
 $('#importBtn').addEventListener('click', () => openImportModal());
 
-/* 把 .txt / .md 拖到窗口任意位置也能导入 */
+/* 把 .txt / .md / .docx 拖到窗口任意位置也能导入 */
 let dragDepth = 0;
 function showDropMask(on) {
   const mask = $('#dropMask');
@@ -7982,7 +8051,7 @@ window.addEventListener('drop', (e) => {
   const f = e.dataTransfer.files?.[0];
   if (!f) return;
   if (!S.novel) return toast('先打开一部作品，再把文稿拖进来', 'err');
-  if (!isTextFile(f)) return toast('只支持 .txt / .md 文件', 'err');
+  if (!isImportFile(f)) return toast('只支持 .txt / .md / .docx 文件', 'err');
   openImportModal(f);
 });
 

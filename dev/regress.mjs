@@ -49,6 +49,21 @@ const get = async (u) => (await req('GET', u)).json;
 const post = async (u, b) => (await req('POST', u, b)).json;
 const put = async (u, b) => (await req('PUT', u, b)).json;
 
+/** 发原始二进制（Word 导入接口不走 JSON） */
+async function postRaw(url, buf, type = 'application/octet-stream') {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': type },
+    body: buf,
+  });
+  const out = Buffer.from(await r.arrayBuffer());
+  let json = null;
+  if ((r.headers.get('content-type') || '').includes('json')) {
+    try { json = JSON.parse(out.toString('utf8')); } catch { /* 非 JSON 正文 */ }
+  }
+  return { status: r.status, buf: out, json };
+}
+
 /** 发一次流式请求，把正文攒出来（用来验证模型对比时两个模型各自跑各自的） */
 async function streamOnce(providerId, model, novelId, chapterId) {
   const r = await fetch(`${BASE}/api/ai/stream`, {
@@ -233,6 +248,45 @@ async function checkManuscript(novelId) {
 
   t = await parse(['第一卷 少年游', '第一章', '第1卷的结局让人意外', '第2章', '乙'].join(NL));
   check('正文里的「第N卷」不误切', t.chapters.length === 2 && t.volumes.length === 1, `章=${t.chapters.length} 卷=${t.volumes.length}`);
+}
+
+/** Word 导入：导出一份带书名页 / 创作说明的 docx，解析后再按章节导入 */
+async function checkDocxImport() {
+  const made = await post(`${BASE}/api/novels`, { title: 'Word 导入测试', author: '测试作者', genre: '悬疑' });
+  const nid = made.novel?.id;
+  check('Word 导入：建测试作品', !!nid);
+  if (!nid) return;
+
+  await put(`${BASE}/api/novels/${nid}`, { meta: { submissionNote: '给编辑的附言。' } });
+  await post(`${BASE}/api/novels/${nid}/chapters`, { title: '开始', content: '第一段。' });
+  await post(`${BASE}/api/novels/${nid}/chapters`, { title: '继续', content: '第二段。' });
+
+  const exp = await req('GET', `${BASE}/api/novels/${nid}/export?format=docx&note=1`);
+  check('Word 导入：导出测试稿', exp.status === 200 && exp.buf.length > 1000 && exp.buf.readUInt32LE(0) === 0x04034b50,
+    `status=${exp.status} size=${exp.buf.length}`);
+
+  const parsed = await postRaw(`${BASE}/api/import/docx`, exp.buf, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  const t = parsed.json || {};
+  check('Word 导入：解析接口返回正文', parsed.status === 200 && !!t.text, `status=${parsed.status} ${JSON.stringify(t).slice(0, 120)}`);
+  check('Word 导入：跳过书名页与创作说明',
+    t.text?.includes('第1章 开始') && !t.text?.includes('Word 导入测试') && !t.text?.includes('创作说明') &&
+    t.frontMatter?.includes('Word 导入测试') && t.frontMatter?.includes('创作说明'),
+    JSON.stringify({ text: (t.text || '').slice(0, 60), front: (t.frontMatter || '').slice(0, 60) }));
+  check('Word 导入：正文与统计都在',
+    t.text?.includes('第一段。') && t.text?.includes('第二段。') && t.paragraphs > 0 && t.headings === 2 && t.frontMatterHeadings === 1,
+    `paragraphs=${t.paragraphs} headings=${t.headings} frontHeadings=${t.frontMatterHeadings}`);
+
+  await put(`${BASE}/api/novels/${nid}`, { chapters: [], outline: { volumes: [], notes: '' } });
+  const imported = await post(`${BASE}/api/novels/${nid}/import`, { text: t.text });
+  const n = (await get(`${BASE}/api/novels/${nid}`)).novel;
+  check('Word 导入：解析结果按章节导入',
+    imported.imported === 2 && n.chapters.length === 2 && n.chapters[0].title === '开始' && n.chapters[1].content === '第二段。',
+    `imported=${imported.imported} chapters=${n.chapters.length}`);
+
+  const bad = await postRaw(`${BASE}/api/import/docx`, Buffer.from('这不是 docx'), 'application/octet-stream');
+  check('Word 导入：拒绝非 docx', bad.status === 400 && /Word/.test(bad.json?.error || ''), `status=${bad.status} ${bad.json?.error || ''}`);
+
+  await req('DELETE', `${BASE}/api/novels/${nid}?permanent=1`);
 }
 
 async function main() {
@@ -898,6 +952,10 @@ async function main() {
   // ---------------------------------------------------------------
   group('导入已有文稿');
   await checkManuscript(id);
+
+  // ---------------------------------------------------------------
+  group('Word 导入');
+  await checkDocxImport();
 
   // ---------------------------------------------------------------
   group('清理');

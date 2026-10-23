@@ -19,6 +19,8 @@ import { buildSubmitCheck, submitCheckHtml, wan, pickNos, SUBMIT_MIN_WORDS } fro
 import { PAPER_DEFAULTS, PAPER_SIZE_MIN, PAPER_SIZE_MAX, PAPER_LH_STEPS, PAPER_FONTS, PAPER_FONT_KEYS, normalizePaper, nextPaperSize, paperVars, paperLabel } from '../web/lib/paper.js';
 import { buildPrintHtml } from '../server/print.js';
 import { buildDocx } from '../server/docx.js';
+import { zip, unzipEntry } from '../server/zip.js';
+import { extractDocxText } from '../server/docx-import.js';
 
 let pass = 0;
 let fail = 0;
@@ -647,6 +649,102 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   const evil = unzipDocx(buildDocx({ ...pn, chapters: [evilCh] }, [evilCh]))['word/document.xml'].toString('utf8');
   check('Word 标题与正文里的尖括号被转义',
     evil.includes('&lt;b&gt;x&lt;/b&gt;') && evil.includes('&lt;script&gt;alert(1)&lt;/script&gt;') && !evil.includes('<script>alert(1)</script>'));
+}
+
+// ---------------------------------------------------------------
+// Word 导入（.docx → 纯文本）
+{
+  const makeDocx = (xml) => zip([{ name: 'word/document.xml', data: xml }]);
+  const wrap = (body) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`;
+
+  const pn = {
+    title: '雾城 <记>',
+    author: '林三',
+    meta: { submissionNote: '这是第一段。\n这是第二段。' },
+    chapters: [
+      { id: 'c1', no: 1, title: '夜车', content: '第一段。\n第二段「引号」。', stage: 'done', outlineId: 'o1' },
+      { id: 'c2', no: 2, title: '', content: '', stage: 'draft', volumeId: 'v2' },
+    ],
+    outline: {
+      volumes: [
+        { id: 'v1', name: '风起', chapters: [{ id: 'o1', title: '夜车' }] },
+        { id: 'v2', name: '第2卷 云涌', chapters: [] },
+      ],
+    },
+  };
+  const exported = extractDocxText(buildDocx(pn, pn.chapters, { note: true }));
+  check('Word 导入：能读回章节正文', exported.text.includes('第1章 夜车') && exported.text.includes('第一段。'));
+  check('Word 导入：默认跳过书名页与创作说明',
+    !exported.text.includes('雾城 <记>') && !exported.text.includes('创作说明') &&
+    exported.frontMatter.includes('雾城 <记>') && exported.frontMatter.includes('创作说明'),
+    JSON.stringify({ text: exported.text.slice(0, 80), front: exported.frontMatter.slice(0, 80) }));
+  check('Word 导入：分卷标题还在', exported.text.includes('第1卷 风起') && exported.text.includes('第2卷 云涌'));
+  check('Word 导入：统计段数与标题', exported.paragraphs > 0 && exported.headings === 4 && exported.frontMatterHeadings === 1,
+    `paragraphs=${exported.paragraphs} headings=${exported.headings} frontHeadings=${exported.frontMatterHeadings}`);
+
+  const customXml = wrap(`
+    <w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>书名页</w:t></w:r></w:p>
+    <w:p><w:r><w:t>作者</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>创作说明</w:t></w:r></w:p>
+    <w:p><w:r><w:t>说明文字</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>篇幅</w:t></w:r></w:p>
+    <w:p><w:r><w:t>两章</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>第1章 开始</w:t></w:r></w:p>
+    <w:p>
+      <w:r><w:t>保留 &amp; &lt;标签&gt;</w:t></w:r>
+      <w:del><w:r><w:delText>删掉</w:delText></w:r></w:del>
+      <w:ins><w:r><w:t>插入</w:t></w:r></w:ins>
+      <w:r><w:tab/><w:t>制表</w:t></w:r>
+      <w:r><w:br/><w:t>换行</w:t></w:r>
+    </w:p>`);
+  const custom = extractDocxText(makeDocx(customXml));
+  check('Word 导入：修订删除不进来、插入保留',
+    custom.text.includes('保留') && !custom.text.includes('删掉') && custom.text.includes('插入'));
+  check('Word 导入：实体、制表、换行都还原',
+    custom.text.includes('保留 & <标签>') && custom.text.includes('\t制表') && custom.text.includes('\n换行'));
+  check('Word 导入：跳过创作说明段落',
+    custom.frontMatter.includes('书名页') && custom.frontMatter.includes('创作说明') &&
+    custom.frontMatter.includes('篇幅') && !custom.text.includes('说明文字') && !custom.text.includes('篇幅') &&
+    custom.text.startsWith('第1章 开始') && custom.headings === 1 && custom.frontMatterHeadings === 2);
+  check('Word 导入：统计修订数量', custom.deleted === 1 && custom.inserted === 1, `deleted=${custom.deleted} inserted=${custom.inserted}`);
+
+  const noHead = extractDocxText(makeDocx(wrap('<w:p><w:r><w:t>只有正文</w:t></w:r></w:p>')));
+  check('Word 导入：没有标题时不跳内容', noHead.text === '只有正文' && noHead.frontMatter === '');
+
+  let missing = '';
+  try { extractDocxText(zip([{ name: 'word/styles.xml', data: 'x' }])); } catch (err) { missing = err.message; }
+  check('Word 导入：缺少正文有提示', /word\/document\.xml/.test(missing), missing);
+
+  let bad = '';
+  try { extractDocxText(Buffer.from('不是 zip')); } catch (err) { bad = err.message; }
+  check('Word 导入：非 zip 有提示', /Word|ZIP/.test(bad), bad);
+
+  let tooBig = '';
+  try { unzipEntry(makeDocx(customXml), 'word/document.xml', { maxBytes: 10 }); } catch (err) { tooBig = err.message; }
+  check('Word 导入：解压上限生效', /太大/.test(tooBig), tooBig);
+
+  const packed = makeDocx(customXml);
+  const central = packed.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+  const eocd = packed.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+
+  const badCrc = Buffer.from(packed);
+  badCrc.writeUInt32LE((badCrc.readUInt32LE(central + 16) ^ 0xffffffff) >>> 0, central + 16);
+  let crcErr = '';
+  try { unzipEntry(badCrc, 'word/document.xml'); } catch (err) { crcErr = err.message; }
+  check('Word 导入：CRC 对不上会被拒', /校验失败/.test(crcErr), crcErr);
+
+  const encrypted = Buffer.from(packed);
+  encrypted.writeUInt16LE(encrypted.readUInt16LE(central + 8) | 1, central + 8);
+  let encErr = '';
+  try { unzipEntry(encrypted, 'word/document.xml'); } catch (err) { encErr = err.message; }
+  check('Word 导入：加密文件会被拒', /加密/.test(encErr), encErr);
+
+  const zip64 = Buffer.from(packed);
+  zip64.writeUInt16LE(0xffff, eocd + 10);
+  let zip64Err = '';
+  try { unzipEntry(zip64, 'word/document.xml'); } catch (err) { zip64Err = err.message; }
+  check('Word 导入：ZIP64 会被拒', /ZIP64/.test(zip64Err), zip64Err);
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);

@@ -16,6 +16,7 @@ import { buildTask, TASKS, TEMPLATE_SLOTS, TEMPLATE_VARS } from './prompts.js';
 import { buildEpub } from './epub.js';
 import { buildPrintHtml } from './print.js';
 import { buildDocx } from './docx.js';
+import { extractDocxText } from './docx-import.js';
 import { outlineRows, characterRows, hasExtras, submissionFacts, submissionNote } from './manuscript.js';
 import { coverSvg, readCoverImage, saveCoverImage, deleteCoverImage, coverOptions } from './cover.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
@@ -489,6 +490,21 @@ async function handleApi(req, res, url) {
   // 某一天的明细：点开写作日历上的某一天
   if (seg[1] === 'stats' && seg[2] === 'day' && seg.length === 3 && method === 'GET') {
     return sendJson(res, 200, statsDay(url.searchParams.get('date')));
+  }
+
+  /* --- Word 导入：只解析，不写盘；预览确认后再走作品导入接口 --- */
+  if (seg[1] === 'import' && seg[2] === 'docx' && seg.length === 3 && method === 'POST') {
+    let buf;
+    try {
+      buf = await readBinary(req, 20 * 1024 * 1024, 'Word 文件');
+    } catch (err) {
+      return sendJson(res, 400, { error: err.message || '读取 Word 文件失败' });
+    }
+    try {
+      return sendJson(res, 200, extractDocxText(buf));
+    } catch (err) {
+      return sendJson(res, 400, { error: `读不了这个 Word 文件：${err.message}` });
+    }
   }
 
   // 测试连通性 / 拉取模型列表
@@ -1549,17 +1565,17 @@ function parseManuscript(text) {
 }
 
 /* ------------------------------------------------------------------ */
-/* 二进制请求体（上传封面图用），不走 JSON 解析                        */
+/* 二进制请求体（上传封面图 / Word 文件），不走 JSON 解析              */
 /* ------------------------------------------------------------------ */
 
-function readBinary(req, limit = 8 * 1024 * 1024) {
+function readBinary(req, limit = 8 * 1024 * 1024, label = '图片') {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
     req.on('data', (c) => {
       size += c.length;
       if (size > limit) {
-        reject(new Error('图片太大了（上限 8 MB）'));
+        reject(new Error(`${label}太大了（上限 ${Math.round(limit / 1024 / 1024)} MB）`));
         req.destroy();
         return;
       }
