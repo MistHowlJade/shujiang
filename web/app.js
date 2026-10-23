@@ -5105,6 +5105,11 @@ function getScenes(ch) {
   return ch.scenes;
 }
 
+/** 场景校验：返回 true 表示完整，false 表示有缺失 */
+function validateScene(sc) {
+  return sc.location && sc.time && sc.characters && sc.summary;
+}
+
 function renderCorkboard() {
   const ch = currentChapter();
   const board = $('#corkboard');
@@ -5114,30 +5119,39 @@ function renderCorkboard() {
     return;
   }
   const scenes = getScenes(ch);
-  $('#scenesInfo').textContent = `第 ${ch.no} 章《${ch.title}》 · ${scenes.length} 个场景`;
+  const totalTarget = scenes.reduce((s, sc) => s + (sc.targetWords || 0), 0);
+  const totalActual = scenes.reduce((s, sc) => s + countWords(sc.summary || ''), 0);
+  $('#scenesInfo').innerHTML = `第 ${ch.no} 章《${ch.title}》 · ${scenes.length} 个场景 · 目标 ${totalTarget || '—'} 字 · 梗概 ${totalActual} 字`;
   if (!scenes.length) {
     board.innerHTML = '<div class="cork-empty">还没有场景卡片。点「从章纲生成场景」或「新增场景」开始。</div>';
     return;
   }
   board.innerHTML = scenes.map((sc, i) => `
-    <div class="scene-card" data-index="${i}" draggable="true">
+    <div class="scene-card${validateScene(sc) ? '' : ' scene-warn'}" data-index="${i}" draggable="true">
       <div class="scene-handle" title="拖拽排序">${ico('grip')}</div>
       <div class="scene-actions">
         <button class="scene-gen" title="生成正文" data-index="${i}">${ico('spark')}</button>
+        <button class="scene-dup" title="复制" data-index="${i}">${ico('copy')}</button>
         <button class="scene-del" title="删除">${ico('x')}</button>
       </div>
       <div class="scene-header">
         <span class="scene-num">场次 ${i + 1}</span>
         <span class="scene-pov">${esc(sc.pov || '')}</span>
       </div>
-      <div class="scene-field"><span class="scene-label">地点</span><span class="scene-value">${esc(sc.location || '')}</span></div>
-      <div class="scene-field"><span class="scene-label">时间</span><span class="scene-value">${esc(sc.time || '')}</span></div>
-      <div class="scene-field"><span class="scene-label">人物</span><span class="scene-value">${esc(sc.characters || '')}</span></div>
-      <div class="scene-field"><span class="scene-label">梗概</span><span class="scene-value">${esc(sc.summary || '')}</span></div>
+      <div class="scene-field"><span class="scene-label">地点</span><span class="scene-value">${esc(sc.location || '')}</span>${!sc.location ? '<span class="scene-warn-tag">缺</span>' : ''}</div>
+      <div class="scene-field"><span class="scene-label">时间</span><span class="scene-value">${esc(sc.time || '')}</span>${!sc.time ? '<span class="scene-warn-tag">缺</span>' : ''}</div>
+      <div class="scene-field"><span class="scene-label">人物</span><span class="scene-value">${esc(sc.characters || '')}</span>${!sc.characters ? '<span class="scene-warn-tag">缺</span>' : ''}</div>
+      <div class="scene-field"><span class="scene-label">梗概</span><span class="scene-value">${esc(sc.summary || '')}</span>${!sc.summary ? '<span class="scene-warn-tag">缺</span>' : ''}</div>
       <div class="scene-field"><span class="scene-label">钩子</span><span class="scene-value">${esc(sc.hook || '')}</span></div>
-      <div class="scene-field"><span class="scene-label">目标字数</span><span class="scene-value">${sc.targetWords || ''}</span></div>
+      <div class="scene-field"><span class="scene-label">目标字数</span><span class="scene-value">${sc.targetWords || ''}</span>${sc.targetWords ? ` · ${Math.round((countWords(sc.summary || '') / sc.targetWords) * 100)}%` : ''}</div>
     </div>
   `).join('');
+
+  // 插入线
+  const insertLine = document.createElement('div');
+  insertLine.className = 'cork-insert-line';
+  insertLine.hidden = true;
+  board.appendChild(insertLine);
 
   // 双击编辑
   $$('.scene-card', board).forEach((card) => {
@@ -5151,10 +5165,15 @@ function renderCorkboard() {
       e.stopPropagation();
       generateSceneProse(ch, idx);
     };
+    card.querySelector('.scene-dup').onclick = (e) => {
+      e.stopPropagation();
+      duplicateScene(ch, idx);
+    };
   });
 
-  // 拖拽排序
+  // 拖拽排序 - 使用插入线
   let dragSrc = null;
+  let insertBefore = null;
   board.addEventListener('dragstart', (e) => {
     const card = e.target.closest('.scene-card');
     if (!card) return;
@@ -5164,6 +5183,7 @@ function renderCorkboard() {
   });
   board.addEventListener('dragend', () => {
     if (dragSrc) dragSrc.classList.remove('dragging');
+    insertLine.hidden = true;
     dragSrc = null;
   });
   board.addEventListener('dragover', (e) => {
@@ -5172,24 +5192,38 @@ function renderCorkboard() {
     if (card && card !== dragSrc) {
       const rect = card.getBoundingClientRect();
       const midY = rect.top + rect.height / 2;
-      if (e.clientY < midY) card.style.borderTop = '2px solid var(--brand)';
-      else card.style.borderBottom = '2px solid var(--brand)';
+      insertLine.hidden = false;
+      if (e.clientY < midY) {
+        insertLine.style.top = `${rect.top - board.getBoundingClientRect().top}px`;
+        insertBefore = card;
+      } else {
+        insertLine.style.top = `${rect.bottom - board.getBoundingClientRect().top}px`;
+        insertBefore = null;
+      }
+    } else {
+      insertLine.hidden = true;
+      insertBefore = null;
     }
   });
   board.addEventListener('dragleave', (e) => {
     if (!board.contains(e.relatedTarget)) {
-      $$('.scene-card', board).forEach((c) => { c.style.borderTop = ''; c.style.borderBottom = ''; });
+      insertLine.hidden = true;
+      insertBefore = null;
     }
   });
   board.addEventListener('drop', (e) => {
     e.preventDefault();
-    $$('.scene-card', board).forEach((c) => { c.style.borderTop = ''; c.style.borderBottom = ''; });
+    insertLine.hidden = true;
     const target = e.target.closest('.scene-card');
-    if (dragSrc && target && dragSrc !== target) {
+    if (dragSrc && (target || insertBefore !== null) && dragSrc !== target) {
       const from = Number(dragSrc.dataset.index);
-      const to = Number(target.dataset.index);
+      let to;
+      if (insertBefore !== null) to = Number(insertBefore.dataset.index);
+      else if (target) to = Number(target.dataset.index) + 1;
+      else to = 0;
       moveScene(ch, from, to);
     }
+    insertBefore = null;
   });
 }
 
@@ -5237,6 +5271,17 @@ function deleteScene(ch, index) {
   markChapterDirty(ch);
   renderCorkboard();
   toast('场景已删除', 'ok');
+}
+
+function duplicateScene(ch, index) {
+  const scenes = getScenes(ch);
+  const sc = scenes[index];
+  if (!sc) return;
+  const copy = { ...sc, pov: sc.pov ? sc.pov + ' (复制)' : '复制', targetWords: 0 };
+  scenes.splice(index + 1, 0, copy);
+  markChapterDirty(ch);
+  renderCorkboard();
+  toast('场景已复制', 'ok');
 }
 
 function moveScene(ch, from, to) {
@@ -5354,6 +5399,60 @@ $('#scenesClear').addEventListener('click', () => {
   markChapterDirty(ch);
   renderCorkboard();
   toast('场景已清空', 'ok');
+});
+
+/** 导出场景卡片（JSON） */
+$('#scenesExportBtn').addEventListener('click', () => {
+  const ch = currentChapter();
+  if (!ch) return toast('先选择一章', 'err');
+  const scenes = getScenes(ch);
+  if (!scenes.length) return toast('没有场景可导出', 'err');
+  const blob = new Blob([JSON.stringify({ version: 1, title: ch.title, exportedAt: Date.now(), scenes }, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${ch.title || 'chapter'}_scenes_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('场景已导出', 'ok');
+});
+
+/** 导入场景卡片（JSON） */
+$('#scenesImportBtn').addEventListener('click', () => {
+  const ch = currentChapter();
+  if (!ch) return toast('先选择一章', 'err');
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data.scenes || !Array.isArray(data.scenes)) throw new Error('不是有效的场景文件');
+      const ch = currentChapter();
+      if (!ch) return;
+      ch.scenes = ch.scenes || [];
+      // 合并：避免重复（按 pov+location+summary 去重）
+      const existingKeys = new Set((ch.scenes || []).map(s => `${s.pov}|${s.location}|${s.summary}`));
+      let added = 0;
+      for (const sc of data.scenes) {
+        const key = `${sc.pov || ''}|${sc.location || ''}|${sc.summary || ''}`;
+        if (!existingKeys.has(key)) {
+          ch.scenes.push(sc);
+          existingKeys.add(key);
+          added++;
+        }
+      }
+      markChapterDirty(ch);
+      renderCorkboard();
+      toast(`导入完成，新增 ${added} 个场景`, 'ok');
+    } catch (err) {
+      toast('导入失败：' + err.message, 'err');
+    }
+  };
+  input.click();
 });
 
 $('#compileScenesBtn').addEventListener('click', async () => {

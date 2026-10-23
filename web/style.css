@@ -1219,6 +1219,45 @@ kbd {
 .scene-label { min-width: 54px; color: var(--text-4); font-weight: 500; flex-shrink: 0; }
 .scene-value { color: var(--text-2); word-break: break-word; flex: 1; }
 
+.scene-card.scene-warn { border-color: var(--warning); }
+.scene-card.scene-warn:hover { border-color: var(--warning); box-shadow: 0 0 0 1px var(--warning); }
+.scene-warn-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  font-size: 9px;
+  border-radius: var(--r-full);
+  background: var(--warning-bg);
+  color: var(--warning);
+  border: 1px solid var(--warning);
+  vertical-align: middle;
+}
+
+.cork-insert-line {
+  position: absolute;
+  left: 8px; right: 8px;
+  height: 2px;
+  background: var(--brand);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 10;
+  box-shadow: 0 0 0 2px var(--surface-1), 0 0 6px var(--brand);
+  animation: pulse 1s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+.scene-dup {
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  background: transparent; border: none; border-radius: var(--r-sm);
+  color: var(--text-4);
+  transition: background var(--dur), color var(--dur);
+}
+.scene-dup:hover { background: var(--success-bg); color: var(--success); }
+
 /* 检查结果 */
 .issue {
   position: relative; margin-bottom: 9px; padding: 11px 13px 11px 15px;
