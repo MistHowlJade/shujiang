@@ -1578,6 +1578,47 @@ kbd {
 .export-done.disabled { opacity: .55; cursor: not-allowed; }
 .export-done-hint { margin-top: 7px; }
 
+/* ---------------- 交稿检查 ---------------- */
+.export-submit {
+  display: flex; align-items: baseline; gap: 8px;
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+.export-submit-body {
+  margin-top: 10px; padding: 12px 14px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.submit-verdict {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin-bottom: 10px; padding: 9px 11px;
+  font-size: 12px; line-height: 1.7; color: var(--text-2);
+  background: var(--warning-bg); border: 1px solid var(--border); border-radius: var(--r-md);
+}
+.submit-verdict.ok { background: var(--success-bg); }
+.submit-verdict.error { background: var(--danger-bg); }
+.submit-verdict .ico { flex: 0 0 auto; width: 15px; height: 15px; margin-top: 2px; color: var(--warning); }
+.submit-verdict.ok .ico { color: var(--success); }
+.submit-verdict.error .ico { color: var(--danger); }
+.submit-verdict-text { flex: 1; min-width: 0; }
+.submit-scope { flex: 0 0 auto; margin-left: 8px; font-size: 11px; color: var(--text-3); white-space: nowrap; }
+
+.submit-group { margin: 12px 0 0; font-size: 10.5px; letter-spacing: .04em; color: var(--text-4); }
+.submit-item {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 7px 0; border-top: 1px solid var(--border);
+}
+.submit-item .ico { flex: 0 0 auto; width: 14px; height: 14px; margin-top: 3px; color: var(--text-4); }
+.submit-item.ok .ico { color: var(--success); }
+.submit-item.warn .ico { color: var(--warning); }
+.submit-item.error .ico { color: var(--danger); }
+.submit-body { flex: 1; min-width: 0; }
+.submit-title { margin: 0; font-size: 12px; line-height: 1.65; color: var(--text-1); }
+.submit-item.ok .submit-title, .submit-item.info .submit-title { color: var(--text-2); }
+.submit-detail { margin: 2px 0 0; font-size: 11px; line-height: 1.7; color: var(--text-3); }
+.submit-go { flex: 0 0 auto; }
+.submit-note { margin-right: auto; font-size: 11px; color: var(--text-3); }
+
 /* ---------------- 导出弹窗里的封面 ---------------- */
 .cover-row {
   display: flex; gap: 14px; margin-top: 14px; padding: 12px;

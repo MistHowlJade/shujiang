@@ -6,6 +6,7 @@ import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofPara
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
 import { diffProse, diffHtml, diffSideHtml } from './lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from './lib/goal.js';
+import { buildSubmitCheck, submitCheckHtml } from './lib/submit.js';
 
 /* 阅读进度只存在本浏览器，不写作品 JSON，也不走服务端 */
 const READER_PROGRESS_KEY = 'shu.reader.progress.v1';
@@ -100,6 +101,8 @@ function showModal(html, onMount, opts = {}) {
   const box = $('#modal');
   box.classList.toggle('modal-wide', !!opts.wide);
   box.innerHTML = html;
+  // 弹窗是同一个容器复用的，不重置的话新弹窗会沿用上一个的滚动位置
+  box.scrollTop = 0;
   // 关掉弹窗时能回调一次（模型对比要用它停掉还在跑的流）
   box._onClose = opts.onClose || null;
   mask.hidden = false;
@@ -5915,6 +5918,12 @@ function field(label, key, obj, opts = {}) {
     : `<input class="input" data-key="${key}" value="${val}" placeholder="${esc(opts.ph || '')}" />`}</label>`;
 }
 
+/** 作品本身的字段（书名 / 作者 / 类型）不在 meta 里，用 data-novel 单独绑，别被 bindFields 写进 meta */
+function novelField(label, key, obj, opts = {}) {
+  const val = esc(obj[key] ?? '');
+  return `<label class="field-label">${label}<input class="input" data-novel="${key}" value="${val}" placeholder="${esc(opts.ph || '')}" /></label>`;
+}
+
 function bindFields(root, obj, after, numericKeys = []) {
   $$('[data-key]', root).forEach((el) => el.addEventListener('input', () => {
     const k = el.dataset.key;
@@ -5950,9 +5959,14 @@ function renderOutlineTab(host, n) {
         <button class="btn btn-sm" id="aiFullOutline">从一句话生成全书大纲</button>
       </h2>
       <div class="grid2">
-        ${field('一句话故事', 'logline', n.meta, { ph: '一个少年背着一把不能出鞘的剑，去杀他师傅。' })}
+        ${novelField('书名', 'title', n)}
+        ${novelField('作者', 'author', n, { ph: '印在稿件头部' })}
+      </div>
+      <div class="grid2">
+        ${novelField('类型', 'genre', n, { ph: '仙侠 / 都市 / 悬疑' })}
         ${field('目标平台 / 调性', 'platform', n.meta)}
       </div>
+      ${field('一句话故事', 'logline', n.meta, { ph: '一个少年背着一把不能出鞘的剑，去杀他师傅。' })}
       <div class="grid2">
         ${field('作者联系方式', 'contact', n.meta, { ph: '邮箱 / QQ / 微信' })}
         <div class="dim small" style="align-self:end">投稿时编辑要联系你。导出 TXT / Markdown / EPUB 时，这行会印在稿件头部。</div>
@@ -5973,6 +5987,14 @@ function renderOutlineTab(host, n) {
     </div>`;
 
   bindFields(host, n.meta, () => saveNovelPart({ meta: n.meta }), []);
+  // 书名 / 作者 / 类型 是作品本身的字段（不在 meta 里）：改完顺手刷新顶栏
+  $$('[data-novel]', host).forEach((el) => el.addEventListener('input', () => {
+    const key = el.dataset.novel;
+    n[key] = el.value;
+    if (key === 'title') renderTopbarActions();
+    // 三个字段一起发：saveNovelPart 是防抖的，连着改两处时后一次会把前一次吞掉
+    saveNovelPart({ title: n.title, author: n.author, genre: n.genre });
+  }));
   host.querySelector('[data-key="notes"]').addEventListener('input', () => saveNovelPart({ outline: n.outline }));
 
   const vl = $('#volList', host);
@@ -7917,6 +7939,51 @@ async function loadCoverOptions() {
   return coverOptsCache;
 }
 
+/* ---------- 交稿检查 ---------- */
+// 每一项检查都带「去处理」，点了就跳到能改它的地方
+const SUBMIT_FOCUS = {
+  author: '[data-novel="author"]',
+  logline: '[data-key="logline"]',
+  contact: '[data-key="contact"]',
+  note: '[data-key="submissionNote"]',
+};
+
+function runSubmitAction(kind, id) {
+  closeModal();
+  if (kind === 'chapter') {
+    if (id) openChapterFromIndex(id);
+    return;
+  }
+  setView('bible');
+  bibleTab = 'outline';
+  $$('#bibleTabs button').forEach((x) => x.classList.toggle('on', x.dataset.bible === 'outline'));
+  renderBible();
+  const sel = SUBMIT_FOCUS[kind];
+  if (sel) setTimeout(() => document.querySelector(sel)?.focus(), 120);
+}
+
+function bindSubmitActions(root) {
+  root.querySelectorAll('[data-sub-act]').forEach((btn) => {
+    btn.onclick = () => runSubmitAction(btn.dataset.subAct, btn.dataset.subId || '');
+  });
+}
+
+function openSubmitCheck() {
+  if (!S.novel) return toast('先打开一部作品', 'err');
+  const list = S.novel.chapters;
+  const r = buildSubmitCheck(S.novel, list, { scope: `全书 ${list.length} 章` });
+  showModal(`<h3>交稿检查</h3>
+    <p class="modal-sub">《${esc(S.novel.title)}》 · 只看本地已有的数据，不调用模型。</p>
+    <div class="submit-wrap">${submitCheckHtml(r)}</div>
+    <div class="modal-foot">
+      <span class="submit-note">3 万字门槛 · 结果仅供参考</span>
+      <button class="btn btn-primary" id="submitClose">关闭</button>
+    </div>`, (box) => {
+    box.querySelector('#submitClose').onclick = closeModal;
+    bindSubmitActions(box);
+  });
+}
+
 function exportBook() {
   if (!S.novel) return toast('先打开作品', 'err');
   showModal(`<h3>导出 / 备份《${esc(S.novel.title)}》</h3>
@@ -7979,6 +8046,11 @@ function exportBook() {
         <div class="dim small">支持 PNG / JPG / GIF，8 MB 以内。不上传就按书名、作者和题材自动画一张。</div>
       </div>
     </div>
+    <div class="export-submit" id="exSubmitRow">
+      <button type="button" class="proof-link" id="exCheck">交稿前检查一下</button>
+      <span class="dim small" id="exCheckHint">看看这份稿子还缺什么</span>
+    </div>
+    <div class="export-submit-body" id="exCheckBody" hidden></div>
     <div class="modal-foot"><button class="btn btn-text" id="exCancel">取消</button><button class="btn btn-primary" id="exOk">下载</button></div>`,
     (box) => {
       const fmtEl = box.querySelector('#exFmt');
@@ -8119,6 +8191,32 @@ function exportBook() {
           return no >= lo && no <= hi;
         });
       };
+      // 导出窗口里这次的章节：跟服务端同一套规则（区间 / 定稿 / 当前章）
+      const exportChapters = () => {
+        const scopeNow = scopeEl.value;
+        const base = scopeNow === 'chapter'
+          ? S.novel.chapters.filter((c) => c.id === S.chapterId)
+          : scopeNow === 'range' ? rangeChapters() : S.novel.chapters;
+        return doneEl.checked && scopeNow !== 'chapter' ? base.filter((c) => stageOf(c) === 'done') : base;
+      };
+      const scopeLabel = () => {
+        const scopeNow = scopeEl.value;
+        if (scopeNow === 'chapter') return '当前章';
+        if (scopeNow === 'range') {
+          const { lo, hi } = rangeValues();
+          return `第 ${lo === hi ? lo : `${lo}–${hi}`} 章`;
+        }
+        return '全书';
+      };
+      // 交稿检查：就地展开，改范围 / 勾定稿后跟着重算
+      const submitRow = box.querySelector('#exSubmitRow');
+      const checkBtn = box.querySelector('#exCheck');
+      const checkBody = box.querySelector('#exCheckBody');
+      const renderCheck = () => {
+        const r = buildSubmitCheck(S.novel, exportChapters(), { onlyDone: doneEl.checked, scope: scopeLabel() });
+        checkBody.innerHTML = submitCheckHtml(r);
+        bindSubmitActions(checkBody);
+      };
       // 关系条数：新数据是数组，老数据是「对象：关系」的字符串
       const relCount = charList.reduce((sum, c) => {
         const r = c.relations;
@@ -8216,6 +8314,13 @@ function exportBook() {
             setTimeout(() => document.querySelector('[data-key="contact"]')?.focus(), 120);
           };
         }
+        // 交稿检查只对文稿有意义；备份是整份数据，没什么可检查的
+        submitRow.hidden = backup;
+        if (backup && !checkBody.hidden) {
+          checkBody.hidden = true;
+          checkBtn.textContent = '交稿前检查一下';
+        }
+        if (!checkBody.hidden) renderCheck();
       };
       fmtEl.onchange = sync;
       scopeEl.onchange = sync;
@@ -8233,6 +8338,12 @@ function exportBook() {
       };
       fromEl.onchange = settleRange;
       toEl.onchange = settleRange;
+      checkBtn.onclick = () => {
+        const open = checkBody.hidden;
+        checkBody.hidden = !open;
+        checkBtn.textContent = open ? '收起交稿检查' : '交稿前检查一下';
+        if (open) renderCheck();
+      };
       sync();
       box.querySelector('#exCancel').onclick = closeModal;
       box.querySelector('#exOk').onclick = () => {
@@ -8841,6 +8952,7 @@ function cmdkSource() {
     op('重做', 'redo', () => { setView('studio'); doRedo(); }, 'Ctrl+Shift+Z');
     op('全书查找 / 替换', 'search', () => { setView('studio'); openFind(); }, 'Ctrl+F');
     op('全书体检', 'pulse', () => { setView('studio'); openHealthReport(); });
+    op('交稿检查', 'stamp', () => openSubmitCheck());
     op('章节看板', 'columns', () => { setView('studio'); openChapterBoard(); }, 'Ctrl+Alt+B');
     op('文字校对', 'proof', () => { setView('studio'); openProof(); }, 'Ctrl+Alt+P');
     op('本章修订清单', 'check', () => {
@@ -9220,5 +9332,5 @@ async function boot() {
   }
 }
 
-window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, openChapterTargetModal, toggleFocus, openGlobalSearch, openTrash, restoreNovelBackup, applyFragmentData, openStatsModal, openRevisionInbox, openModelCompare };
+window.__shu = { S, openNovel, exportBook, setView, openCmdk, closeCmdk, cmdk, sprint, sprintToggle, openHealthReport, openProof, openChapterBoard, openChapterTargetModal, toggleFocus, openGlobalSearch, openTrash, restoreNovelBackup, applyFragmentData, openStatsModal, openRevisionInbox, openModelCompare, openSubmitCheck };
 boot();

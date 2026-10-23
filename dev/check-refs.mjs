@@ -21,6 +21,7 @@ const FILES = [
   'web/lib/health.js',
   'web/lib/diff.js',
   'web/lib/goal.js',
+  'web/lib/submit.js',
 ];
 
 const all = FILES.map((f) => [f.replace(/\\/g, '/'), fs.readFileSync(f, 'utf8')]);

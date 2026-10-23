@@ -13,6 +13,7 @@ import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelH
 import { scanProofChapter, buildProofReport } from '../web/lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey } from '../web/lib/health.js';
 import { submissionFacts, submissionNote } from '../server/manuscript.js';
+import { buildSubmitCheck, submitCheckHtml, wan, pickNos, SUBMIT_MIN_WORDS } from '../web/lib/submit.js';
 
 let pass = 0;
 let fail = 0;
@@ -331,6 +332,106 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   }
   check('附言会去掉首尾空白', submissionNote(novel) === '给编辑的话  \n\n第二段', JSON.stringify(submissionNote(novel)));
   check('没写附言时返回空串', submissionNote({ meta: {} }) === '' && submissionNote(null) === '');
+}
+
+// ---------------------------------------------------------------
+// 交稿检查
+{
+  const mk = (over = {}) => ({
+    title: '测试稿',
+    author: '林一',
+    genre: '仙侠',
+    outline: { volumes: [] },
+    bible: { characters: [] },
+    ...over,
+    meta: { logline: '一句话故事', contact: 'me@example.com', submissionNote: '给编辑的话', ...(over.meta || {}) },
+    chapters: over.chapters || [],
+  });
+  const ch = (no, words, stage = 'done') => ({
+    id: `c${no}`, no, title: `标题${no}`, stage, content: '字'.repeat(words),
+  });
+  const item = (r, key) => r.items.find((i) => i.key === key);
+
+  const six = mk({ chapters: [ch(1, 12000), ch(2, 12000), ch(3, 6000)] });
+  const ok = buildSubmitCheck(six, six.chapters, { scope: '全书' });
+  check('全都齐了就是 ok', ok.level === 'ok', `${ok.level} / ${ok.errors} / ${ok.warns}`);
+  check('字数与章数算对', ok.words === 30000 && ok.chapters === 3, `${ok.words} / ${ok.chapters}`);
+  check('整本检查范围原样带回', ok.scope === '全书');
+  check('齐了也有话说', ok.verdict === '没发现拦住投稿的问题，可以发了。', ok.verdict);
+
+  // 空章节：直接拦住
+  const withEmpty = mk({ chapters: [ch(1, 12000), ch(2, 0), ch(3, 12000), ch(4, 0)] });
+  const r1 = buildSubmitCheck(withEmpty, withEmpty.chapters);
+  check('空章节算 error', item(r1, 'empty').level === 'error', item(r1, 'empty').level);
+  check('空章节点名到章', item(r1, 'empty').detail.includes('第 2 章、第 4 章'), item(r1, 'empty').detail);
+  check('空章节能跳过去补', item(r1, 'empty').action?.kind === 'chapter' && item(r1, 'empty').action.id === 'c2');
+  check('有 error 时结论也是 error', r1.level === 'error', r1.level);
+
+  // 没定稿只说一句
+  const drafts = mk({ chapters: [ch(1, 12000, 'done'), ch(2, 12000, 'draft'), ch(3, 12000, 'revising')] });
+  const r2 = buildSubmitCheck(drafts, drafts.chapters);
+  check('未定稿算 warn', item(r2, 'draft').level === 'warn', item(r2, 'draft').level);
+  check('未定稿点名到章', item(r2, 'draft').detail.includes('第 2 章、第 3 章'), item(r2, 'draft').detail);
+  check('未定稿不拦人', r2.level === 'warn' && r2.errors === 0, `${r2.level}/${r2.errors}`);
+
+  // 只导定稿时，草稿不进列表
+  const doneOnly = buildSubmitCheck(drafts, drafts.chapters.filter((c) => c.stage === 'done'), { onlyDone: true });
+  check('只发定稿时不再报草稿', item(doneOnly, 'draft').level === 'ok', item(doneOnly, 'draft').level);
+  check('只发定稿时说清漏了哪几章', item(doneOnly, 'draft').detail.includes('还有 2 章没定稿'), item(doneOnly, 'draft').detail);
+  check('只发定稿的标题带章数', item(doneOnly, 'draft').title === '只发定稿的 1 章', item(doneOnly, 'draft').title);
+
+  // 字数门槛
+  const short = mk({ chapters: [ch(1, 8000), ch(2, 8000)] });
+  const r3 = buildSubmitCheck(short, short.chapters);
+  check('不到 3 万字算 warn', item(r3, 'words').level === 'warn', item(r3, 'words').level);
+  check('差多少字说清楚', item(r3, 'words').title === '1.6 万字，离 3 万字还差 1.4 万字', item(r3, 'words').title);
+  check('够了就说过了门槛', item(ok, 'words').title === '3 万字，过了 3 万字的常见门槛', item(ok, 'words').title);
+
+  // 材料
+  check('有作者就 ok', item(ok, 'author').level === 'ok', item(ok, 'author').level);
+  const noAuthor = buildSubmitCheck({ ...six, author: '  ' }, six.chapters);
+  check('没作者算 warn', item(noAuthor, 'author').level === 'warn');
+  check('没作者能跳去填', item(noAuthor, 'author').action?.kind === 'author');
+  const noInfo = buildSubmitCheck({ ...six, meta: { ...six.meta, logline: '', synopsis: '' } }, six.chapters);
+  check('没简介算 warn', item(noInfo, 'logline').level === 'warn');
+  check('只有梗概也算写了', item(buildSubmitCheck({ ...six, meta: { ...six.meta, logline: '', synopsis: '梗概' } }, six.chapters), 'logline').level === 'ok');
+  check('没联系方式算 warn', item(buildSubmitCheck({ ...six, meta: { ...six.meta, contact: '' } }, six.chapters), 'contact').level === 'warn');
+  check('没附言只算提示（不拦人）', item(buildSubmitCheck({ ...six, meta: { ...six.meta, submissionNote: '' } }, six.chapters), 'note').level === 'info');
+  check('附言写出字数', item(ok, 'note').title === '投稿附言 5 字', item(ok, 'note').title);
+  check('没有附带材料时给个入口', item(ok, 'extras').action?.kind === 'outline');
+  const withOutline = buildSubmitCheck({ ...six, outline: { volumes: [{ chapters: [{ title: '甲' }, { title: '乙' }] }] }, bible: { characters: [{ name: '甲' }, { name: '乙' }, { name: '丙' }] } }, six.chapters);
+  check('有材料就不催了', item(withOutline, 'extras').action === null && item(withOutline, 'extras').title.includes('大纲 2 章 · 人物 3 张'),
+    item(withOutline, 'extras').title);
+  const blankOutline = buildSubmitCheck({ ...six, outline: { volumes: [{ chapters: [{}, { summary: '  ' }] }] }, bible: { characters: [{ name: '' }] } }, six.chapters);
+  check('空的大纲行 / 无名人物不算材料', blankOutline.items.find((i) => i.key === 'extras').title === '还没有可随稿附带的材料',
+    blankOutline.items.find((i) => i.key === 'extras').title);
+
+  // 区间：按章号排好，只算选中的那几章
+  const ten = mk({ chapters: Array.from({ length: 10 }, (_, i) => ch(i + 1, 4000)) });
+  const picked = [ten.chapters[4], ten.chapters[2], ten.chapters[3]];
+  const r4 = buildSubmitCheck(ten, picked);
+  check('区间只算选中的章数', r4.chapters === 3 && r4.words === 12000, `${r4.chapters}/${r4.words}`);
+  check('区间也认全书总章数', r4.total === 10, String(r4.total));
+
+  // 空列表
+  const none = buildSubmitCheck(ten, []);
+  check('一章都没有算 error', none.level === 'error' && item(none, 'empty').title === '这次一章都没有', item(none, 'empty').title);
+
+  // 格式化与渲染
+  check('wan：一万以下按字', wan(8600) === '8600 字', wan(8600));
+  check('wan：整万不带小数', wan(30000) === '3 万字', wan(30000));
+  check('wan：带小数', wan(96000) === '9.6 万字', wan(96000));
+  check('pickNos：多了就收成等 N 章', pickNos(Array.from({ length: 9 }, (_, i) => ({ no: i + 1 }))) === '第 1 章、第 2 章、第 3 章、第 4 章、第 5 章、第 6 章 等 9 章',
+    pickNos(Array.from({ length: 9 }, (_, i) => ({ no: i + 1 }))));
+
+  const html = submitCheckHtml(ok);
+  check('渲染出正文 / 材料两组', html.includes('>正文<') && html.includes('>材料<'));
+  check('渲染带结论色', html.includes('submit-verdict ok'), html.slice(0, 80));
+  const evil = buildSubmitCheck({ ...six, author: '<b>某人</b>' }, six.chapters);
+  check('作者名里的尖括号被转义', submitCheckHtml(evil).includes('&lt;b&gt;') && !submitCheckHtml(evil).includes('<b>'));
+  check('有动作才渲染按钮', submitCheckHtml(noAuthor).includes('data-sub-act="author"'));
+  check('没动作就不渲染按钮', !submitCheckHtml(withOutline).includes('data-sub-act='));
+  check('三万字门槛常量没被改', SUBMIT_MIN_WORDS === 30000);
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
