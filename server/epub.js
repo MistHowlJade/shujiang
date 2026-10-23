@@ -4,7 +4,7 @@ import { deflateRawSync } from 'node:zlib';
 import { randomUUID } from 'node:crypto';
 import { chapterVolumeIds, countWords, volumeLabel } from './store.js';
 import { coverSvg, readCoverImage } from './cover.js';
-import { outlineRows, characterRows } from './manuscript.js';
+import { outlineRows, characterRows, submissionFacts, submissionNote } from './manuscript.js';
 
 const XML_HEAD = '<?xml version="1.0" encoding="utf-8"?>';
 const CHAPTER_FILE = (i) => `chapter-${String(i + 1).padStart(3, '0')}.xhtml`;
@@ -114,6 +114,7 @@ function navPage(groups, chapters, extras = {}) {
   }).join('\n');
   // 随稿附带的材料：目录里也给出入口
   const extraLinks = [];
+  if (extras.note) extraLinks.push('<li><a href="note.xhtml">创作说明</a></li>');
   if (extras.outline) extraLinks.push('<li><a href="outline.xhtml">全书大纲</a></li>');
   if (extras.characters) extraLinks.push('<li><a href="characters.xhtml">人物小传</a></li>');
   return `<nav epub:type="toc" id="toc">
@@ -166,6 +167,21 @@ ${body}
 </section>`;
 }
 
+/** 投稿附言（创作说明）：放在书名页后面，编辑/读者翻开先看到这一页 */
+function notePage(novel, words) {
+  const facts = submissionFacts(novel, words);
+  const note = submissionNote(novel);
+  const paras = note
+    ? note.replace(/\r\n?/g, '\n').split('\n').map((s) => s.trim()).filter(Boolean)
+      .map((s) => `<p class="ol-field">${esc(s)}</p>`).join('\n')
+    : '';
+  return `<section epub:type="preface" class="ol-page">
+<h1>创作说明</h1>
+${facts.map((f) => `<p class="ol-field"><b>${esc(f.label)}</b>${esc(f.value)}</p>`).join('\n')}
+${paras ? `<h2>给编辑的话</h2>\n${paras}` : ''}
+</section>`;
+}
+
 function titlePage(novel, chapters, words = 0) {
   const meta = [novel.genre, `共 ${chapters.length} 章`, `约 ${words.toLocaleString('zh-CN')} 字`]
     .filter(Boolean)
@@ -189,6 +205,7 @@ function packageFile(novel, chapters, cover, extras = {}) {
     `<item id="cover-img" href="${cover.href}" media-type="${cover.media}" properties="cover-image" />`,
     '<item id="cover" href="cover.xhtml" media-type="application/xhtml+xml" />',
     '<item id="title" href="title.xhtml" media-type="application/xhtml+xml" />',
+    ...(extras.note ? ['<item id="note" href="note.xhtml" media-type="application/xhtml+xml" />'] : []),
     ...(extras.outline ? ['<item id="outline" href="outline.xhtml" media-type="application/xhtml+xml" />'] : []),
     ...(extras.characters ? ['<item id="characters" href="characters.xhtml" media-type="application/xhtml+xml" />'] : []),
     ...chapters.map((c, i) => `<item id="ch${i + 1}" href="${CHAPTER_FILE(i)}" media-type="application/xhtml+xml" />`),
@@ -196,6 +213,7 @@ function packageFile(novel, chapters, cover, extras = {}) {
   const spine = [
     '<itemref idref="cover" />',
     '<itemref idref="title" />',
+    ...(extras.note ? ['<itemref idref="note" />'] : []),
     '<itemref idref="nav" />',
     ...(extras.outline ? ['<itemref idref="outline" />'] : []),
     ...(extras.characters ? ['<itemref idref="characters" />'] : []),
@@ -352,7 +370,12 @@ export function buildEpub(novel, chapters = novel.chapters || [], extras = {}) {
     { name: 'OEBPS/title.xhtml', data: page(novel.title || '书名页', titlePage(novel, list, words)) },
   ];
 
-  // 随稿附带的材料：全书大纲、人物小传
+  // 随稿附带的材料：全书大纲、人物小传、投稿附言
+  if (extras.note) {
+    // 「全书约 N 字」说的是整本，不是本次导出的那几章
+    const bookWords = (novel.chapters || []).reduce((sum, c) => sum + countWords(c.content), 0);
+    files.push({ name: 'OEBPS/note.xhtml', data: page('创作说明', notePage(novel, bookWords)) });
+  }
   if (extras.outline) {
     files.push({ name: 'OEBPS/outline.xhtml', data: page('全书大纲', outlinePage(novel, list)) });
   }

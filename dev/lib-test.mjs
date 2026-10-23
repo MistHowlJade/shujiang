@@ -12,6 +12,7 @@ import { diffProse, diffHtml, diffSideHtml, splitSentences, lcsOps } from '../we
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from '../web/lib/goal.js';
 import { scanProofChapter, buildProofReport } from '../web/lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey } from '../web/lib/health.js';
+import { submissionFacts, submissionNote } from '../server/manuscript.js';
 
 let pass = 0;
 let fail = 0;
@@ -298,6 +299,38 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   // 忽略清单写成字符串也能认
   const asStrings = applyHealthIgnored(r, [key]);
   check('忽略清单用字符串也能认', asStrings.gaps.length === r.gaps.length - 1);
+}
+
+// ---------------- 投稿附言：事实与去重 ----------------
+{
+  const novel = {
+    title: '剑与长街', author: '张三', genre: '玄幻',
+    meta: { platform: '起点', targetWords: 0, logline: '一句话。', contact: 'me@x.com', submissionNote: '  给编辑的话  \n\n第二段  ' },
+    chapters: [
+      { id: 'c1', content: '一二三四五', stage: 'done' },
+      { id: 'c2', content: '一二三四五六七', stage: 'draft' },
+      { id: 'c3', content: '', stage: 'draft' },
+    ],
+  };
+  const f = submissionFacts(novel, 12);
+  const labels = f.map((x) => x.label);
+  check('附言的篇幅按章数与定稿数算', f[0].value === '共 3 章 · 已定稿 1 章 · 全书约 12 字', f[0].value);
+  check('字数带千分位', submissionFacts(novel, 1234567)[0].value.includes('1,234,567'), submissionFacts(novel, 1234567)[0].value);
+  check('没设目标就不写进度行', !labels.includes('进度'), labels.join(','));
+  check('设了目标才算进度', submissionFacts({ ...novel, meta: { ...novel.meta, targetWords: 100 } }, 25)
+    .find((x) => x.label === '进度')?.value === '全书目标 100 字，目前约 25%');
+  check('写完不超过 100%', submissionFacts({ ...novel, meta: { ...novel.meta, targetWords: 10 } }, 999)
+    .find((x) => x.label === '进度')?.value.endsWith('100%'));
+  check('刚动笔不写「约 0%」', submissionFacts({ ...novel, meta: { ...novel.meta, targetWords: 1000 } }, 3)
+    .find((x) => x.label === '进度')?.value.endsWith('目前不到 1%'));
+  check('平台写了才有', labels.includes('目标平台'));
+  check('没写平台就不出现', !submissionFacts({ ...novel, meta: { ...novel.meta, platform: '' } }, 12).some((x) => x.label === '目标平台'));
+  // 稿件头部已经印过的东西不该再抄一遍
+  for (const k of ['作品', '作者', '类型', '联系方式', '一句话故事']) {
+    check(`附言里不重复「${k}」`, !labels.includes(k), labels.join(','));
+  }
+  check('附言会去掉首尾空白', submissionNote(novel) === '给编辑的话  \n\n第二段', JSON.stringify(submissionNote(novel)));
+  check('没写附言时返回空串', submissionNote({ meta: {} }) === '' && submissionNote(null) === '');
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);

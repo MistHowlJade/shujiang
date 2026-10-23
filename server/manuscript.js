@@ -135,3 +135,40 @@ export function hasExtras(novel) {
     characters: c.length > 0,
   };
 }
+
+/** 作者自己写的投稿附言（正文部分） */
+export function submissionNote(novel) {
+  return str(novel?.meta?.submissionNote);
+}
+
+/**
+ * 创作说明的头部事实：编辑拆开稿子最先想知道、而稿件头部又没写的几个数。
+ *
+ * 书名、作者、类型、联系方式、一句话故事，稿件头部/书名页已经有了，
+ * 这里不再抄一遍——同一份文件里重复五遍只会显得没收拾。
+ *
+ * 全部从作品里现算，不是另存一份——作者写到第几章、定了多少章，
+ * 附言里的数字就跟着变，不会出现「信上写 80 章、稿子里 120 章」。
+ *
+ * @param {object} novel 作品
+ * @param {number} words 全书正文字数（调用方算好传进来，免得这里再依赖字数统计）
+ */
+export function submissionFacts(novel, words = 0) {
+  const all = novel?.chapters || [];
+  const done = all.filter((c) => (c.stage || 'draft') === 'done').length;
+  const target = Number(novel?.meta?.targetWords) || 0;
+  const num = (v) => Number(v || 0).toLocaleString('zh-CN');
+  const facts = [
+    { label: '篇幅', value: `共 ${all.length} 章 · 已定稿 ${done} 章 · 全书约 ${num(words)} 字` },
+  ];
+  if (target > 0 && words > 0) {
+    const raw = (words / target) * 100;
+    // 刚开始写的时候别写成「约 0%」，那是给编辑看的信
+    const value = raw > 0 && raw < 1
+      ? `全书目标 ${num(target)} 字，目前不到 1%`
+      : `全书目标 ${num(target)} 字，目前约 ${Math.min(100, Math.round(raw))}%`;
+    facts.push({ label: '进度', value });
+  }
+  if (str(novel?.meta?.platform)) facts.push({ label: '目标平台', value: str(novel.meta.platform) });
+  return facts;
+}

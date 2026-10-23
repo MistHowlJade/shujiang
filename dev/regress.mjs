@@ -635,6 +635,65 @@ async function main() {
   }
 
   // ---------------------------------------------------------------
+  group('投稿附言（创作说明）');
+  {
+    const n2 = await post(`${BASE}/api/novels`, { title: '附言测试', author: '张三', genre: '玄幻' });
+    const nid = n2.novel?.id;
+    const NOTE = '这本书写了两年，前十万字推翻重来过一次。\n目标读者是慢热群像的老读者。';
+    await put(`${BASE}/api/novels/${nid}`, {
+      meta: { logline: '一句话故事。', contact: 'me@example.com', platform: '起点', targetWords: 1000, submissionNote: NOTE },
+    });
+    const sc1 = await post(`${BASE}/api/novels/${nid}/chapters`, { title: '第一章', content: '正文内容。', stage: 'done' });
+    await post(`${BASE}/api/novels/${nid}/chapters`, { title: '第二章', content: '第二章的正文。' });
+    check('建章时就带定稿状态（给附言数数用）', sc1.chapter?.stage === 'done');
+
+    const saved = (await get(`${BASE}/api/novels/${nid}`)).novel;
+    check('附言存进了作品', saved.meta?.submissionNote === NOTE, JSON.stringify(saved.meta?.submissionNote));
+
+    const txtNote = (await req('GET', `${BASE}/api/novels/${nid}/export?format=txt&note=1`)).buf.toString('utf8').replace(/^\uFEFF/, '');
+    check('TXT 以创作说明开头', txtNote.startsWith('创作说明'), JSON.stringify(txtNote.slice(0, 12)));
+    check('TXT 篇幅是现算的', txtNote.includes('共 2 章 · 已定稿 1 章 · 全书约 12 字'),
+      txtNote.split('\n').find((l) => l.startsWith('篇幅')));
+    check('TXT 算出了进度', txtNote.includes('全书目标 1,000 字，目前约 1%'),
+      txtNote.split('\n').find((l) => l.startsWith('进度')));
+    check('TXT 带上了目标平台', txtNote.includes('目标平台：起点'));
+    check('TXT 有给编辑的话', txtNote.includes('给编辑的话：') && txtNote.includes('前十万字推翻重来过一次'));
+    check('TXT 的信在书名前面', txtNote.indexOf('创作说明') < txtNote.indexOf('《附言测试》'));
+    // 头像里已经印过的东西，信里不该再抄一遍
+    const txtHead = txtNote.slice(0, txtNote.indexOf('='.repeat(20)));
+    check('信里不重复书名', !txtHead.includes('作品：《'), txtHead);
+    check('信里不重复联系方式', !txtHead.includes('联系方式'));
+    const txtPlain = (await req('GET', `${BASE}/api/novels/${nid}/export?format=txt`)).buf.toString('utf8');
+    check('TXT 不勾就没有信', !txtPlain.includes('创作说明'));
+
+    const mdNote = (await req('GET', `${BASE}/api/novels/${nid}/export?format=md&note=1`)).buf.toString('utf8');
+    check('Markdown 有创作说明小节', mdNote.includes('## 创作说明'));
+    check('Markdown 附言原样保留', mdNote.includes('目标读者是慢热群像的老读者'));
+    check('Markdown 的信在正文前', mdNote.indexOf('## 创作说明') < mdNote.indexOf('## 第1章'));
+    check('Markdown 只有一个一级标题', (mdNote.replace(/^\uFEFF/, '').match(/^# /gm) || []).length === 1);
+    const mdPlain2 = (await req('GET', `${BASE}/api/novels/${nid}/export?format=md`)).buf.toString('utf8');
+    check('Markdown 不勾就没有信', !mdPlain2.includes('创作说明'));
+
+    const epubNote = unzip((await req('GET', `${BASE}/api/novels/${nid}/export?format=epub&note=1`)).buf);
+    check('EPUB 里有说明页', !!epubNote['OEBPS/note.xhtml'], Object.keys(epubNote).join(','));
+    const opfN = epubNote['OEBPS/content.opf'].toString('utf8');
+    check('EPUB 的 opf 收了说明页', opfN.includes('href="note.xhtml"') && opfN.includes('<itemref idref="note" />'));
+    check('EPUB 目录里有入口', epubNote['OEBPS/nav.xhtml'].toString('utf8').includes('note.xhtml'));
+    const noteXml = epubNote['OEBPS/note.xhtml'].toString('utf8');
+    check('EPUB 说明页有附言', noteXml.includes('前十万字推翻重来过一次'));
+    check('EPUB 说明页标成前言', noteXml.includes('epub:type="preface"'));
+    const epubPlain2 = unzip((await req('GET', `${BASE}/api/novels/${nid}/export?format=epub`)).buf);
+    check('EPUB 不勾就没有说明页', !epubPlain2['OEBPS/note.xhtml']);
+
+    // 附言清空 → 信没了，事实那几行还在
+    await put(`${BASE}/api/novels/${nid}`, { meta: { submissionNote: '' } });
+    const txtBare = (await req('GET', `${BASE}/api/novels/${nid}/export?format=txt&note=1`)).buf.toString('utf8');
+    check('附言清空只剩事实', txtBare.includes('创作说明') && !txtBare.includes('给编辑的话'));
+
+    await req('DELETE', `${BASE}/api/novels/${nid}?permanent=1`);
+  }
+
+  // ---------------------------------------------------------------
   group('章节状态');
   {
     // 新建章节时 stage 会被尊重（拆分本章继承原章阶段靠这个）

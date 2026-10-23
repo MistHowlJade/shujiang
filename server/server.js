@@ -14,7 +14,7 @@ import {
 } from './store.js';
 import { buildTask, TASKS, TEMPLATE_SLOTS, TEMPLATE_VARS } from './prompts.js';
 import { buildEpub } from './epub.js';
-import { outlineRows, characterRows, hasExtras } from './manuscript.js';
+import { outlineRows, characterRows, hasExtras, submissionFacts, submissionNote } from './manuscript.js';
 import { coverSvg, readCoverImage, saveCoverImage, deleteCoverImage, coverOptions } from './cover.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
 import { addWords, setGoal, statsSummary, statsDay } from './stats.js';
@@ -855,10 +855,11 @@ async function handleApi(req, res, url) {
       // 空书仍可导出（至少保留书名页 / 封面信息）；只有「只导出定稿」没内容时才报错
       if (!list.length && onlyDone) return sendJson(res, 400, { error: '还没有已定稿的章节' });
       const suffix = onlyDone ? '_定稿版' : '';
-      // 随稿附带的材料：extras=outline,characters
+      // 随稿附带的材料：extras=outline,characters；note=1 是投稿附言（放在最前面）
       const extras = {
         outline: (url.searchParams.get('extras') || '').split(',').includes('outline'),
         characters: (url.searchParams.get('extras') || '').split(',').includes('characters'),
+        note: url.searchParams.get('note') === '1',
       };
 
       if (format === 'epub') {
@@ -874,7 +875,7 @@ async function handleApi(req, res, url) {
         return res.end(buf);
       }
 
-      const text = format === 'md' ? exportMarkdown(n, list, extras) : exportTxt(n, list);
+      const text = format === 'md' ? exportMarkdown(n, list, extras) : exportTxt(n, list, extras);
       const name = `${safeName(n.title)}${suffix}${cid && list[0] ? `_第${list[0].no}章` : ''}.${format}`;
       res.writeHead(200, {
         'Content-Type': format === 'md' ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8',
@@ -1093,7 +1094,21 @@ function safeName(s) {
   return String(s || 'novel').replace(/[\\/:*?"<>|\r\n]+/g, '_').slice(0, 60);
 }
 
-function exportTxt(n, chapters) {
+/** 全书正文字数：投稿附言里的「全书约 N 字」说的永远是整本，不是本次导出的那几章 */
+function bookWords(novel) {
+  return (novel.chapters || []).reduce((sum, c) => sum + countWords(c.content), 0);
+}
+
+/** 投稿附言（TXT）：编辑拆开文件先看到信，再看到稿子 */
+function txtNote(novel, words) {
+  const lines = ['创作说明', ''];
+  for (const f of submissionFacts(novel, words)) lines.push(`${f.label}：${f.value}`);
+  const note = submissionNote(novel);
+  if (note) lines.push('', '给编辑的话：', '', note);
+  return lines.join('\n');
+}
+
+function exportTxt(n, chapters, extras = {}) {
   const head = [
     `《${n.title}》`,
     n.author ? `作者：${n.author}` : '',
@@ -1112,7 +1127,8 @@ function exportTxt(n, chapters) {
     lastVol = v ? v.id : '';
     return `${vor}\n\n第${c.no}章 ${c.title}\n\n${(c.content || '').trim()}`;
   }).join('\n');
-  return `${head}\n${'-'.repeat(30)}${body}\n`;
+  const front = extras.note ? `${txtNote(n, bookWords(n))}\n\n${'='.repeat(32)}\n\n` : '';
+  return `${front}${head}\n${'-'.repeat(30)}${body}\n`;
 }
 
 function exportMarkdown(n, chapters, extras = {}) {
@@ -1122,6 +1138,18 @@ function exportMarkdown(n, chapters, extras = {}) {
   if (n.genre) lines.push(`类型：${n.genre}`);
   if (n.meta?.logline) lines.push(`\n> ${n.meta.logline}`);
   if (n.meta?.synopsis) lines.push(`\n## 作品简介\n\n${n.meta.synopsis}`);
+  // 投稿附言：放在正文之前，跟简介同属前置页
+  if (extras.note) {
+    const block = ['## 创作说明', ''];
+    for (const f of submissionFacts(n, bookWords(n))) block.push(`- **${f.label}**：${f.value}`);
+    const note = submissionNote(n);
+    if (note) {
+      // 作者自己就是「一行一段」的写法，跟正文的处理保持一致
+      const paras = note.replace(/\r\n?/g, '\n').split('\n').map((s) => s.trim()).filter(Boolean);
+      block.push('', '给编辑的话：', '', paras.join('\n\n'));
+    }
+    lines.push(`\n${block.join('\n')}`);
+  }
   lines.push('\n---\n');
   const plan = volumePlan(n);
   let lastVol = '';

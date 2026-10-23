@@ -5958,6 +5958,8 @@ function renderOutlineTab(host, n) {
         <div class="dim small" style="align-self:end">投稿时编辑要联系你。导出 TXT / Markdown / EPUB 时，这行会印在稿件头部。</div>
       </div>
       ${field('故事梗概', 'synopsis', n.meta, { area: true, rows: 4 })}
+      ${field('投稿附言（创作说明）', 'submissionNote', n.meta, { area: true, rows: 4 })}
+      <div class="dim small" style="margin-top:-8px">投稿时给编辑的话：这本书的卖点、目标读者、更新计划。导出时勾上「创作说明」，这段会连篇幅、进度一起放在稿件最前面。不填就不出现。</div>
       ${field('大纲备注（主线、支线、伏笔规划）', 'notes', n.outline, { area: true, rows: 3 })}
       <div class="row gap6">
         <button class="btn btn-sm" id="addVol">${ico('plus')}新增卷</button>
@@ -7940,6 +7942,11 @@ function exportBook() {
       <label class="export-extra"><input type="checkbox" id="exCharacters" /><span>人物小传</span></label>
       <div class="dim small" id="exExtrasHint"></div>
     </div>
+    <div class="export-extras" id="exNoteRow" hidden>
+      <span class="export-extras-lbl">投稿附言</span>
+      <label class="export-extra"><input type="checkbox" id="exNote" /><span>创作说明放在最前</span></label>
+      <div class="dim small" id="exNoteHint"></div>
+    </div>
     <div class="cover-row" id="exCoverRow" hidden>
       <div class="cover-thumb"><img id="exCoverImg" alt="封面预览" /></div>
       <div class="cover-side">
@@ -8070,6 +8077,13 @@ function exportBook() {
       const hasOutline = (S.novel.outline?.volumes || []).some((v) => (v.chapters || []).length);
       const charList = S.novel.bible?.characters || [];
       const hasCharacters = charList.length > 0;
+      // 投稿附言：作者自己写的那段话
+      const noteRow = box.querySelector('#exNoteRow');
+      const noteEl = box.querySelector('#exNote');
+      const noteHint = box.querySelector('#exNoteHint');
+      const noteText = String(S.novel.meta?.submissionNote || '').trim();
+      noteEl.checked = !!noteText;
+      noteEl.disabled = !noteText;
       // 关系条数：新数据是数组，老数据是「对象：关系」的字符串
       const relCount = charList.reduce((sum, c) => {
         const r = c.relations;
@@ -8105,6 +8119,24 @@ function exportBook() {
         if (epub) refreshCover();
         // 附带材料：Markdown 与 EPUB 有意义；TXT 是拿来读的，不塞这些
         extrasRow.hidden = !(md || epub);
+        // 投稿附言：三种文稿格式都能放，但只对整本有意义；备份本来就有全部内容
+        noteRow.hidden = !(!backup && scopeEl.value === 'all');
+        noteEl.disabled = !noteText;
+        if (!noteText) noteEl.checked = false;
+        if (!noteRow.hidden) {
+          noteHint.innerHTML = noteText
+            ? `会放在稿件最前面：篇幅、进度，加上你写的 ${noteText.length} 字附言。`
+            : `还没写附言。<button type="button" class="proof-link" id="exGoNote">去写</button>`
+              + '<span class="dim small">　不写也能导出，只是没有这一页。</span>';
+          noteHint.querySelector('#exGoNote')?.addEventListener('click', () => {
+            closeModal();
+            setView('bible');
+            bibleTab = 'outline';
+            $$('#bibleTabs button').forEach((x) => x.classList.toggle('on', x.dataset.bible === 'outline'));
+            renderBible();
+            setTimeout(() => document.querySelector('[data-key="submissionNote"]')?.focus(), 120);
+          });
+        }
         const picked = [];
         if (outlineEl.checked) picked.push('全书大纲');
         if (charactersEl.checked) picked.push('人物小传');
@@ -8153,7 +8185,8 @@ function exportBook() {
         if (!extrasRow.hidden && outlineEl.checked) extras.push('outline');
         if (!extrasRow.hidden && charactersEl.checked) extras.push('characters');
         const extraQ = extras.length ? `&extras=${extras.join(',')}` : '';
-        window.location.href = `/api/novels/${S.novel.id}/export?format=${fmt}${q}${extraQ}`;
+        const noteQ = !noteRow.hidden && noteEl.checked && noteText ? '&note=1' : '';
+        window.location.href = `/api/novels/${S.novel.id}/export?format=${fmt}${q}${extraQ}${noteQ}`;
         closeModal();
       };
     });
