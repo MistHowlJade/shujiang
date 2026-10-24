@@ -25,6 +25,24 @@ export function toast(msg, kind = '') {
   setTimeout(() => box.remove(), 3000);
 }
 export const countWords = (t) => String(t || '').replace(/\s+/g, '').length;
+
+/**
+ * 章节字数缓存：正文没换（同一个字符串）就直接复用上次的结果。
+ * 长篇渲染一次要反复汇总全书字数，缓存后切章、改状态、更新进度都不再重扫全文。
+ * 用章节对象做键：换书 / 重新加载后旧对象会被自动回收，不会把字数串到别的书上。
+ */
+export function createWordCounter() {
+  const cache = new WeakMap();
+  return (chapter) => {
+    if (!chapter || typeof chapter !== 'object') return countWords(chapter);
+    const hit = cache.get(chapter);
+    if (hit && hit.content === chapter.content) return hit.words;
+    const words = countWords(chapter.content);
+    cache.set(chapter, { content: chapter.content, words });
+    return words;
+  };
+}
+
 export const fmtWords = (n) => (n >= 10000 ? `${(n / 10000).toFixed(2)} 万` : String(n));
 export function fmtDate(ts) {
   if (!ts) return '';

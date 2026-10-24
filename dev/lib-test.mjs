@@ -22,6 +22,7 @@ import { buildDocx } from '../server/docx.js';
 import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
+import { countWords, createWordCounter } from '../web/lib/util.js';
 
 let pass = 0;
 let fail = 0;
@@ -47,6 +48,29 @@ function unzipDocx(buf) {
     i = start + compSize;
   }
   return files;
+}
+
+// ---------------- 章节字数缓存 ----------------
+{
+  check('字数统计忽略空白', countWords('一 二\n三\t四') === 4);
+
+  let reads = 0;
+  let raw = '一二三';
+  const ch = {
+    id: 'c1',
+    get content() { reads += 1; return raw; },
+    set content(v) { raw = v; },
+  };
+  const words = createWordCounter();
+  check('首次统计得到正确字数', words(ch) === 3);
+  const afterFirst = reads;
+  check('正文没变时复用缓存', words(ch) === 3 && reads === afterFirst + 1, `reads=${reads}`);
+  ch.content = '一二三四五';
+  check('正文变了重新统计', words(ch) === 5);
+  check('空章节算 0 字', words({ id: 'c2', content: '' }) === 0 && words(null) === 0);
+
+  const another = { id: 'c1', content: '一二三四五六七' };
+  check('换了章节对象不会沿用旧字数', words(another) === 7);
 }
 
 // 句子切分

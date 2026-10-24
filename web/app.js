@@ -1,6 +1,6 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
-import { $, $$, esc, ico, debounce, toast, countWords, fmtWords, fmtDate, fmtAgo } from './lib/util.js';
+import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo } from './lib/util.js';
 import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads } from './lib/data.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -13,6 +13,9 @@ import { PAPER_DEFAULTS, normalizePaper, nextPaperSize, paperVars, paperLabel } 
 /* 阅读进度只存在本浏览器，不写作品 JSON，也不走服务端 */
 const READER_PROGRESS_KEY = 'shu.reader.progress.v1';
 const READER_SIZE_KEY = 'shu.reader.size.v1';
+
+/* 章节字数缓存：切章 / 改状态 / 刷进度时不再反复重扫全书 */
+const wordsOf = createWordCounter();
 
 function readerProgressMap() {
   try {
@@ -1483,7 +1486,7 @@ function volGroupEl(ul, vid, group) {
   const open = isVolOpen(vid);
   const li = document.createElement('li');
   li.className = `vol-group${open ? '' : ' closed'}`;
-  const words = group.chapters.reduce((s, c) => s + countWords(c.content), 0);
+  const words = group.chapters.reduce((s, c) => s + wordsOf(c), 0);
   li.innerHTML = `
     <div class="vol-head" title="${open ? '点击收起这一卷' : '点击展开这一卷'}">
       <button class="vol-toggle" type="button">${ico('chev-down')}</button>
@@ -1676,7 +1679,7 @@ function openChapterTargetModal(index) {
   const n = S.novel;
   const ch = n?.chapters[index];
   if (!ch) return toast('先打开一章', 'err');
-  const words = countWords(ch.content);
+  const words = wordsOf(ch);
   const currentTarget = targetOf(ch);
   const defaultTarget = Math.max(0, Math.floor(Number(n.meta?.targetWordsPerChapter) || 0));
   const presets = [...new Set([defaultTarget, 3000, 5000, 10000])]
@@ -2194,7 +2197,7 @@ const targetOf = (c) => {
 };
 const progressOf = (c) => {
   const target = targetOf(c);
-  return target ? Math.min(100, Math.round((countWords(c?.content) / target) * 100)) : 0;
+  return target ? Math.min(100, Math.round((wordsOf(c) / target) * 100)) : 0;
 };
 function stageCountsOf(novel) {
   const counts = { draft: 0, revising: 0, done: 0 };
@@ -2249,9 +2252,9 @@ function openChapterBoard() {
       const scrolls = {};
       $$('.kb-list', board).forEach((el) => { scrolls[el.dataset.stage] = el.scrollTop; });
       const counts = stageCountsOf(n);
-      const totalWords = n.chapters.reduce((sum, c) => sum + countWords(c.content), 0);
+      const totalWords = n.chapters.reduce((sum, c) => sum + wordsOf(c), 0);
       const targeted = n.chapters.filter((c) => targetOf(c) > 0);
-      const achieved = targeted.filter((c) => countWords(c.content) >= targetOf(c)).length;
+      const achieved = targeted.filter((c) => wordsOf(c) >= targetOf(c)).length;
       const goalNote = targeted.length ? ` · 目标 ${achieved}/${targeted.length} 章达标` : '';
       sub.textContent = `共 ${n.chapters.length} 章 · ${fmtWords(totalWords)} 字 · 定稿 ${counts.done}/${n.chapters.length}${goalNote}`;
       bar.innerHTML = BOARD_STAGES.map((stage) => {
@@ -2263,9 +2266,9 @@ function openChapterBoard() {
 
       board.innerHTML = BOARD_STAGES.map((stage) => {
         const rows = n.chapters.map((c, i) => ({ c, i })).filter(({ c }) => stageOf(c) === stage);
-        const words = rows.reduce((sum, { c }) => sum + countWords(c.content), 0);
+        const words = rows.reduce((sum, { c }) => sum + wordsOf(c), 0);
         const cards = rows.map(({ c, i }) => {
-          const w = countWords(c.content);
+          const w = wordsOf(c);
           const target = targetOf(c);
           const pct = progressOf(c);
           const revs = openRevisionCount(c);
@@ -2380,7 +2383,7 @@ const chapterRow = (id) => $$('#chapterList .chapter-item').find((el) => el.data
 function renderTopbarActions() {
   const mid = $('#topbarMid');
   if (!S.novel) { mid.textContent = ''; mid.onclick = null; return; }
-  const total = S.novel.chapters.reduce((s, c) => s + countWords(c.content), 0);
+  const total = S.novel.chapters.reduce((s, c) => s + wordsOf(c), 0);
   const goal = bookGoalOf(S.novel);
   const est = finishEstimate(goal, S.stats);
   const goalTip = goal
@@ -2400,7 +2403,7 @@ function renderWordChip() {
   const el = $('#chWords');
   if (!el) return;
   const ch = currentChapter();
-  const words = countWords(ch?.content || '');
+  const words = wordsOf(ch);
   const target = targetOf(ch);
   const pct = progressOf(ch);
   el.textContent = `${fmtWords(words)} 字`;
@@ -2432,7 +2435,7 @@ function renderFocusBar() {
     return;
   }
   const i = S.novel.chapters.indexOf(ch);
-  const words = countWords(ch.content);
+  const words = wordsOf(ch);
   const target = targetOf(ch);
   const pct = progressOf(ch);
   title.textContent = ch.title || '未命名';
@@ -2473,66 +2476,8 @@ function toggleFocus() {
   else enterFocus();
 }
 
-function renderStudio() {
-  if (!S.novel && S.focusMode) exitFocus();
-  const wrap = $('.editor-wrap');
-  const empty = $('#editorEmpty');
-  const setEmpty = (on, title, text, cta) => {
-    wrap.classList.toggle('is-empty', on);
-    empty.hidden = !on;
-    if (on) { $('#editorEmptyTitle').textContent = title; $('#editorEmptyText').textContent = text; $('#editorEmptyBtn').hidden = !cta; }
-    $('#chTitle').disabled = on;
-    $('#chContent').disabled = on;
-    $('#chStage').disabled = on;
-    $('#formatBtn').disabled = on;
-    $('#previewBtn').disabled = on;
-  };
-
-  if (!S.novel) {
-    $('#chapterList').innerHTML = '<li class="chapter-empty">还没有打开作品<br>回「书架」选择或新建一部</li>';
-    $('#chTitle').value = ''; $('#chContent').value = '';
-    renderWordChip();
-    $('#chapterMeta').textContent = '';
-    $('#chapterMeta').classList.remove('solo');
-    $('.chapter-filter').hidden = true;
-    $('#stageFilter').disabled = true;
-    $('#stageFilter').value = '';
-    $('#stageFilter').classList.remove('on');
-    $('#stageStat').textContent = '';
-    $('#chStage').value = 'draft';
-    $('#chStage').className = 'stage-select';
-    $('#footInfo').textContent = '';
-    $('#chapterOutlineCard').hidden = true;
-    renderRevisionCard();
-    setEmpty(true, '还没有打开作品', '回「书架」选一部旧作，或者新建一部开始写。', false);
-    histSync();
-    renderTopbarActions();
-    return;
-  }
-  const n = S.novel;
-  const total = n.chapters.reduce((s, c) => s + countWords(c.content), 0);
-  const curIdx = n.chapters.findIndex((c) => c.id === S.chapterId);
-  const curVol = curIdx >= 0 && volumesOf().length ? volumeTitle(effVolumeIds()[curIdx]) : '';
-  $('#chapterMeta').innerHTML = `${esc(n.genre || '未分类')} · ${curVol ? `${esc(curVol)} · ` : ''}${n.chapters.length} 章 · ${fmtWords(total)} 字${n.meta.platform ? ` · ${esc(n.meta.platform)}` : ''}`;
-
-  // 状态筛选：数字挂在选项里，收起时也能一眼看到「全部 / 未定稿 / 定稿」的进度
-  const stageCounts = stageCountsOf(n);
-  const stageLabels = { '': '全部', open: '未定稿', draft: '草稿', revising: '修改中', done: '定稿' };
-  const stageNums = { '': n.chapters.length, open: stageCounts.draft + stageCounts.revising, ...stageCounts };
-  if (!Object.prototype.hasOwnProperty.call(stageLabels, S.stageFilter)) S.stageFilter = '';
-  if (!n.chapters.length) S.stageFilter = '';
-  $('#chapterMeta').classList.toggle('solo', !n.chapters.length);
-  $('.chapter-filter').hidden = !n.chapters.length;
-  const filterEl = $('#stageFilter');
-  filterEl.disabled = false;
-  filterEl.value = S.stageFilter;
-  filterEl.classList.toggle('on', !!S.stageFilter);
-  for (const [value, label] of Object.entries(stageLabels)) {
-    const opt = filterEl.querySelector(`option[value="${value}"]`);
-    if (opt) opt.textContent = `${label} ${stageNums[value]}`;
-  }
-  $('#stageStat').textContent = n.chapters.length ? `${stageCounts.done}/${n.chapters.length} 定稿` : '';
-
+/** 重建左侧章节列表（分卷 / 筛选 / 平铺三种形态）。切章时不走这里，见 syncChapterSelection */
+function renderChapterList(n, stageLabels) {
   const ul = $('#chapterList');
   const keepScroll = ul.scrollTop;
   ul.innerHTML = '';
@@ -2562,7 +2507,7 @@ function renderStudio() {
       openRevs ? `${openRevs} 项待改` : '',
       target ? `目标 ${fmtWords(target)} 字 · ${pct}%` : '',
     ].filter(Boolean).join(' · ');
-    const w = countWords(c.content);
+    const w = wordsOf(c);
     const moveButtons = filtered ? '' : `
         <button class="mini-act" data-a="up" title="上移">${ico('chev-up')}</button>
         <button class="mini-act" data-a="down" title="下移">${ico('chev-down')}</button>`;
@@ -2630,6 +2575,80 @@ function renderStudio() {
     }
   }
   ul.scrollTop = keepScroll;
+}
+
+/** 切章只挪选中态：几百章的长篇不用把整个列表重新造一遍 */
+function syncChapterSelection() {
+  const ul = $('#chapterList');
+  const prev = ul.querySelector('.chapter-item.on');
+  if (prev && prev.dataset.id === S.chapterId) return;
+  if (prev) prev.classList.remove('on');
+  const next = chapterRow(S.chapterId);
+  if (next) next.classList.add('on');
+}
+
+function renderStudio({ list = true } = {}) {
+  if (!S.novel && S.focusMode) exitFocus();
+  const wrap = $('.editor-wrap');
+  const empty = $('#editorEmpty');
+  const setEmpty = (on, title, text, cta) => {
+    wrap.classList.toggle('is-empty', on);
+    empty.hidden = !on;
+    if (on) { $('#editorEmptyTitle').textContent = title; $('#editorEmptyText').textContent = text; $('#editorEmptyBtn').hidden = !cta; }
+    $('#chTitle').disabled = on;
+    $('#chContent').disabled = on;
+    $('#chStage').disabled = on;
+    $('#formatBtn').disabled = on;
+    $('#previewBtn').disabled = on;
+  };
+
+  if (!S.novel) {
+    $('#chapterList').innerHTML = '<li class="chapter-empty">还没有打开作品<br>回「书架」选择或新建一部</li>';
+    $('#chTitle').value = ''; $('#chContent').value = '';
+    renderWordChip();
+    $('#chapterMeta').textContent = '';
+    $('#chapterMeta').classList.remove('solo');
+    $('.chapter-filter').hidden = true;
+    $('#stageFilter').disabled = true;
+    $('#stageFilter').value = '';
+    $('#stageFilter').classList.remove('on');
+    $('#stageStat').textContent = '';
+    $('#chStage').value = 'draft';
+    $('#chStage').className = 'stage-select';
+    $('#footInfo').textContent = '';
+    $('#chapterOutlineCard').hidden = true;
+    renderRevisionCard();
+    setEmpty(true, '还没有打开作品', '回「书架」选一部旧作，或者新建一部开始写。', false);
+    histSync();
+    renderTopbarActions();
+    return;
+  }
+  const n = S.novel;
+  const total = n.chapters.reduce((s, c) => s + wordsOf(c), 0);
+  const curIdx = n.chapters.findIndex((c) => c.id === S.chapterId);
+  const curVol = curIdx >= 0 && volumesOf().length ? volumeTitle(effVolumeIds()[curIdx]) : '';
+  $('#chapterMeta').innerHTML = `${esc(n.genre || '未分类')} · ${curVol ? `${esc(curVol)} · ` : ''}${n.chapters.length} 章 · ${fmtWords(total)} 字${n.meta.platform ? ` · ${esc(n.meta.platform)}` : ''}`;
+
+  // 状态筛选：数字挂在选项里，收起时也能一眼看到「全部 / 未定稿 / 定稿」的进度
+  const stageCounts = stageCountsOf(n);
+  const stageLabels = { '': '全部', open: '未定稿', draft: '草稿', revising: '修改中', done: '定稿' };
+  const stageNums = { '': n.chapters.length, open: stageCounts.draft + stageCounts.revising, ...stageCounts };
+  if (!Object.prototype.hasOwnProperty.call(stageLabels, S.stageFilter)) S.stageFilter = '';
+  if (!n.chapters.length) S.stageFilter = '';
+  $('#chapterMeta').classList.toggle('solo', !n.chapters.length);
+  $('.chapter-filter').hidden = !n.chapters.length;
+  const filterEl = $('#stageFilter');
+  filterEl.disabled = false;
+  filterEl.value = S.stageFilter;
+  filterEl.classList.toggle('on', !!S.stageFilter);
+  for (const [value, label] of Object.entries(stageLabels)) {
+    const opt = filterEl.querySelector(`option[value="${value}"]`);
+    if (opt) opt.textContent = `${label} ${stageNums[value]}`;
+  }
+  $('#stageStat').textContent = n.chapters.length ? `${stageCounts.done}/${n.chapters.length} 定稿` : '';
+
+  if (list) renderChapterList(n, stageLabels);
+  else syncChapterSelection();
 
   const ch = currentChapter();
   setEmpty(!ch, '这部作品还没有章节', '新建第一章，再让右侧助手按章纲生成正文。', true);
@@ -3006,7 +3025,7 @@ function editorChanged() {
   const ch = currentChapter();
   if (!ch) return;
   ch.content = $('#chContent').value;
-  const w = countWords(ch.content);
+  const w = wordsOf(ch);
   renderWordChip();
   const li = chapterRow(ch.id);
   if (li) li.querySelector('.ci-words').textContent = w;
@@ -3156,7 +3175,9 @@ function selectChapter(id) {
   S.chapterId = id;
   S.out = ''; S.reasoning = '';
   renderOut();
-  renderStudio();
+  // 列表已经在就只挪选中态；首次进入 / 刚切回写作台时才整块重建
+  const hasList = !!$('#chapterList').querySelector('.chapter-item');
+  renderStudio({ list: !hasList });
 }
 
 $('#chStage').addEventListener('change', () => {
@@ -3409,7 +3430,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
     const stage = STAGE_LABEL[stageOf(ch)];
     $r('#readerKicker').textContent = `第 ${idx + 1} 章`;
     $r('#readerTitle').textContent = ch.title || '未命名';
-    $r('#readerMeta').textContent = `${stage} · ${fmtWords(countWords(ch.content))} 字${openRevs ? ` · ${openRevs} 项待改` : ''}`;
+    $r('#readerMeta').textContent = `${stage} · ${fmtWords(wordsOf(ch))} 字${openRevs ? ` · ${openRevs} 项待改` : ''}`;
     const html = paragraphHtml(ch.content);
     $r('#readerContent').innerHTML = html || '<p class="reader-empty">本章还没有正文。</p>';
     $r('#readerEnd').hidden = !html;
@@ -6918,7 +6939,7 @@ function renderArcsTab(host, n) {
         state,
         events,
         unresolved,
-        words: countWords(ch.content || ''),
+        words: wordsOf(ch),
       };
     });
 
@@ -6987,7 +7008,7 @@ function renderBeatsTab(host, n) {
   ];
 
   // 从章节/场景推算当前进度
-  const totalWords = (n.chapters || []).reduce((s, c) => s + countWords(c.content || ''), 0);
+  const totalWords = (n.chapters || []).reduce((s, c) => s + wordsOf(c), 0);
   const targetWords = n.meta?.targetWordsPerChapter ? n.meta.targetWordsPerChapter * n.chapters.length : totalWords || 1;
   const progress = Math.min(100, Math.round((totalWords / targetWords) * 100));
 
@@ -7346,7 +7367,7 @@ function renderStyleTab(host, n) {
     const perCh = Math.max(0, Number(m.targetWordsPerChapter) || 0);
     const updateHint = () => {
       const target = Math.floor(Number(input.value) || 0);
-      const words = (n.chapters || []).reduce((s, c) => s + countWords(c.content || ''), 0);
+      const words = (n.chapters || []).reduce((s, c) => s + wordsOf(c), 0);
       if (!target) { hint.textContent = '不定目标也可以写；这里只是给你看进度。'; return; }
       const need = perCh ? Math.ceil(target / perCh) : 0;
       const have = (n.chapters || []).length;
@@ -8574,7 +8595,7 @@ function exportBook() {
         if (showRange) {
           const inRange = rangeChapters();
           const picked = doneEl.checked ? inRange.filter((c) => stageOf(c) === 'done') : inRange;
-          const words = picked.reduce((sum, c) => sum + countWords(c.content || ''), 0);
+          const words = picked.reduce((sum, c) => sum + wordsOf(c), 0);
           const { lo, hi } = rangeValues();
           // 输入框里的章号被夹过 / 换过序时先报出真实范围，免得数字对不上
           const typed = Math.floor(Number(fromEl.value) || 0) === lo && Math.floor(Number(toEl.value) || 0) === hi;
@@ -9451,7 +9472,7 @@ function sprintDuration(phase = sprint.phase) {
   return Math.max(1, Math.round(min * 60));
 }
 function sprintBookWords() {
-  return (S.novel?.chapters || []).reduce((sum, ch) => sum + countWords(ch.content || ''), 0);
+  return (S.novel?.chapters || []).reduce((sum, ch) => sum + wordsOf(ch), 0);
 }
 function sprintFmt(sec) {
   sec = Math.max(0, Math.round(sec));
