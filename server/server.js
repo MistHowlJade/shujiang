@@ -889,6 +889,13 @@ async function handleApi(req, res, url) {
         onlyDone,
         // PDF 导出：页面加载后自动弹打印对话框
         autoprint: format === 'pdf',
+        // 打印版式：纸张 / 字号 / 行距 / 是否含书名页；非法值由 normalizePrintLayout 兜底
+        layout: {
+          paper: url.searchParams.get('paper'),
+          font: url.searchParams.get('font'),
+          leading: url.searchParams.get('leading'),
+          title: url.searchParams.get('notitle') !== '1',
+        },
       };
 
       // 打印稿 / PDF：返回一份可以直接打印的 HTML，浏览器打印对话框里可另存为 PDF

@@ -580,6 +580,20 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   const single = buildPrintHtml(pn, [pn.chapters[1]], { single: true });
   check('单章打印写清章号', single.includes('第 2 章 · 约 0 字'));
 
+  const a5 = buildPrintHtml(pn, pn.chapters, { layout: { size: 'a5', font: 14, leading: 2.2 } });
+  check('A5 版式覆盖纸张与页边距', a5.includes('@page { size: A5; margin: 16mm 14mm; }'));
+  check('字号与行距写进页面', a5.includes('font-size: 14pt') && a5.includes('line-height: 2.2'));
+  check('工具栏标出版式', a5.includes('A5 · 14pt · 2.2 行距'));
+
+  const noTitle = buildPrintHtml(pn, [pn.chapters[0]], { layout: { title: false } });
+  check('可以不要书名页', !noTitle.includes('class="titlepage"') && noTitle.includes('class="chapter"'));
+  check('没有书名页时第一章不留装饰线', noTitle.includes('class="no-titlepage"') && noTitle.includes('body.no-titlepage .sheet > .chapter:first-child'));
+  check('没有书名页时首页也标页码', noTitle.includes('@page :first { @bottom-center { content: counter(page); } }'));
+
+  const badLayout = buildPrintHtml(pn, pn.chapters, { layout: { size: 'letter', font: 99, leading: 9 } });
+  check('非法版式退回 A4 / 12pt / 1.95',
+    badLayout.includes('A4 · 12pt · 1.95 行距') && badLayout.includes('class="titlepage"'));
+
   const evilCh = { id: 'c3', no: 3, title: '<b>x</b>', content: '<script>alert(1)</script>' };
   const evil = buildPrintHtml({ ...pn, chapters: [evilCh] }, [evilCh]);
   check('章节标题与正文里的尖括号被转义',

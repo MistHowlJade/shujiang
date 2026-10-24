@@ -438,6 +438,19 @@ async function main() {
   check('PDF 导出会自动弹打印框', pdfHtml.includes('const autoPrint = true'));
   check('打印稿不会自动弹打印框', printHtml.includes('const autoPrint = false'));
 
+  const pdfA5 = await req('GET', `${BASE}/api/novels/${id}/export?format=pdf&paper=a5&font=14&leading=2.2&notitle=1`);
+  const pdfA5Html = pdfA5.buf.toString('utf8');
+  check('PDF 认版式参数',
+    pdfA5.status === 200 && pdfA5Html.includes('@page { size: A5; margin: 16mm 14mm; }')
+      && pdfA5Html.includes('font-size: 14pt') && pdfA5Html.includes('A5 · 14pt · 2.2 行距'));
+  check('PDF 可以不排书名页', !pdfA5Html.includes('class="titlepage"') && pdfA5Html.includes('class="chapter"')
+    && pdfA5Html.includes('class="no-titlepage"'));
+
+  const pdfBad = await req('GET', `${BASE}/api/novels/${id}/export?format=pdf&paper=letter&font=99&leading=9`);
+  const pdfBadHtml = pdfBad.buf.toString('utf8');
+  check('非法版式退回默认 A4 / 12pt / 1.95',
+    pdfBad.status === 200 && pdfBadHtml.includes('A4 · 12pt · 1.95 行距') && pdfBadHtml.includes('class="titlepage"'));
+
   const docxRes = await fetch(`${BASE}/api/novels/${id}/export?format=docx`);
   const docxBuf = Buffer.from(await docxRes.arrayBuffer());
   const docxName = decodeURIComponent(docxRes.headers.get('content-disposition') || '');

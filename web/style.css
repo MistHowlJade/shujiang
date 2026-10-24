@@ -1899,6 +1899,11 @@ kbd {
 .export-extra input { accent-color: var(--accent); }
 .export-extra:has(input:disabled) { opacity: .45; cursor: not-allowed; }
 .export-extras .dim.small { flex: 1 0 100%; }
+.export-extras .export-extra select.input {
+  width: auto; min-height: 28px; height: 28px;
+  padding: 0 26px 0 8px; font-size: 12px;
+  background-position: calc(100% - 14px) 12px, calc(100% - 9px) 12px;
+}
 
 /* ---------------- 导入文稿 ---------------- */
 .import-drop {

@@ -107,6 +107,65 @@ function chapterPage(c) {
 </section>`;
 }
 
+/* ---------------- 打印版式 ---------------- */
+
+/** 可选纸张：屏幕上按同一尺寸预览，打印时交给 @page */
+export const PRINT_PAGE_SIZES = {
+  a4: {
+    label: 'A4', width: '210mm', height: '297mm',
+    marginY: '22mm', marginX: '20mm',
+    titleScreen: '190mm', titlePrint: '210mm',
+    volumeScreenMargin: '30mm', volumeScreenPad: '36mm', volumePrintPad: '80mm',
+  },
+  a5: {
+    label: 'A5', width: '148mm', height: '210mm',
+    marginY: '16mm', marginX: '14mm',
+    titleScreen: '128mm', titlePrint: '140mm',
+    volumeScreenMargin: '20mm', volumeScreenPad: '24mm', volumePrintPad: '52mm',
+  },
+};
+
+export const PRINT_FONT_SIZES = [10.5, 12, 14];
+export const PRINT_LEADINGS = [1.5, 1.95, 2.2];
+
+/** 把 query / UI 传来的字符串收成合法版式；不认识的值一律退回默认 */
+export function normalizePrintLayout(input = {}) {
+  const key = String(input.size ?? input.paper ?? '').toLowerCase();
+  const font = Number(input.font);
+  const leading = Number(input.leading);
+  return {
+    size: PRINT_PAGE_SIZES[key] ? key : 'a4',
+    font: PRINT_FONT_SIZES.includes(font) ? font : 12,
+    leading: PRINT_LEADINGS.includes(leading) ? leading : 1.95,
+    title: !(input.title === false || input.title === '0' || input.title === 0 || input.noTitle === true),
+  };
+}
+
+/** 版式覆盖样式：接在基础 STYLE 后面，只改纸张 / 字号 / 行距 / 书名页 */
+function layoutStyle(layout) {
+  const page = PRINT_PAGE_SIZES[layout.size];
+  return `
+/* 版式：${page.label} · ${layout.font}pt · ${layout.leading} 行距 */
+body { font-size: ${layout.font}pt; line-height: ${layout.leading}; }
+.sheet {
+  width: min(${page.width}, calc(100vw - 28px));
+  min-height: ${page.height};
+  padding: ${page.marginY} ${page.marginX};
+}
+.titlepage { min-height: ${page.titleScreen}; }
+.volume { margin-top: ${page.volumeScreenMargin}; padding-top: ${page.volumeScreenPad}; }
+@page { size: ${page.label}; margin: ${page.marginY} ${page.marginX}; }
+@media print {
+  .titlepage { min-height: ${page.titlePrint}; }
+  .volume { padding-top: ${page.volumePrintPad}; }
+}
+${layout.title ? '' : `
+/* 没有书名页时，第一章直接从页首开始，别留一条没有上文的装饰线 */
+body.no-titlepage .sheet > .chapter:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+@page :first { @bottom-center { content: counter(page); } }`}
+`;
+}
+
 const STYLE = `
 :root {
   --ink: #17181b;
@@ -368,13 +427,16 @@ body {
  * 生成一份可直接打印的 A4 HTML。
  * @param {object} novel 作品
  * @param {object[]} chapters 本次要打印的章节
- * @param {object} extras { range, onlyDone, single, note, autoprint }
+ * @param {object} extras { range, onlyDone, single, note, autoprint, layout }
  *   autoprint 为 true 时（PDF 导出）页面加载完自动弹出打印对话框
+ *   layout 可指定纸张 / 字号 / 行距 / 是否含书名页，见 normalizePrintLayout
  * @returns {string} 完整 HTML 文档
  */
 export function buildPrintHtml(novel, chapters = [], extras = {}) {
   const list = Array.isArray(chapters) ? chapters.filter(Boolean) : [];
   const autoprint = !!extras.autoprint;
+  const layout = normalizePrintLayout(extras.layout || {});
+  const page = PRINT_PAGE_SIZES[layout.size];
   const words = list.reduce((sum, c) => sum + countWords(c.content), 0);
   const bookWords = (novel.chapters || []).reduce((sum, c) => sum + countWords(c.content), 0);
   const volOf = volumeOf(novel);
@@ -389,7 +451,7 @@ export function buildPrintHtml(novel, chapters = [], extras = {}) {
   }
 
   const title = str(novel.title) || '未命名作品';
-  const meta = `${list.length} 章 · 约 ${num(words)} 字`;
+  const meta = `${page.label} · ${layout.font}pt · ${layout.leading} 行距 · ${list.length} 章 · 约 ${num(words)} 字`;
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -397,9 +459,9 @@ export function buildPrintHtml(novel, chapters = [], extras = {}) {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="color-scheme" content="light" />
 <title>《${esc(title)}》· ${autoprint ? 'PDF' : '打印稿'}</title>
-<style>${STYLE}</style>
+<style>${STYLE}${layoutStyle(layout)}</style>
 </head>
-<body>
+<body${layout.title ? '' : ' class="no-titlepage"'}>
 <header class="bar">
   <div class="bar-main">
     <span class="bar-eyebrow">${autoprint ? 'PDF 导出' : '打印预览'}</span>
@@ -416,7 +478,7 @@ export function buildPrintHtml(novel, chapters = [], extras = {}) {
   </div>
 </header>
 <main class="sheet">
-${titlePage(novel, list, extras, words)}
+${layout.title ? titlePage(novel, list, extras, words) : ''}
 ${extras.note ? notePage(novel, bookWords) : ''}
 ${body.join('\n')}
 </main>

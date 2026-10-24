@@ -8299,6 +8299,19 @@ function exportBook() {
     </label>
     <div class="dim small export-done-hint" id="exDoneHint" hidden>章号沿用原书，不会自动重新编号。</div>
     <div class="dim small" id="exHint" hidden>EPUB 自动生成标题页、目录和分卷结构，适合放进手机 / 阅读器。选了区间就只打包这几章。</div>
+    <div class="export-extras" id="exLayoutRow" hidden>
+      <span class="export-extras-lbl">版式</span>
+      <label class="export-extra">纸张
+        <select id="exPaper" class="input"><option value="a4">A4</option><option value="a5">A5</option></select>
+      </label>
+      <label class="export-extra">字号
+        <select id="exFont" class="input"><option value="10.5">五号 10.5pt</option><option value="12" selected>小四 12pt</option><option value="14">四号 14pt</option></select>
+      </label>
+      <label class="export-extra">行距
+        <select id="exLeading" class="input"><option value="1.5">紧凑 1.5</option><option value="1.95" selected>标准 1.95</option><option value="2.2">宽松 2.2</option></select>
+      </label>
+      <label class="export-extra"><input type="checkbox" id="exTitlePage" checked /><span>包含书名页</span></label>
+    </div>
     <div class="dim small export-done-hint" id="exContactHint" hidden></div>
     <div class="export-extras" id="exExtras" hidden>
       <span class="export-extras-lbl">随稿附带</span>
@@ -8345,6 +8358,11 @@ function exportBook() {
       const scopeEl = box.querySelector('#exScope');
       const hintEl = box.querySelector('#exHint');
       const okBtn = box.querySelector('#exOk');
+      const layoutRow = box.querySelector('#exLayoutRow');
+      const paperEl = box.querySelector('#exPaper');
+      const fontEl = box.querySelector('#exFont');
+      const leadingEl = box.querySelector('#exLeading');
+      const titlePageEl = box.querySelector('#exTitlePage');
       const doneEl = box.querySelector('#exDone');
       const doneRow = box.querySelector('#exDoneRow');
       const doneCountEl = box.querySelector('#exDoneCount');
@@ -8530,6 +8548,8 @@ function exportBook() {
         scopeEl.querySelector('option[value="chapter"]').disabled = epub;
         if (epub && scopeEl.value === 'chapter') scopeEl.value = 'all';
         const scope = scopeEl.value;
+        // 版式只对打印稿 / PDF 有意义
+        layoutRow.hidden = !(print || pdf);
         hintEl.hidden = !(backup || epub || docx || print || pdf);
         hintEl.textContent = backup
           ? '备份是当前作品的完整 JSON：正文、设定、大纲、章节记忆和修订都会保留。恢复时会在书架新建一部作品，不会覆盖现有稿件。'
@@ -8673,7 +8693,11 @@ function exportBook() {
         if (!extrasRow.hidden && charactersEl.checked) extras.push('characters');
         const extraQ = extras.length ? `&extras=${extras.join(',')}` : '';
         const noteQ = !noteRow.hidden && noteEl.checked && noteText ? '&note=1' : '';
-        const url = `/api/novels/${S.novel.id}/export?format=${fmt}${q}${rangeQ}${extraQ}${noteQ}`;
+        // 版式参数只随打印稿 / PDF 走，其它格式不带
+        const layoutQ = (fmt === 'print' || fmt === 'pdf')
+          ? `&paper=${paperEl.value}&font=${fontEl.value}&leading=${leadingEl.value}${titlePageEl.checked ? '' : '&notitle=1'}`
+          : '';
+        const url = `/api/novels/${S.novel.id}/export?format=${fmt}${q}${rangeQ}${extraQ}${noteQ}${layoutQ}`;
         // 打印稿 / PDF 是打开一页给人看 / 打印，不是下载；弹窗被拦时留在原地，别把导出窗口关了
         if (fmt === 'print' || fmt === 'pdf') {
           const w = window.open(url, '_blank');
