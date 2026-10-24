@@ -306,6 +306,23 @@ const S = {
     scrollHandler: null,
     measureDone: false,
   },
+  // 虚拟段落编辑器状态
+  editorVl: {
+    enabled: false,
+    itemHeight: 32,         // 预估段落高度（px），首次渲染后实测修正
+    buffer: 3,              // 可视区上下各多渲染几段
+    firstIdx: 0,            // 当前渲染的第一段索引
+    lastIdx: -1,            // 当前渲染的最后一段索引
+    total: 0,               // 总段数
+    paragraphs: [],         // 当前章节的所有段落 [{ text, dom? }]
+    viewportEl: null,       // viewport 元素
+    spacerEl: null,         // spacer 元素
+    scrollHandler: null,    // 滚动监听器引用
+    measureDone: false,     // 是否已实测段高
+    editingIdx: -1,         // 正在编辑的段索引
+    editingTextarea: null,  // 正在编辑的 textarea 元素
+    baseText: '',           // 当前章节的完整文本（用于 diff）
+  },
 };
 
 function setSave(flag, text) {
@@ -2825,6 +2842,305 @@ function cleanupBibleVirtualList(listEl) {
   vl.listEl = null;
 }
 
+/* ============================================================
+ * 虚拟段落编辑器
+ * ============================================================ */
+
+/** 将文本按段落分割 */
+function splitParagraphs(text) {
+  return String(text || '').split(/\n\s*\n/).filter(p => p.trim().length > 0);
+}
+
+/** 初始化虚拟段落编辑器 */
+function initEditorVirtual() {
+  const vl = S.editorVl;
+  const viewportEl = $('#editorVirtualViewport');
+  const spacerEl = $('#editorVirtualSpacer');
+  
+  if (!viewportEl || !spacerEl) return;
+  
+  vl.viewportEl = viewportEl;
+  vl.spacerEl = spacerEl;
+  vl.enabled = true;
+  vl.measureDone = false;
+  vl.firstIdx = 0;
+  vl.lastIdx = -1;
+  vl.editingIdx = -1;
+  
+  // 绑定滚动事件
+  if (!vl.scrollHandler) {
+    vl.scrollHandler = () => renderEditorVirtual(viewportEl, viewportEl.scrollTop);
+    viewportEl.addEventListener('scroll', vl.scrollHandler, { passive: true });
+  }
+  
+  // 绑定点击/焦点事件处理编辑
+  viewportEl.addEventListener('click', handleEditorClick);
+  viewportEl.addEventListener('focusin', handleEditorFocusIn);
+  viewportEl.addEventListener('focusout', handleEditorFocusOut);
+  viewportEl.addEventListener('keydown', handleEditorKeydown);
+  
+  // 初次渲染
+  renderEditorVirtual(viewportEl, 0);
+}
+
+/** 重建虚拟编辑器段落 */
+function rebuildEditorParagraphs(text) {
+  const vl = S.editorVl;
+  const paragraphs = splitParagraphs(text);
+  vl.paragraphs = paragraphs.map(text => ({ text }));
+  vl.total = paragraphs.length;
+  vl.baseText = text;
+  vl.measureDone = false;
+  vl.firstIdx = 0;
+  vl.lastIdx = -1;
+  vl.editingIdx = -1;
+}
+
+/** 处理点击：进入编辑模式 */
+function handleEditorClick(e) {
+  const vl = S.editorVl;
+  const para = e.target.closest('.editor-para');
+  if (!para) return;
+  
+  const idx = Array.from(vl.viewportEl.querySelectorAll('.editor-para')).indexOf(para);
+  if (idx < 0 || idx < vl.firstIdx || idx > vl.lastIdx) return;
+  
+  // 如果已经在编辑中，不重复处理
+  if (vl.editingIdx === idx) return;
+  
+  // 如果正在编辑其他段，先结束编辑
+  if (vl.editingIdx >= 0) finishEditing();
+  
+  startEditing(idx);
+}
+
+/** 处理焦点进入 */
+function handleEditorFocusIn(e) {
+  const para = e.target.closest('.editor-para');
+  if (!para) return;
+  para.classList.add('focused');
+}
+
+/** 处理焦点离开 */
+function handleEditorFocusOut(e) {
+  const para = e.target.closest('.editor-para');
+  if (!para) return;
+  para.classList.remove('focused');
+  
+  // 如果是点击其他段落，不立即结束编辑（由 click 处理）
+  // 如果是点击别处，延迟结束编辑
+  setTimeout(() => {
+    if (!document.activeElement.closest('.editor-para')) {
+      finishEditing();
+    }
+  }, 0);
+}
+
+/** 处理键盘事件 */
+function handleEditorKeydown(e) {
+  const vl = S.editorVl;
+  if (vl.editingIdx < 0) return;
+  
+  const ta = vl.editingTextarea;
+  if (!ta) return;
+  
+  // Tab 键处理
+  if (e.key === 'Tab' && !e.shiftKey) {
+    e.preventDefault();
+    ta.setRangeText('　　', ta.selectionStart, ta.selectionEnd, 'end');
+    return;
+  }
+  // Enter 键：分段
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    const before = ta.value.slice(0, ta.selectionStart);
+    const line = before.slice(before.lastIndexOf('\n') + 1);
+    if (line.startsWith('　　')) {
+      e.preventDefault();
+      ta.setRangeText('\n　　', ta.selectionStart, ta.selectionEnd, 'end');
+      return;
+    }
+  }
+  // Esc：退出编辑
+  if (e.key === 'Escape') {
+    finishEditing();
+    return;
+  }
+}
+
+/** 开始编辑某段 */
+function startEditing(idx) {
+  const vl = S.editorVl;
+  const viewportEl = vl.viewportEl;
+  if (!viewportEl) return;
+  
+  const paras = viewportEl.querySelectorAll('.editor-para');
+  const para = paras[idx - vl.firstIdx];
+  if (!para) return;
+  
+  const text = vl.paragraphs[idx].text;
+  
+  // 创建 textarea
+  const textarea = document.createElement('textarea');
+  textarea.className = 'editor-para-edit';
+  textarea.value = text;
+  textarea.style.cssText = `
+    width: 100%; min-height: 2.5em; resize: vertical;
+    font: inherit; line-height: inherit; letter-spacing: inherit;
+    padding: 4px 8px; border: 1px solid var(--accent);
+    border-radius: 2px; background: var(--surface-1);
+    outline: none; box-shadow: 0 0 0 3px var(--accent-bg);
+    font-family: var(--ed-font); font-size: var(--ed-size); line-height: var(--ed-lh);
+  `;
+  
+  // 替换段落
+  para.style.display = 'none';
+  para.parentNode.insertBefore(textarea, para);
+  textarea.focus();
+  textarea.setSelectionRange(text.length, text.length);
+  
+  vl.editingIdx = idx;
+  vl.editingTextarea = textarea;
+  para.classList.add('editing');
+  
+  // 绑定事件
+  textarea.addEventListener('input', () => onEditingInput(idx, textarea));
+  textarea.addEventListener('blur', () => setTimeout(() => finishEditing(), 0));
+}
+
+/** 编辑过程中的输入处理 */
+function onEditingInput(idx, textarea) {
+  const vl = S.editorVl;
+  const oldText = vl.paragraphs[idx].text;
+  const newText = textarea.value;
+  vl.paragraphs[idx].text = newText;
+  
+  // 实时更新字数统计
+  const ch = currentChapter();
+  if (ch) {
+    ch.content = vl.paragraphs.map(p => p.text).join('\n\n');
+    const w = countWords(ch.content);
+    renderWordChip();
+    const li = chapterRow(ch.id);
+    if (li) li.querySelector('.ci-words').textContent = w;
+    markDirty();
+    hideSelToolbar();
+    updateUndoButtons();
+    updateFoot();
+  }
+}
+
+/** 结束编辑：将 textarea 内容写回段落 */
+function finishEditing() {
+  const vl = S.editorVl;
+  if (vl.editingIdx < 0 || !vl.editingTextarea) return;
+  
+  const idx = vl.editingIdx;
+  const textarea = vl.editingTextarea;
+  const newText = textarea.value;
+  
+  // 更新段落文本
+  vl.paragraphs[idx].text = newText;
+  
+  // 移除 textarea，显示段落
+  const paras = vl.viewportEl.querySelectorAll('.editor-para');
+  const para = paras[idx - vl.firstIdx];
+  if (para) {
+    para.textContent = newText;
+    para.style.display = '';
+    para.classList.remove('editing');
+  }
+  
+  // 移除 textarea
+  textarea.remove();
+  vl.editingIdx = -1;
+  vl.editingTextarea = null;
+  
+  // 更新完整文本并触发保存/统计
+  const ch = currentChapter();
+  if (ch) {
+    ch.content = vl.paragraphs.map(p => p.text).join('\n\n');
+    const w = countWords(ch.content);
+    renderWordChip();
+    const li = chapterRow(ch.id);
+    if (li) li.querySelector('.ci-words').textContent = w;
+    markDirty();
+    hideSelToolbar();
+    updateUndoButtons();
+    updateFoot();
+    // 记录撤销历史
+    const diff = makeCompactDiff(vl.baseText, ch.content);
+    const entry = { diff, sel: { s: 0, e: 0 } };
+    const st = histState(ch.id);
+    st.undo.push(entry);
+    if (st.undo.length > HIST_MAX) st.undo.shift();
+    st.redo.length = 0;
+    vl.baseText = ch.content;
+  }
+}
+
+/** 虚拟编辑器渲染 */
+function renderEditorVirtual(viewportEl, scrollTop) {
+  const vl = S.editorVl;
+  const { itemHeight, buffer, total, paragraphs } = vl;
+  const clientH = viewportEl.clientHeight;
+  if (clientH === 0) return;
+  
+  const first = Math.max(0, Math.floor(scrollTop / itemHeight) - buffer);
+  const visibleCount = Math.ceil(clientH / itemHeight);
+  const last = Math.min(total - 1, first + visibleCount + buffer * 2 - 1);
+  
+  // 范围没变且已测量过高度，不重绘
+  if (vl.measureDone && first === vl.firstIdx && last === vl.lastIdx) return;
+  vl.firstIdx = first;
+  vl.lastIdx = last;
+  
+  // 渲染
+  const frag = document.createDocumentFragment();
+  for (let idx = first; idx <= last; idx++) {
+    const p = vl.paragraphs[idx];
+    const div = document.createElement('div');
+    div.className = 'editor-para';
+    div.dataset.idx = idx;
+    div.textContent = p.text;
+    frag.appendChild(div);
+  }
+  
+  viewportEl.innerHTML = '';
+  viewportEl.appendChild(frag);
+  
+  // 更新 spacer 高度
+  const spacerEl = vl.spacerEl;
+  if (spacerEl) spacerEl.style.height = `${total * itemHeight}px`;
+  
+  // 首帧后实测段落高度并修正
+  if (!vl.measureDone) {
+    const firstPara = viewportEl.querySelector('.editor-para');
+    if (firstPara) {
+      const h = firstPara.getBoundingClientRect().height;
+      if (h > 16 && h < 200) {
+        vl.itemHeight = h;
+        const spacerEl = vl.spacerEl;
+        if (spacerEl) spacerEl.style.height = `${total * h}px`;
+        viewportEl.scrollTop = first * h;
+      }
+      vl.measureDone = true;
+    }
+  }
+}
+
+/** 获取当前章节完整文本 */
+function getEditorFullText() {
+  return S.editorVl.paragraphs.map(p => p.text).join('\n\n');
+}
+
+/** 设置编辑器完整文本（用于切章、撤销等） */
+function setEditorFullText(text) {
+  const vl = S.editorVl;
+  rebuildEditorParagraphs(text);
+  renderEditorVirtual(vl.viewportEl, vl.viewportEl.scrollTop);
+  vl.baseText = text;
+}
+
 function renderStudio({ list = true } = {}) {
   if (!S.novel && S.focusMode) exitFocus();
   const wrap = $('.editor-wrap');
@@ -2894,9 +3210,13 @@ function renderStudio({ list = true } = {}) {
   $('#chStage').value = stage;
   $('#chStage').className = `stage-select st-${stage}`;
   $('#chTitle').value = ch?.title || '';
-  const taEl = $('#chContent');
-  const nextContent = ch?.content || '';
-  if (taEl.value !== nextContent) { taEl.value = nextContent; resetCounted(ch); }   // 值没变就别赋值，免得光标被弹到末尾
+  
+  // 初始化虚拟段落编辑器
+  if (ch) {
+    setEditorFullText(ch.content || '');
+    initEditorVirtual();
+  }
+  
   renderWordChip();
   histSync();
   $('#genWords').value = n.meta.targetWordsPerChapter || 3000;
@@ -3140,6 +3460,16 @@ function histState(id) {
 }
 
 function editorSnap() {
+  const vl = S.editorVl;
+  if (vl.enabled && vl.viewportEl) {
+    const text = getEditorFullText();
+    const ta = vl.editingTextarea;
+    if (ta) {
+      return { v: text, s: ta.selectionStart ?? 0, e: ta.selectionEnd ?? 0 };
+    }
+    return { v: text, s: 0, e: 0 };
+  }
+  // 兼容旧模式
   const ta = $('#chContent');
   return { v: ta.value, s: ta.selectionStart ?? 0, e: ta.selectionEnd ?? 0 };
 }
@@ -3157,7 +3487,8 @@ function updateUndoButtons() {
 function histSync() {
   const ch = currentChapter();
   if (!ch) { HIST.chapterId = null; HIST.cur = null; updateUndoButtons(); return; }
-  const v = $('#chContent').value;
+  const vl = S.editorVl;
+  const v = vl.enabled ? getEditorFullText() : $('#chContent').value;
   if (HIST.chapterId === ch.id) {
     if (HIST.cur && HIST.cur.v === v) { updateUndoButtons(); return; }
     // 同一章内容却被外部改了（比如全书替换）：历史已对不上，清掉更安全
@@ -3207,12 +3538,33 @@ function histEdit() {
 /** 光标 / 选区变化时记一笔，撤销后能回到原来的位置 */
 function histCaret() {
   if (!HIST.cur) return;
-  const ta = $('#chContent');
-  HIST.cur.s = ta.selectionStart ?? 0;
-  HIST.cur.e = ta.selectionEnd ?? 0;
+  const vl = S.editorVl;
+  if (vl.enabled && vl.editingTextarea) {
+    HIST.cur.s = vl.editingTextarea.selectionStart ?? 0;
+    HIST.cur.e = vl.editingTextarea.selectionEnd ?? 0;
+  } else {
+    const ta = $('#chContent');
+    HIST.cur.s = ta.selectionStart ?? 0;
+    HIST.cur.e = ta.selectionEnd ?? 0;
+  }
 }
 
 function applySnap(entry) {
+  const vl = S.editorVl;
+  if (vl.enabled) {
+    // 虚拟编辑器模式：应用 diff 到完整文本
+    const newText = applyCompactDiff(entry.diff.baseText || S.editorVl.baseText, entry.diff);
+    setEditorFullText(newText);
+    const len = newText.length;
+    const s = Math.max(0, Math.min(entry.sel.s ?? len, len));
+    const e = Math.max(s, Math.min(entry.sel.e ?? s, len));
+    HIST.cur = { v: newText, s, e };
+    HIST.last = 0;
+    resetCounted(currentChapter());
+    editorChanged();
+    return;
+  }
+  // 兼容旧模式
   const ta = $('#chContent');
   const newText = applyCompactDiff(entry.diff.baseText || base.v, entry.diff);
   ta.value = newText;
@@ -3221,10 +3573,10 @@ function applySnap(entry) {
   const e = Math.max(s, Math.min(entry.sel.e ?? s, len));
   HIST.cur = { v: newText, s, e };
   HIST.last = 0;
-  resetCounted(currentChapter());   // 撤销 / 重做是还原，不记码字量
+  resetCounted(currentChapter());
   ta.focus();
   try { ta.setSelectionRange(s, e); } catch { /* 忽略 */ }
-  editorChanged();             // 同步字数、脏标记、自动保存
+  editorChanged();
 }
 
 function doUndo() {
@@ -3234,7 +3586,7 @@ function doUndo() {
   if (!st.undo.length) return toast('没有可撤销的操作了');
   // 当前状态入 redo
   const cur = editorSnap();
-  const curDiff = makeCompactDiff(st.baseText || base.v, cur.v);
+  const curDiff = makeCompactDiff(st.baseText || S.editorVl.baseText, cur.v);
   st.redo.push({ diff: curDiff, sel: { s: cur.s, e: cur.e } });
   if (st.redo.length > HIST_MAX) st.redo.shift();
   // 撤销：应用 undo 栈顶的 diff
@@ -3250,7 +3602,7 @@ function doRedo() {
   const st = histState(ch.id);
   if (!st.redo.length) return toast('没有可重做的操作了');
   const cur = editorSnap();
-  const curDiff = makeCompactDiff(st.baseText || base.v, cur.v);
+  const curDiff = makeCompactDiff(st.baseText || S.editorVl.baseText, cur.v);
   st.undo.push({ diff: curDiff, sel: { s: cur.s, e: cur.e } });
   if (st.undo.length > HIST_MAX) st.undo.shift();
   const entry = st.redo.pop();
@@ -3278,7 +3630,12 @@ $('#chContent').addEventListener('compositionend', () => {
 function editorChanged() {
   const ch = currentChapter();
   if (!ch) return;
-  ch.content = $('#chContent').value;
+  const vl = S.editorVl;
+  if (vl.enabled) {
+    ch.content = getEditorFullText();
+  } else {
+    ch.content = $('#chContent').value;
+  }
   const w = wordsOf(ch);
   renderWordChip();
   const li = chapterRow(ch.id);
