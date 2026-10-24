@@ -6809,6 +6809,34 @@ function renderCharactersTab(host, n) {
   };
 }
 
+/* ---- 世界观条目渲染（供虚拟列表复用） ---- */
+function renderWorldEntry(w, i) {
+  const div = document.createElement('div');
+  div.className = 'entry';
+  div.innerHTML = `
+    <div class="entry-head">
+      <input class="input" data-key="name" value="${esc(w.name || '')}" placeholder="名称" style="max-width:200px;font-weight:600" />
+      <input class="input" data-key="category" value="${esc(w.category || '')}" placeholder="分类：地理/势力/力量体系/规则/物品" style="max-width:240px" />
+      <span style="flex:1"></span>
+      <button class="del" title="删除">${ico('trash')}</button>
+    </div>
+    ${field('说明（写具体细节，模型才能用上）', 'desc', w, { area: true, rows: 3 })}
+    ${field('检索关键词（逗号分隔）', 'kwText', { kwText: (w.keywords || []).join('，') })}`;
+  bindFields(div, w, () => saveNovelPart({ bible: n.bible }));
+  const kw = div.querySelector('[data-key="kwText"]');
+  kw.addEventListener('input', () => {
+    w.keywords = kw.value.split(/[,，、\s]+/).filter(Boolean);
+    saveNovelPart({ bible: n.bible });
+  });
+  div.querySelector('.del').onclick = () => {
+    if (!confirm(`删除设定「${w.name || i + 1}」？`)) return;
+    n.bible.world.splice(i, 1);
+    renderBible();
+    saveNovelPart({ bible: n.bible });
+  };
+  return div;
+}
+
 /* ---- 世界观 ---- */
 function renderWorldTab(host, n) {
   host.innerHTML = `
@@ -6822,33 +6850,12 @@ function renderWorldTab(host, n) {
       <div class="entry-list" id="worldList"></div>
     </div>`;
   const list = $('#worldList', host);
-  if (!n.bible.world.length) list.innerHTML = '<p class="dim">还没有世界观条目。</p>';
-  n.bible.world.forEach((w, i) => {
-    const div = document.createElement('div');
-    div.className = 'entry';
-    div.innerHTML = `
-      <div class="entry-head">
-        <input class="input" data-key="name" value="${esc(w.name || '')}" placeholder="名称" style="max-width:200px;font-weight:600" />
-        <input class="input" data-key="category" value="${esc(w.category || '')}" placeholder="分类：地理/势力/力量体系/规则/物品" style="max-width:240px" />
-        <span style="flex:1"></span>
-        <button class="del" title="删除">${ico('trash')}</button>
-      </div>
-      ${field('说明（写具体细节，模型才能用上）', 'desc', w, { area: true, rows: 3 })}
-      ${field('检索关键词（逗号分隔）', 'kwText', { kwText: (w.keywords || []).join('，') })}`;
-    bindFields(div, w, () => saveNovelPart({ bible: n.bible }));
-    const kw = div.querySelector('[data-key="kwText"]');
-    kw.addEventListener('input', () => {
-      w.keywords = kw.value.split(/[,，、\s]+/).filter(Boolean);
-      saveNovelPart({ bible: n.bible });     // 同上：关键词字段不在 bindFields 的自动保存里
-    });
-    div.querySelector('.del').onclick = () => {
-      if (!confirm(`删除设定「${w.name || i + 1}」？`)) return;
-      n.bible.world.splice(i, 1);
-      renderBible();
-      saveNovelPart({ bible: n.bible });
-    };
-    list.appendChild(div);
-  });
+  if (!n.bible.world.length) {
+    list.innerHTML = '<p class="dim">还没有世界观条目。</p>';
+    return;
+  }
+  initBibleVirtualList(list, n.bible.world, (w, i) => renderWorldEntry(w, i));
+
   $('#addWorld', host).onclick = () => {
     n.bible.world.push({ id: uid('w'), name: '新设定', category: '地理', desc: '', keywords: [] });
     renderBible();
@@ -7096,6 +7103,16 @@ function renderRelationsTab(host, n) {
   renderGraph();
 }
 
+/* ---- 线索条目渲染（供虚拟列表复用） ---- */
+function renderThreadEntry(item) {
+  return `<button type="button" class="thread-row" data-thread-ch="${item.latest.id}" title="跳到第 ${item.latest.no} 章">
+    <span class="thread-kind ${item.kind}">${THREAD_KINDS[item.kind].label}</span>
+    <span class="thread-text">${esc(item.text)}</span>
+    <span class="thread-meta">${threadMeta(item)}</span>
+  </button>`;
+}
+
+/** 线索追踪：基于章节记忆自动生成 */
 function renderThreadsTab(host, n) {
   const threads = collectThreads(n);
   const counts = {
@@ -7106,6 +7123,7 @@ function renderThreadsTab(host, n) {
   const memCount = (n.chapters || []).filter((c) => c.memory).length;
   const filter = ['all', 'unresolved', 'foreshadowing'].includes(S.threadFilter) ? S.threadFilter : 'all';
   const visible = filter === 'all' ? threads : threads.filter((t) => t.kind === filter);
+  
   host.innerHTML = `
     <div class="bible-block">
       <h2>线索追踪
@@ -7126,11 +7144,7 @@ function renderThreadsTab(host, n) {
         ].map(([kind, label, count]) => `<button data-tf="${kind}" class="${filter === kind ? 'on' : ''}">${label} ${count}</button>`).join('')}
       </div>` : ''}
       <div class="thread-list">
-        ${visible.length ? visible.map((item) => `<button type="button" class="thread-row" data-thread-ch="${item.latest.id}" title="跳到第 ${item.latest.no} 章">
-          <span class="thread-kind ${item.kind}">${THREAD_KINDS[item.kind].label}</span>
-          <span class="thread-text">${esc(item.text)}</span>
-          <span class="thread-meta">${threadMeta(item)}</span>
-        </button>`).join('') : `<div class="thread-empty">${total
+        ${visible.length ? visible.map(renderThreadEntry).join('') : `<div class="thread-empty">${total
           ? '没有符合当前筛选的线索。'
           : memCount
             ? '章节记忆里还没有未决或伏笔记录。'
@@ -7138,6 +7152,7 @@ function renderThreadsTab(host, n) {
       </div>
       ${memCount > 0 && memCount < n.chapters.length ? `<p class="dim small thread-hint">还有 ${n.chapters.length - memCount} 章没有章节记忆，线索可能不完整。</p>` : ''}
     </div>`;
+  
   $$('#threadFilter button', host).forEach((btn) => {
     btn.onclick = () => {
       S.threadFilter = btn.dataset.tf;
@@ -7324,6 +7339,27 @@ function renderBeatsTab(host, n) {
     });
   });
 }
+/* ---- 时间线条目渲染（供虚拟列表复用） ---- */
+function renderTimelineEntry(t, i) {
+  const div = document.createElement('div');
+  div.className = 'entry';
+  div.innerHTML = `
+    <div class="entry-head">
+      <input class="input" data-key="time" value="${esc(t.time || '')}" placeholder="时间：开元三年春 / 主角 12 岁" style="max-width:280px;font-weight:600" />
+      <input class="input" data-key="title" value="${esc(t.title || '')}" placeholder="事件标题" />
+      <button class="del" title="删除">${ico('trash')}</button>
+    </div>
+    ${field('说明', 'desc', t, { area: true, rows: 2 })}`;
+  bindFields(div, t, () => saveNovelPart({ bible: n.bible }));
+  div.querySelector('.del').onclick = () => {
+    n.bible.timeline.splice(i, 1);
+    renderBible();
+    saveNovelPart({ bible: n.bible });
+  };
+  return div;
+}
+
+/* ---- 时间线 ---- */
 function renderTimelineTab(host, n) {
   host.innerHTML = `
     <div class="bible-block">
@@ -7335,25 +7371,12 @@ function renderTimelineTab(host, n) {
       <div class="entry-list" id="tlList"></div>
     </div>`;
   const list = $('#tlList', host);
-  if (!n.bible.timeline.length) list.innerHTML = '<p class="dim">还没有时间节点。</p>';
-  n.bible.timeline.forEach((t, i) => {
-    const div = document.createElement('div');
-    div.className = 'entry';
-    div.innerHTML = `
-      <div class="entry-head">
-        <input class="input" data-key="time" value="${esc(t.time || '')}" placeholder="时间：开元三年春 / 主角 12 岁" style="max-width:280px;font-weight:600" />
-        <input class="input" data-key="title" value="${esc(t.title || '')}" placeholder="事件标题" />
-        <button class="del" title="删除">${ico('trash')}</button>
-      </div>
-      ${field('说明', 'desc', t, { area: true, rows: 2 })}`;
-    bindFields(div, t, () => saveNovelPart({ bible: n.bible }));
-    div.querySelector('.del').onclick = () => {
-      n.bible.timeline.splice(i, 1);
-      renderBible();
-      saveNovelPart({ bible: n.bible });
-    };
-    list.appendChild(div);
-  });
+  if (!n.bible.timeline.length) {
+    list.innerHTML = '<p class="dim">还没有时间节点。</p>';
+    return;
+  }
+  initBibleVirtualList(list, n.bible.timeline, (t, i) => renderTimelineEntry(t, i));
+
   $('#addTl', host).onclick = () => {
     n.bible.timeline.push({ id: uid('t'), time: '', title: '', desc: '' });
     renderBible();
