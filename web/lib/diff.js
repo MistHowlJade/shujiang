@@ -13,6 +13,51 @@
 import { esc } from './util.js';
 
 /* ============================================================
+ * 紧凑 Diff 编码（用于撤销历史压缩）
+ * ============================================================ */
+
+/**
+ * 生成紧凑 diff：{ ops: [{ type: 'same'|'del'|'add', text: string }], baseLen: number }
+ * 只记录变化部分，same 段只记录句子数不记录内容，极大压缩历史体积
+ */
+export function makeCompactDiff(oldText, newText) {
+  const ops = lcsOps(splitSentences(oldText), splitSentences(newText));
+  const compact = [];
+  let sameCount = 0;
+  for (const op of ops) {
+    if (op.type === 'same') {
+      sameCount += 1;
+    } else {
+      if (sameCount > 0) { compact.push({ t: 's', n: sameCount }); sameCount = 0; }
+      compact.push({ t: op.type === 'del' ? 'd' : 'a', v: op.text });
+    }
+  }
+  if (sameCount > 0) compact.push({ t: 's', n: sameCount });
+  return { ops: compact, baseLen: oldText.length };
+}
+
+/**
+ * 应用紧凑 diff 还原文本
+ */
+export function applyCompactDiff(baseText, diff) {
+  const baseSentences = splitSentences(baseText);
+  let pos = 0;
+  const resultSentences = [];
+  for (const op of diff.ops) {
+    if (op.t === 's') {
+      resultSentences.push(...baseSentences.slice(pos, pos + op.n));
+      pos += op.n;
+    } else if (op.t === 'd') {
+      pos += 1;
+    } else if (op.t === 'a') {
+      resultSentences.push(op.v);
+    }
+  }
+  resultSentences.push(...baseSentences.slice(pos));
+  return resultSentences.join('');
+}
+
+/* ============================================================
  * LCS 核心
  * ============================================================ */
 

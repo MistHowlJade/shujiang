@@ -5,7 +5,7 @@ import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryC
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown, CONSISTENCY_KINDS } from './lib/consistency.js';
-import { diffProse, diffHtml, diffSideHtml } from './lib/diff.js';
+import { diffProse, diffHtml, diffSideHtml, makeCompactDiff, applyCompactDiff } from './lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from './lib/goal.js';
 import { buildSubmitCheck, submitCheckHtml } from './lib/submit.js';
 import { PAPER_DEFAULTS, normalizePaper, nextPaperSize, paperVars, paperLabel } from './lib/paper.js';
@@ -3187,9 +3187,16 @@ function histEdit() {
   const st = histState(ch.id);
   const jump = Math.abs(cur.v.length - base.v.length) > HIST_JUMP;
   const merge = !jump && st.undo.length && now - HIST.last < HIST_MERGE_MS;
+
+  const diff = makeCompactDiff(base.v, cur.v);
+  const entry = { diff, sel: { s: base.s, e: base.e } };
+
   if (!merge) {
-    st.undo.push(base);
+    st.undo.push(entry);
     if (st.undo.length > HIST_MAX) st.undo.shift();
+  } else {
+    // 合并：用最新的 diff 替换最后一个
+    st.undo[st.undo.length - 1] = entry;
   }
   st.redo.length = 0;          // 有了新改动，原来的重做链就断了
   HIST.cur = cur;
@@ -3205,13 +3212,14 @@ function histCaret() {
   HIST.cur.e = ta.selectionEnd ?? 0;
 }
 
-function applySnap(snap) {
+function applySnap(entry) {
   const ta = $('#chContent');
-  ta.value = snap.v;
-  const len = snap.v.length;
-  const s = Math.max(0, Math.min(snap.s ?? len, len));
-  const e = Math.max(s, Math.min(snap.e ?? s, len));
-  HIST.cur = { v: snap.v, s, e };
+  const newText = applyCompactDiff(entry.diff.baseText || base.v, entry.diff);
+  ta.value = newText;
+  const len = newText.length;
+  const s = Math.max(0, Math.min(entry.sel.s ?? len, len));
+  const e = Math.max(s, Math.min(entry.sel.e ?? s, len));
+  HIST.cur = { v: newText, s, e };
   HIST.last = 0;
   resetCounted(currentChapter());   // 撤销 / 重做是还原，不记码字量
   ta.focus();
@@ -3224,9 +3232,14 @@ function doUndo() {
   if (!ch) return;
   const st = histState(ch.id);
   if (!st.undo.length) return toast('没有可撤销的操作了');
-  st.redo.push(editorSnap());
+  // 当前状态入 redo
+  const cur = editorSnap();
+  const curDiff = makeCompactDiff(st.baseText || base.v, cur.v);
+  st.redo.push({ diff: curDiff, sel: { s: cur.s, e: cur.e } });
   if (st.redo.length > HIST_MAX) st.redo.shift();
-  applySnap(st.undo.pop());
+  // 撤销：应用 undo 栈顶的 diff
+  const entry = st.undo.pop();
+  applySnap(entry);
   const after = histState(ch.id);
   toast(after.undo.length ? `已撤销 · 还能再撤 ${after.undo.length} 步` : '已撤销');
 }
@@ -3236,9 +3249,12 @@ function doRedo() {
   if (!ch) return;
   const st = histState(ch.id);
   if (!st.redo.length) return toast('没有可重做的操作了');
-  st.undo.push(editorSnap());
+  const cur = editorSnap();
+  const curDiff = makeCompactDiff(st.baseText || base.v, cur.v);
+  st.undo.push({ diff: curDiff, sel: { s: cur.s, e: cur.e } });
   if (st.undo.length > HIST_MAX) st.undo.shift();
-  applySnap(st.redo.pop());
+  const entry = st.redo.pop();
+  applySnap(entry);
   toast('已重做');
 }
 
