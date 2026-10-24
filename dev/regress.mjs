@@ -429,6 +429,15 @@ async function main() {
     printDone.status === 200 && printDoneHtml.includes('定稿 1 章')
       && (printDoneHtml.match(/class="chapter"/g) || []).length === 1);
 
+  const pdfExp = await req('GET', `${BASE}/api/novels/${id}/export?format=pdf`);
+  const pdfHtml = pdfExp.buf.toString('utf8');
+  check('PDF 导出 200 且是完整 HTML',
+    pdfExp.status === 200 && pdfHtml.startsWith('<!doctype html>')
+      && pdfHtml.includes('PDF 导出') && pdfHtml.includes('class="chapter"'),
+    pdfHtml.slice(0, 40));
+  check('PDF 导出会自动弹打印框', pdfHtml.includes('const autoPrint = true'));
+  check('打印稿不会自动弹打印框', printHtml.includes('const autoPrint = false'));
+
   const docxRes = await fetch(`${BASE}/api/novels/${id}/export?format=docx`);
   const docxBuf = Buffer.from(await docxRes.arrayBuffer());
   const docxName = decodeURIComponent(docxRes.headers.get('content-disposition') || '');

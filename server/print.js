@@ -368,11 +368,13 @@ body {
  * 生成一份可直接打印的 A4 HTML。
  * @param {object} novel 作品
  * @param {object[]} chapters 本次要打印的章节
- * @param {object} extras { range, onlyDone, single, note }
+ * @param {object} extras { range, onlyDone, single, note, autoprint }
+ *   autoprint 为 true 时（PDF 导出）页面加载完自动弹出打印对话框
  * @returns {string} 完整 HTML 文档
  */
 export function buildPrintHtml(novel, chapters = [], extras = {}) {
   const list = Array.isArray(chapters) ? chapters.filter(Boolean) : [];
+  const autoprint = !!extras.autoprint;
   const words = list.reduce((sum, c) => sum + countWords(c.content), 0);
   const bookWords = (novel.chapters || []).reduce((sum, c) => sum + countWords(c.content), 0);
   const volOf = volumeOf(novel);
@@ -394,18 +396,18 @@ export function buildPrintHtml(novel, chapters = [], extras = {}) {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="color-scheme" content="light" />
-<title>《${esc(title)}》· 打印稿</title>
+<title>《${esc(title)}》· ${autoprint ? 'PDF' : '打印稿'}</title>
 <style>${STYLE}</style>
 </head>
 <body>
 <header class="bar">
   <div class="bar-main">
-    <span class="bar-eyebrow">打印预览</span>
+    <span class="bar-eyebrow">${autoprint ? 'PDF 导出' : '打印预览'}</span>
     <strong>《${esc(title)}》</strong>
     <span class="bar-meta">${esc(meta)}</span>
   </div>
   <div class="bar-actions">
-    <span class="bar-hint">A4 · 每章另起一页 · 打印时选「另存为 PDF」</span>
+    <span class="bar-hint">A4 · 每章另起一页 · ${autoprint ? '打印对话框里选「另存为 PDF」' : '打印时选「另存为 PDF」'}</span>
     <button id="printBtn" type="button" aria-label="打印或存为 PDF">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V3h12v6"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8" rx="1"/></svg>
       打印 / 存为 PDF
@@ -422,6 +424,11 @@ ${body.join('\n')}
   (() => {
     const btn = document.getElementById('printBtn');
     if (btn) btn.addEventListener('click', () => window.print());
+    // PDF 导出：排版稳定后自动弹打印框，少点一次；加 #noauto 可只看不打印
+    const autoPrint = ${autoprint ? 'true' : 'false'};
+    if (autoPrint && !location.hash.includes('noauto')) {
+      window.addEventListener('load', () => setTimeout(() => window.print(), 300));
+    }
   })();
 </script>
 </body>

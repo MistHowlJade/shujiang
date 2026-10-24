@@ -849,7 +849,7 @@ async function handleApi(req, res, url) {
       const n = getNovel(id);
       if (!n) return sendJson(res, 404, { error: '作品不存在' });
       const raw = url.searchParams.get('format');
-      const format = ['md', 'epub', 'docx', 'json', 'print'].includes(raw) ? raw : 'txt';
+      const format = ['md', 'epub', 'docx', 'json', 'print', 'pdf'].includes(raw) ? raw : 'txt';
       // 整本作品备份：原样导出作品 JSON，保留正文、设定、大纲、记忆和修订；
       // 恢复时由前端新建一部作品，不覆盖现有稿件。
       if (format === 'json') {
@@ -887,10 +887,12 @@ async function handleApi(req, res, url) {
         // 打印稿的书名页要写清是单章还是定稿版
         single: !!cid,
         onlyDone,
+        // PDF 导出：页面加载后自动弹打印对话框
+        autoprint: format === 'pdf',
       };
 
       // 打印稿 / PDF：返回一份可以直接打印的 HTML，浏览器打印对话框里可另存为 PDF
-      if (format === 'print') {
+      if (format === 'print' || format === 'pdf') {
         const html = buildPrintHtml(n, list, extras);
         res.writeHead(200, {
           'Content-Type': 'text/html; charset=utf-8',
