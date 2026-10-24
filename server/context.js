@@ -9,7 +9,7 @@ function norm(s) {
 }
 
 // 把任意文本切成用于匹配的中文词块（2-4 字）与英文/数字词
-function terms(text) {
+export function terms(text) {
   const t = norm(text);
   const out = new Set();
   const cjk = t.match(/[\u4e00-\u9fa5]{2,}/g) || [];
@@ -23,7 +23,7 @@ function terms(text) {
   return out;
 }
 
-function score(queryTerms, item, fields) {
+export function score(queryTerms, item, fields) {
   let s = 0;
   for (const f of fields) {
     const value = norm(f(item));
@@ -43,7 +43,7 @@ function score(queryTerms, item, fields) {
   return s;
 }
 
-function fmtCharacter(c, brief = false) {
+export function fmtCharacter(c, brief = false) {
   if (brief) return `· ${c.name}（${c.role || '人物'}${c.identity ? `·${c.identity}` : ''}）：${(c.personality || '').slice(0, 60)}${c.goal ? `｜目标：${c.goal.slice(0, 50)}` : ''}`;
   const bits = [
     `姓名：${c.name}`,
@@ -64,15 +64,15 @@ function fmtCharacter(c, brief = false) {
   return bits.join('\n');
 }
 
-function fmtWorld(w) {
+export function fmtWorld(w) {
   return `【${w.category || '设定'}】${w.name}：${w.desc || ''}`;
 }
 
-function fmtTimeline(t) {
+export function fmtTimeline(t) {
   return `${t.time || '?'}｜${t.title || ''}${t.desc ? `：${t.desc}` : ''}`;
 }
 
-function fmtMemory(ch) {
+export function fmtMemory(ch) {
   const m = ch.memory || {};
   const bits = [`第${ch.no}章《${ch.title}》：${m.summary || ch.summary || '（无概要）'}`];
   if (m.events?.length) bits.push(`  事件：${m.events.join('；')}`);

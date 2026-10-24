@@ -20,6 +20,7 @@ import { extractDocxText } from './docx-import.js';
 import { outlineRows, characterRows, hasExtras, submissionFacts, submissionNote } from './manuscript.js';
 import { coverSvg, readCoverImage, saveCoverImage, deleteCoverImage, coverOptions } from './cover.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
+import { buildContextStream, collectContextStream } from './context-stream.js';
 import { addWords, setGoal, statsSummary, statsDay } from './stats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -182,6 +183,86 @@ function prepareTask(cfg, body) {
     prevTail,
     payload: { ...payload, scopeText, prevTail, taskName: task, templateKey: payload.templateKey || '' },
     // 请求体没带模板时回落配置里的：API 直调也能用上用户设定的模板
+    customTemplates: customTemplates && Object.keys(customTemplates).length
+      ? customTemplates
+      : (cfg?.promptTemplates || {}),
+  };
+  const built = buildTask(task, ctx);
+  return { built, novel, stats, pack, chapter };
+}
+
+/* 异步版本：支持流式上下文组装，适合大小说 */
+async function prepareTaskAsync(cfg, body) {
+  const { task, novelId, chapterId, payload = {}, customTemplates } = body;
+  if (!task) throw new Error('缺少 task');
+  if (!TASKS[task]) throw new Error(`未知任务：${task}`);
+  let novel = null;
+  let pack = [];
+  let stats = {};
+  let prevTail = '';
+
+  if (novelId) {
+    novel = getNovel(novelId);
+    if (!novel) throw new Error('找不到这部作品');
+    if (task !== 'style' && task !== 'custom') {
+      // 大小说（>5万字）用流式组装，避免阻塞主线程
+      const estimatedChars = (novel.chapters || []).reduce((s, c) => s + (c.content?.length || 0), 0);
+      const useStream = estimatedChars > 50000;
+      
+      if (useStream) {
+        const generator = buildContextStream(novel, { chapterId, extraQuery: payload.extraQuery, budget: novel.meta?.contextBudget });
+        const collected = await collectContextStream(generator, { maxChunks: 200 });
+        const statsObj = { packChars: 0, chars: 0, worlds: 0, timeline: 0, memories: 0 };
+        // 计算简单统计
+        for (const chunk of collected) {
+          if (chunk.type === 'outline' || chunk.type === 'volumes' || chunk.type === 'outline_notes') {
+            // 总纲类
+          } else if (chunk.type === 'volume_outline' || chunk.type === 'chapter_outline') {
+            statsObj.chars++;
+          } else if (chunk.type === 'character') {
+            statsObj.chars++;
+          } else if (chunk.type === 'world') {
+            statsObj.worlds++;
+          } else if (chunk.type === 'timeline') {
+            statsObj.timeline++;
+          } else if (chunk.type === 'memory') {
+            statsObj.memories++;
+          }
+        }
+        // 构建 pack（按优先级已排序）
+        pack = collected.map(c => c.data).filter(Boolean);
+        stats = statsObj;
+        // prevTail 用同步版
+        const built = buildContext(novel, { chapterId, extraQuery: payload.extraQuery, budget: novel.meta?.contextBudget });
+        prevTail = built.prevTail;
+      } else {
+        const built = buildContext(novel, { chapterId, extraQuery: payload.extraQuery, budget: novel.meta?.contextBudget });
+        pack = built.pack;
+        stats = built.stats;
+        prevTail = built.prevTail;
+      }
+    }
+  }
+
+  const chapter = novel && chapterId ? (novel.chapters || []).find((c) => c.id === chapterId) : null;
+
+  // 需要正文范围的任务（一致性检查 / 责编评审）
+  let scopeText = payload.scopeText || '';
+  if ((task === 'consistency' || task === 'review') && novel && !scopeText) {
+    scopeText = collectScopeText(novel, {
+      chapterIds: payload.chapterIds,
+      from: payload.from,
+      to: payload.to,
+      maxChars: payload.maxChars || 35000,
+    });
+  }
+
+  const ctx = {
+    novel,
+    chapter,
+    pack,
+    prevTail,
+    payload: { ...payload, scopeText, prevTail, taskName: task, templateKey: payload.templateKey || '' },
     customTemplates: customTemplates && Object.keys(customTemplates).length
       ? customTemplates
       : (cfg?.promptTemplates || {}),
@@ -1078,7 +1159,7 @@ function mergeArrayById(oldArr = [], newArr = []) {
   /* --- 上下文预览 --- */
   if (seg[1] === 'context' && method === 'POST') {
     const body = await readBody(req);
-    const { built, stats, pack } = prepareTask(loadConfig(), body);
+    const { built, stats, pack } = await prepareTaskAsync(loadConfig(), body);
     return sendJson(res, 200, {
       messages: built.messages,
       expect: built.expect,
@@ -1108,7 +1189,7 @@ function mergeArrayById(oldArr = [], newArr = []) {
     let meta = {};
 
     if (!messages) {
-      const prepared = prepareTask(cfg, body);
+      const prepared = await prepareTaskAsync(cfg, body);
       messages = prepared.built.messages;
       temperature = prepared.built.temperature;
       maxTokens = prepared.built.maxTokens;
