@@ -280,6 +280,18 @@ const S = {
   lastOp: null,
   styleDraft: '',
   promptPreview: null,
+  // 虚拟滚动状态
+  vl: {
+    enabled: false,
+    itemHeight: 34,       // 预估行高（px），首次渲染后实测修正
+    buffer: 5,            // 可视区上下各多渲染几行
+    firstIdx: 0,          // 当前渲染的第一行索引
+    lastIdx: -1,          // 当前渲染的最后一行索引
+    total: 0,             // 总行数
+    rows: [],             // 当前显示的行数据 [{ c, i, filtered, group }]
+    scrollHandler: null,  // 滚动监听器引用
+    measureDone: false,   // 是否已实测行高
+  },
 };
 
 function setSave(flag, text) {
@@ -2476,115 +2488,222 @@ function toggleFocus() {
   else enterFocus();
 }
 
+/** 章节行（含 ⋯ 操作菜单）。分卷模式下按卷塞进不同分组，平铺模式直接进 ul。 */
+function makeChapterItem(c, i, { filtered = false, group = null } = {}) {
+  const li = document.createElement('li');
+  li.className = `chapter-item ${c.id === S.chapterId ? 'on' : ''}`;
+  li.dataset.id = c.id;
+  li.dataset.stage = stageOf(c);
+  if (group) li.dataset.vol = group.id;
+  const openRevs = openRevisionCount(c);
+  const target = targetOf(c);
+  const pct = progressOf(c);
+  li.title = [
+    STAGE_LABEL[stageOf(c)],
+    c.memory ? '已有章节记忆' : '',
+    openRevs ? `${openRevs} 项待改` : '',
+    target ? `目标 ${fmtWords(target)} 字 · ${pct}%` : '',
+  ].filter(Boolean).join(' · ');
+  const w = wordsOf(c);
+  const moveButtons = filtered ? '' : `
+      <button class="mini-act" data-a="up" title="上移">${ico('chev-up')}</button>
+      <button class="mini-act" data-a="down" title="下移">${ico('chev-down')}</button>`;
+  li.innerHTML = `
+    <span class="ci-no">${i + 1}</span>
+    <span class="ci-title">${esc(c.title || '未命名')}</span>
+    <span class="ci-words">${openRevs ? `<span class="ci-rev" title="${openRevs} 项待改">${openRevs}</span>` : ''}${c.memory ? '<button type="button" class="ci-mem" data-a="memory" title="查看本章记忆" aria-label="查看本章记忆"></button>' : ''}${w || ''}</span>
+    <span class="ci-act">${moveButtons}
+      <button class="mini-act" data-a="menu" title="分卷 / 本章操作">${ico('more')}</button>
+      <button class="mini-act del" data-a="del" title="删除本章">${ico('x')}</button>
+    </span>`;
+  li.addEventListener('click', (e) => {
+    const act = e.target.closest('.mini-act, .ci-mem')?.dataset.a;
+    if (!act) return selectChapter(c.id);
+    if (act === 'memory') return openMemoryModal(c);
+    if (act === 'up' && !filtered && i > 0) return moveChapter(i, i - 1);
+    if (act === 'down' && !filtered && i < S.novel.chapters.length - 1) return moveChapter(i, i + 1);
+    if (act === 'menu') return openChapterMenu(e.target.closest('.mini-act'), i);
+    if (act === 'del') {
+      (async () => {
+        if (!confirm(`删除第 ${i + 1} 章「${c.title}」？`)) return;
+        const hadVol = typeof c.volumeId === 'string' ? c.volumeId : '';
+        const nextCh = S.novel.chapters[i + 1];
+        const { novel } = await api.del(`/api/novels/${S.novel.id}/chapters/${c.id}`);
+        S.novel = novel;
+        S.unsaved.delete(c.id);
+        pendingCounted.delete(c.id);
+        countedWords.delete(c.id);
+        if (hadVol && nextCh && typeof nextCh.volumeId !== 'string' && novel.chapters.some((x) => x.id === nextCh.id)) {
+          nextCh.volumeId = hadVol;
+          saveChapterVolumes([{ id: nextCh.id, volumeId: hadVol }]);
+        }
+        S.dirty = S.unsaved.size > 0;
+        refreshSavePill();
+        if (S.chapterId === c.id) S.chapterId = novel.chapters[Math.min(i, novel.chapters.length - 1)]?.id || null;
+        renderStudio();
+        loadNovels();
+      })();
+    }
+  });
+  return li;
+}
+
+/** 把章节列表压平成扁平行数组，含分组信息；供虚拟滚动与普通渲染共用 */
+function buildChapterRows(n, stageLabels) {
+  const filterActive = !!S.stageFilter;
+  const filteredRows = filterActive
+    ? n.chapters.map((c, i) => ({ c, i })).filter(({ c }) => stageMatches(c, S.stageFilter))
+    : [];
+  if (!n.chapters.length) return [];
+
+  const eff = effVolumeIds();
+  const groupMode = volumesOf().length > 0;
+
+  const rows = [];
+  if (filterActive) {
+    filteredRows.forEach(({ c, i }) => rows.push({ c, i, filtered: true }));
+  } else if (groupMode) {
+    const groups = [];
+    n.chapters.forEach((c, i) => {
+      const vid = eff[i] || '';
+      const last = groups[groups.length - 1];
+      if (!last || last.id !== vid) groups.push({ id: vid, from: i, chapters: [c] });
+      else last.chapters.push(c);
+    });
+    groups.forEach((g) => {
+      let to = g.from;
+      g.chapters.forEach((c) => { rows.push({ c, i: to, group: g }); to += 1; });
+    });
+  } else {
+    n.chapters.forEach((c, i) => rows.push({ c, i }));
+  }
+  return rows;
+}
+
 /** 重建左侧章节列表（分卷 / 筛选 / 平铺三种形态）。切章时不走这里，见 syncChapterSelection */
 function renderChapterList(n, stageLabels) {
   const ul = $('#chapterList');
   const keepScroll = ul.scrollTop;
   ul.innerHTML = '';
-  const filterActive = !!S.stageFilter;
-  const filteredRows = filterActive
-    ? n.chapters.map((c, i) => ({ c, i })).filter(({ c }) => stageMatches(c, S.stageFilter))
-    : [];
-  if (!n.chapters.length) {
+
+  const rows = buildChapterRows(n, stageLabels);
+  const VIRTUAL_THRESHOLD = 500;
+
+  if (!rows.length) {
     ul.innerHTML = `<li class="chapter-empty">还没有章节<br>点上方 ＋ 新建一章</li>`;
+    S.vl.enabled = false;
+    ul.classList.remove('virtual');
+    if (S.vl.scrollHandler) {
+      ul.removeEventListener('scroll', S.vl.scrollHandler, { passive: true });
+      S.vl.scrollHandler = null;
+    }
+    ul.scrollTop = keepScroll;
+    return;
   }
-  const noChapters = !n.chapters.length;
-  const eff = effVolumeIds();
-  const groupMode = volumesOf().length > 0;      // 没建过卷的书保持原样的平铺列表
 
-  // 章节行（含 ⋯ 操作菜单）。分卷模式下按卷塞进不同分组，平铺模式直接进 ul。
-  const makeItem = (c, i, { filtered = false } = {}) => {
-    const li = document.createElement('li');
-    li.className = `chapter-item ${c.id === S.chapterId ? 'on' : ''}`;
-    li.dataset.id = c.id;
-    li.dataset.stage = stageOf(c);
-    const openRevs = openRevisionCount(c);
-    const target = targetOf(c);
-    const pct = progressOf(c);
-    li.title = [
-      STAGE_LABEL[stageOf(c)],
-      c.memory ? '已有章节记忆' : '',
-      openRevs ? `${openRevs} 项待改` : '',
-      target ? `目标 ${fmtWords(target)} 字 · ${pct}%` : '',
-    ].filter(Boolean).join(' · ');
-    const w = wordsOf(c);
-    const moveButtons = filtered ? '' : `
-        <button class="mini-act" data-a="up" title="上移">${ico('chev-up')}</button>
-        <button class="mini-act" data-a="down" title="下移">${ico('chev-down')}</button>`;
-    li.innerHTML = `
-      <span class="ci-no">${i + 1}</span>
-      <span class="ci-title">${esc(c.title || '未命名')}</span>
-      <span class="ci-words">${openRevs ? `<span class="ci-rev" title="${openRevs} 项待改">${openRevs}</span>` : ''}${c.memory ? '<button type="button" class="ci-mem" data-a="memory" title="查看本章记忆" aria-label="查看本章记忆"></button>' : ''}${w || ''}</span>
-      <span class="ci-act">${moveButtons}
-        <button class="mini-act" data-a="menu" title="分卷 / 本章操作">${ico('more')}</button>
-        <button class="mini-act del" data-a="del" title="删除本章">${ico('x')}</button>
-      </span>`;
-    li.addEventListener('click', (e) => {
-      const act = e.target.closest('.mini-act, .ci-mem')?.dataset.a;
-      if (!act) return selectChapter(c.id);
-      if (act === 'memory') return openMemoryModal(c);
-      if (act === 'up' && !filtered && i > 0) return moveChapter(i, i - 1);
-      if (act === 'down' && !filtered && i < n.chapters.length - 1) return moveChapter(i, i + 1);
-      if (act === 'menu') return openChapterMenu(e.target.closest('.mini-act'), i);
-      if (act === 'del') {
-        (async () => {
-          if (!confirm(`删除第 ${i + 1} 章「${c.title}」？`)) return;
-          // 删掉的若是「某一卷的第一章」，标记要交给下一章，
-          // 否则后面几十章会顺着继承回上一卷（整卷凭空合并）。
-          const hadVol = typeof c.volumeId === 'string' ? c.volumeId : '';
-          const nextCh = n.chapters[i + 1];
-          const { novel } = await api.del(`/api/novels/${n.id}/chapters/${c.id}`);
-          S.novel = novel;
-          S.unsaved.delete(c.id);            // 这一章都不要了，别再补存
-          pendingCounted.delete(c.id);
-          countedWords.delete(c.id);
-          if (hadVol && nextCh && typeof nextCh.volumeId !== 'string' && novel.chapters.some((x) => x.id === nextCh.id)) {
-            nextCh.volumeId = hadVol;
-            saveChapterVolumes([{ id: nextCh.id, volumeId: hadVol }]);
-          }
-          S.dirty = S.unsaved.size > 0;
-          refreshSavePill();
-          if (S.chapterId === c.id) S.chapterId = novel.chapters[Math.min(i, novel.chapters.length - 1)]?.id || null;
-          renderStudio();
-          loadNovels();
-        })();
+  // 决定是否启用虚拟滚动
+  const useVirtual = rows.length >= VIRTUAL_THRESHOLD;
+  S.vl.enabled = useVirtual;
+  S.vl.total = rows.length;
+  S.vl.rows = rows;
+
+  if (useVirtual) {
+    ul.classList.add('virtual');
+    // 初始渲染：先测量一次行高，再按可视区渲染
+    S.vl.measureDone = false;
+    S.vl.firstIdx = 0;
+    S.vl.lastIdx = -1;
+    renderVirtualList(ul, keepScroll);
+    // 挂滚动监听（只挂一次）
+    if (!S.vl.scrollHandler) {
+      S.vl.scrollHandler = () => renderVirtualList(ul, ul.scrollTop);
+      ul.addEventListener('scroll', S.vl.scrollHandler, { passive: true });
+    }
+  } else {
+    ul.classList.remove('virtual');
+    // 普通渲染：全量 append
+    if (S.vl.scrollHandler) {
+      ul.removeEventListener('scroll', S.vl.scrollHandler, { passive: true });
+      S.vl.scrollHandler = null;
+    }
+    rows.forEach(({ c, i, filtered, group }) => ul.appendChild(makeChapterItem(c, i, { filtered, group })));
+    ul.scrollTop = keepScroll;
+  }
+}
+
+/** 虚拟滚动渲染：只画可视区 + buffer 行 */
+function renderVirtualList(ul, scrollTop) {
+  const { itemHeight, buffer, total, rows } = S.vl;
+  const clientH = ul.clientHeight;
+  const first = Math.max(0, Math.floor(scrollTop / itemHeight) - buffer);
+  const visibleCount = Math.ceil(clientH / itemHeight);
+  const last = Math.min(total - 1, first + visibleCount + buffer * 2 - 1);
+
+  // 首次渲染或范围变了才重画
+  if (S.vl.measureDone && first === S.vl.firstIdx && last === S.vl.lastIdx) return;
+  S.vl.firstIdx = first;
+  S.vl.lastIdx = last;
+
+  // 只渲染 viewport 里的行
+  let viewport = ul.querySelector('.vl-viewport');
+  if (!viewport) {
+    ul.innerHTML = `
+      <div class="vl-spacer" style="height: ${total * itemHeight}px"></div>
+      <div class="vl-viewport"></div>
+    `;
+    viewport = ul.querySelector('.vl-viewport');
+  } else {
+    // 更新 spacer 高度
+    ul.querySelector('.vl-spacer').style.height = `${total * itemHeight}px`;
+  }
+
+  viewport.style.transform = `translateY(${first * itemHeight}px)`;
+  viewport.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  for (let idx = first; idx <= last; idx++) {
+    const { c, i, filtered, group } = rows[idx];
+    frag.appendChild(makeChapterItem(c, i, { filtered, group }));
+  }
+  viewport.appendChild(frag);
+
+  // 首帧后实测行高并修正
+  if (!S.vl.measureDone) {
+    const firstRow = viewport.querySelector('.chapter-item');
+    if (firstRow) {
+      const h = firstRow.getBoundingClientRect().height;
+      if (h > 20 && h < 80) {
+        S.vl.itemHeight = h;
+        ul.querySelector('.vl-spacer').style.height = `${total * h}px`;
+        viewport.style.transform = `translateY(${first * h}px)`;
       }
-    });
-    return li;
-  };
-
-  if (!noChapters) {
-    if (filterActive) {
-      if (!filteredRows.length) ul.innerHTML = `<li class="chapter-empty">没有「${stageLabels[S.stageFilter]}」的章节<br>换个筛选条件看看</li>`;
-      else filteredRows.forEach(({ c, i }) => ul.appendChild(makeItem(c, i, { filtered: true })));
-    } else if (groupMode) {
-      const groups = [];
-      n.chapters.forEach((c, i) => {
-        const vid = eff[i] || '';
-        const last = groups[groups.length - 1];
-        if (!last || last.id !== vid) groups.push({ id: vid, from: i, chapters: [c] });
-        else last.chapters.push(c);
-      });
-      groups.forEach((g) => {
-        let to = g.from;
-        const box = volGroupEl(ul, g.id, { ...g, to: g.from + g.chapters.length - 1 });
-        g.chapters.forEach((c) => { box.appendChild(makeItem(c, to)); to += 1; });
-      });
-    } else {
-      n.chapters.forEach((c, i) => ul.appendChild(makeItem(c, i)));
+      S.vl.measureDone = true;
     }
   }
-  ul.scrollTop = keepScroll;
 }
 
 /** 切章只挪选中态：几百章的长篇不用把整个列表重新造一遍 */
 function syncChapterSelection() {
   const ul = $('#chapterList');
-  const prev = ul.querySelector('.chapter-item.on');
-  if (prev && prev.dataset.id === S.chapterId) return;
-  if (prev) prev.classList.remove('on');
-  const next = chapterRow(S.chapterId);
-  if (next) next.classList.add('on');
+  if (S.vl.enabled) {
+    // 虚拟滚动模式：确保当前章在渲染范围内
+    const idx = S.vl.rows.findIndex(r => r.c.id === S.chapterId);
+    if (idx >= 0 && (idx < S.vl.firstIdx || idx > S.vl.lastIdx)) {
+      // 不在可视区，滚过去
+      ul.scrollTop = idx * S.vl.itemHeight;
+    }
+    // 更新 on 类
+    const prev = ul.querySelector('.chapter-item.on');
+    if (prev && prev.dataset.id === S.chapterId) return;
+    if (prev) prev.classList.remove('on');
+    const next = ul.querySelector(`.chapter-item[data-id="${S.chapterId}"]`);
+    if (next) next.classList.add('on');
+  } else {
+    const prev = ul.querySelector('.chapter-item.on');
+    if (prev && prev.dataset.id === S.chapterId) return;
+    if (prev) prev.classList.remove('on');
+    const next = chapterRow(S.chapterId);
+    if (next) next.classList.add('on');
+  }
 }
 
 function renderStudio({ list = true } = {}) {

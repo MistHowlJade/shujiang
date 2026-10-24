@@ -857,7 +857,13 @@ kbd {
   .kb-list { max-height: 220px; }
 }
 
-.chapter-list { flex: 1; list-style: none; margin: 0; padding: 6px; overflow: auto; }
+.chapter-list { flex: 1; list-style: none; margin: 0; padding: 6px; overflow: auto; min-height: 0; }
+
+/* 虚拟滚动：只渲染可视区行 */
+.chapter-list.virtual { position: relative; padding: 0; overflow: auto; }
+.chapter-list.virtual > .vl-spacer { display: block; pointer-events: none; }
+.chapter-list.virtual > .vl-viewport { position: absolute; top: 0; left: 6px; right: 6px; }
+.chapter-list.virtual > .vl-viewport > .chapter-item { margin-bottom: 1px; }
 .chapter-item {
   display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto;
   align-items: center; gap: 8px; margin-bottom: 1px; padding: 7px 6px 7px 8px;
