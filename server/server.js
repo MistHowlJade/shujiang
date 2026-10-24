@@ -590,6 +590,21 @@ async function handleApi(req, res, url) {
       if (!moved) return sendJson(res, 404, { error: '作品不存在' });
       return sendJson(res, 200, { ok: true, trash: moved });
     }
+    /** 按 ID 合并两个数组：新数组里的项按 ID 更新/新增；旧数组里没有在新数组里的 ID 保留 */
+function mergeArrayById(oldArr = [], newArr = []) {
+  if (!Array.isArray(oldArr)) return newArr;
+  if (!Array.isArray(newArr)) return oldArr;
+  const map = new Map(oldArr.map(item => [item.id, item]));
+  for (const item of newArr) {
+    if (item.id) map.set(item.id, { ...map.get(item.id), ...item });
+    else map.set(newId('merge'), item);
+  }
+  return [...map.values()];
+}
+
+/* ------------------------------------------------------------------ */
+/* 导入旧稿 / 导出备份                                                    */
+/* ------------------------------------------------------------------ */
     if (method === 'PUT' && seg.length === 3) {
       const body = await readBody(req);
       const n = getNovel(id);
@@ -604,7 +619,11 @@ async function handleApi(req, res, url) {
         id: n.id,
         createdAt: n.createdAt,
         meta,
-        bible: { ...n.bible, ...(body.bible || {}) },
+        bible: {
+          characters: mergeArrayById(n.bible?.characters, body.bible?.characters),
+          world: mergeArrayById(n.bible?.world, body.bible?.world),
+          timeline: mergeArrayById(n.bible?.timeline, body.bible?.timeline),
+        },
         outline: { ...n.outline, ...(body.outline || {}) },
         chapters: body.chapters || n.chapters,
       };

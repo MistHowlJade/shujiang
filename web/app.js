@@ -5632,7 +5632,15 @@ let bibleTab = 'outline';
 $$('#bibleTabs button').forEach((b) => b.addEventListener('click', () => {
   bibleTab = b.dataset.bible;
   $$('#bibleTabs button').forEach((x) => x.classList.toggle('on', x === b));
-  renderBible();
+  // 切换设定库标签页时刷新最新数据，避免缓存过期
+  if (S.novel) {
+    api.get(`/api/novels/${S.novel.id}`).then(({ novel }) => {
+      S.novel = novel;
+      renderBible();
+    }).catch(() => renderBible());  // 网络失败时用本地缓存兜底
+  } else {
+    renderBible();
+  }
 }));
 
 /* ---- 设定库导出/导入 ---- */
@@ -6211,8 +6219,9 @@ const saveNovelPart = debounce(async (part, msg) => {
   if (!S.novel) return;
   setSave('saving');
   try {
-    await api.put(`/api/novels/${S.novel.id}`, part);
-    refreshSavePill();          // 别把「还有章节没落盘」误报成已保存
+    const { novel } = await api.put(`/api/novels/${S.novel.id}`, part);
+    S.novel = novel;
+    refreshSavePill();
     if (msg) toast(msg, 'ok');
     loadNovels();
   } catch (err) { setSave('dirty', '保存失败'); toast(err.message, 'err'); }
