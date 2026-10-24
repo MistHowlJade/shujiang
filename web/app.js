@@ -280,7 +280,7 @@ const S = {
   lastOp: null,
   styleDraft: '',
   promptPreview: null,
-  // 虚拟滚动状态
+  // 虚拟滚动状态（章节列表）
   vl: {
     enabled: false,
     itemHeight: 34,       // 预估行高（px），首次渲染后实测修正
@@ -291,6 +291,20 @@ const S = {
     rows: [],             // 当前显示的行数据 [{ c, i, filtered, group }]
     scrollHandler: null,  // 滚动监听器引用
     measureDone: false,   // 是否已实测行高
+  },
+  // 虚拟滚动状态（设定库列表：人物、世界观、时间线、线索、关系、结构等）
+  bibleVl: {
+    enabled: false,
+    itemHeight: 280,      // 预估条目高度（px），首次渲染后实测修正
+    buffer: 2,            // 可视区上下各多渲染几条
+    firstIdx: 0,
+    lastIdx: -1,
+    total: 0,
+    items: [],            // 当前列表的数据项
+    renderItem: null,     // 渲染函数 (item, index) => HTMLElement
+    listEl: null,         // 当前的 entry-list 元素
+    scrollHandler: null,
+    measureDone: false,
   },
 };
 
@@ -2704,6 +2718,111 @@ function syncChapterSelection() {
     const next = chapterRow(S.chapterId);
     if (next) next.classList.add('on');
   }
+}
+
+/* ============================================================
+ * 设定库虚拟滚动（通用）
+ * ============================================================ */
+
+/** 初始化设定库虚拟列表容器 */
+function initBibleVirtualList(listEl, items, renderItem) {
+  const vl = S.bibleVl;
+  vl.enabled = items.length >= 100;  // 100 条以上启用虚拟滚动
+  vl.items = items;
+  vl.renderItem = renderItem;
+  vl.listEl = listEl;
+  vl.total = items.length;
+  vl.firstIdx = 0;
+  vl.lastIdx = -1;
+  vl.measureDone = false;
+  vl.itemHeight = 280;  // 预估高度，首帧后实测
+
+  if (!vl.enabled) {
+    // 普通渲染
+    listEl.classList.remove('virtual');
+    if (vl.scrollHandler) {
+      listEl.removeEventListener('scroll', vl.scrollHandler);
+      vl.scrollHandler = null;
+    }
+    listEl.innerHTML = '';
+    items.forEach((item, idx) => listEl.appendChild(renderItem(item, idx)));
+    return;
+  }
+
+  // 虚拟模式初始化
+  listEl.classList.add('virtual');
+  vl.firstIdx = 0;
+  vl.lastIdx = -1;
+  vl.measureDone = false;
+  renderBibleVirtualList(listEl, 0);
+
+  // 挂滚动监听
+  if (!vl.scrollHandler) {
+    vl.scrollHandler = () => renderBibleVirtualList(listEl, listEl.scrollTop);
+    listEl.addEventListener('scroll', vl.scrollHandler, { passive: true });
+  }
+}
+
+/** 设定库虚拟滚动渲染 */
+function renderBibleVirtualList(listEl, scrollTop) {
+  const vl = S.bibleVl;
+  const { itemHeight, buffer, total, items, renderItem } = vl;
+  const clientH = listEl.clientHeight;
+  if (clientH === 0) return;  // 容器未显示
+
+  const first = Math.max(0, Math.floor(scrollTop / itemHeight) - buffer);
+  const visibleCount = Math.ceil(clientH / itemHeight);
+  const last = Math.min(total - 1, first + visibleCount + buffer * 2 - 1);
+
+  if (vl.measureDone && first === vl.firstIdx && last === vl.lastIdx) return;
+  vl.firstIdx = first;
+  vl.lastIdx = last;
+
+  let viewport = listEl.querySelector('.vl-viewport');
+  if (!viewport) {
+    listEl.innerHTML = `
+      <div class="vl-spacer" style="height: ${total * itemHeight}px"></div>
+      <div class="vl-viewport"></div>
+    `;
+    viewport = listEl.querySelector('.vl-viewport');
+  } else {
+    listEl.querySelector('.vl-spacer').style.height = `${total * itemHeight}px`;
+  }
+
+  viewport.style.transform = `translateY(${first * itemHeight}px)`;
+  viewport.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  for (let idx = first; idx <= last; idx++) {
+    frag.appendChild(renderItem(items[idx], idx));
+  }
+  viewport.appendChild(frag);
+
+  // 首帧后实测条目高度并修正
+  if (!vl.measureDone) {
+    const firstEntry = viewport.querySelector('.entry');
+    if (firstEntry) {
+      const h = firstEntry.getBoundingClientRect().height;
+      if (h > 100 && h < 800) {
+        vl.itemHeight = h;
+        listEl.querySelector('.vl-spacer').style.height = `${total * h}px`;
+        viewport.style.transform = `translateY(${first * h}px)`;
+      }
+      vl.measureDone = true;
+    }
+  }
+}
+
+/** 清理设定库虚拟列表状态 */
+function cleanupBibleVirtualList(listEl) {
+  const vl = S.bibleVl;
+  if (vl.scrollHandler) {
+    listEl.removeEventListener('scroll', vl.scrollHandler);
+    vl.scrollHandler = null;
+  }
+  vl.enabled = false;
+  vl.items = [];
+  vl.renderItem = null;
+  vl.listEl = null;
 }
 
 function renderStudio({ list = true } = {}) {
@@ -6584,6 +6703,62 @@ function openCharacterAppearancesModal(name, chapters) {
     });
 }
 
+/* ---- 人物条目渲染（供虚拟列表复用） ---- */
+function renderCharacterEntry(c, i, charIndex) {
+  const div = document.createElement('div');
+  const appearances = appearancesForCharacter(c, charIndex);
+  div.className = 'entry';
+  div.innerHTML = `
+    <div class="entry-head">
+      <input class="input" data-key="name" value="${esc(c.name || '')}" placeholder="姓名" style="max-width:180px;font-weight:600" />
+      <input class="input" data-key="role" value="${esc(c.role || '')}" placeholder="主角 / 配角 / 反派" style="max-width:150px" />
+      <span style="flex:1"></span>
+      <button class="del" title="删除">${ico('trash')}</button>
+    </div>
+    <div class="fields">
+      ${field('身份', 'identity', c)}
+      ${field('年龄', 'age', c)}
+      ${field('外貌', 'appearance', c)}
+      ${field('性格', 'personality', c)}
+      ${field('核心目标', 'goal', c)}
+      ${field('性格缺陷', 'flaw', c)}
+      ${field('隐藏秘密', 'secret', c)}
+      ${field('说话风格', 'speech', c)}
+      ${field('成长弧线', 'arc', c)}
+      ${field('检索关键词（逗号分隔）', 'kwText', { kwText: (c.keywords || []).join('，') })}
+    </div>
+    ${field('关系（每行一条：对象|关系|备注）', 'relText', { relText: (c.relations || []).map((r) => `${r.to}|${r.type || ''}|${r.note || ''}`).join('\n') }, { area: true, rows: 2 })}
+    <div class="char-appear-slot">${characterAppearancesHtml(appearances, i)}</div>`;
+  bindFields(div, c, () => saveNovelPart({ bible: n.bible }));
+  const kw = div.querySelector('[data-key="kwText"]');
+  kw.addEventListener('input', () => {
+    c.keywords = kw.value.split(/[,，、\s]+/).filter(Boolean);
+    saveNovelPart({ bible: n.bible });
+  });
+  const rel = div.querySelector('[data-key="relText"]');
+  rel.addEventListener('input', () => {
+    c.relations = rel.value.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+      const [to, type, note] = l.split('|').map((x) => (x || '').trim());
+      return { to: to || '', type: type || '', note: note || '' };
+    }).filter((r) => r.to);
+    saveNovelPart({ bible: n.bible });
+  });
+  // 改姓名或别名（关键词）后，失焦时只重画这一张卡的出场索引，不整页重排
+  const paintAppear = () => {
+    const slot = div.querySelector('.char-appear-slot');
+    if (slot) slot.innerHTML = characterAppearancesHtml(appearancesForCharacter(c, charIndex), i);
+  };
+  div.querySelector('[data-key="name"]').addEventListener('change', paintAppear);
+  kw.addEventListener('change', paintAppear);
+  div.querySelector('.del').onclick = () => {
+    if (!confirm(`删除人物「${c.name || i + 1}」？`)) return;
+    n.bible.characters.splice(i, 1);
+    renderBible();
+    saveNovelPart({ bible: n.bible });
+  };
+  return div;
+}
+
 /* ---- 人物 ---- */
 function renderCharactersTab(host, n) {
   host.innerHTML = `
@@ -6598,61 +6773,14 @@ function renderCharactersTab(host, n) {
     </div>`;
   const list = $('#charList', host);
   const charIndex = buildCharacterAppearances(n);
-  if (!n.bible.characters.length) list.innerHTML = '<p class="dim">还没有人物卡。</p>';
-  n.bible.characters.forEach((c, i) => {
-    const div = document.createElement('div');
-    const appearances = appearancesForCharacter(c, charIndex);
-    div.className = 'entry';
-    div.innerHTML = `
-      <div class="entry-head">
-        <input class="input" data-key="name" value="${esc(c.name || '')}" placeholder="姓名" style="max-width:180px;font-weight:600" />
-        <input class="input" data-key="role" value="${esc(c.role || '')}" placeholder="主角 / 配角 / 反派" style="max-width:150px" />
-        <span style="flex:1"></span>
-        <button class="del" title="删除">${ico('trash')}</button>
-      </div>
-      <div class="fields">
-        ${field('身份', 'identity', c)}
-        ${field('年龄', 'age', c)}
-        ${field('外貌', 'appearance', c)}
-        ${field('性格', 'personality', c)}
-        ${field('核心目标', 'goal', c)}
-        ${field('性格缺陷', 'flaw', c)}
-        ${field('隐藏秘密', 'secret', c)}
-        ${field('说话风格', 'speech', c)}
-        ${field('成长弧线', 'arc', c)}
-        ${field('检索关键词（逗号分隔）', 'kwText', { kwText: (c.keywords || []).join('，') })}
-      </div>
-      ${field('关系（每行一条：对象|关系|备注）', 'relText', { relText: (c.relations || []).map((r) => `${r.to}|${r.type || ''}|${r.note || ''}`).join('\n') }, { area: true, rows: 2 })}
-      <div class="char-appear-slot">${characterAppearancesHtml(appearances, i)}</div>`;
-    bindFields(div, c, () => saveNovelPart({ bible: n.bible }));
-    const kw = div.querySelector('[data-key="kwText"]');
-    kw.addEventListener('input', () => {
-      c.keywords = kw.value.split(/[,，、\s]+/).filter(Boolean);
-      saveNovelPart({ bible: n.bible });     // kwText 在 bindFields 里被跳过，需要自己触发保存
-    });
-    const rel = div.querySelector('[data-key="relText"]');
-    rel.addEventListener('input', () => {
-      c.relations = rel.value.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
-        const [to, type, note] = l.split('|').map((x) => (x || '').trim());
-        return { to: to || '', type: type || '', note: note || '' };
-      }).filter((r) => r.to);
-      saveNovelPart({ bible: n.bible });
-    });
-    // 改姓名或别名（关键词）后，失焦时只重画这一张卡的出场索引，不整页重排
-    const paintAppear = () => {
-      const slot = div.querySelector('.char-appear-slot');
-      if (slot) slot.innerHTML = characterAppearancesHtml(appearancesForCharacter(c, charIndex), i);
-    };
-    div.querySelector('[data-key="name"]').addEventListener('change', paintAppear);
-    kw.addEventListener('change', paintAppear);
-    div.querySelector('.del').onclick = () => {
-      if (!confirm(`删除人物「${c.name || i + 1}」？`)) return;
-      n.bible.characters.splice(i, 1);
-      renderBible();
-      saveNovelPart({ bible: n.bible });
-    };
-    list.appendChild(div);
-  });
+  if (!n.bible.characters.length) {
+    list.innerHTML = '<p class="dim">还没有人物卡。</p>';
+    return;
+  }
+
+  // 虚拟列表：100 条以上启用
+  initBibleVirtualList(list, n.bible.characters, (c, i) => renderCharacterEntry(c, i, charIndex));
+
   list.addEventListener('click', (e) => {
     const chapterBtn = e.target.closest('[data-chapter]');
     if (chapterBtn) return openChapterFromIndex(chapterBtn.dataset.chapter);

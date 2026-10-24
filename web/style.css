@@ -1349,7 +1349,18 @@ kbd {
   font-size: 13.5px; font-weight: 600;
 }
 .bible-block > h2 .spacer { flex: 1; }
-.entry-list { display: flex; flex-direction: column; gap: 10px; }
+.entry-list { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+
+/* 设定库虚拟滚动 */
+.entry-list.virtual { position: relative; overflow: auto; padding: 0; flex: 1; min-height: 0; }
+.entry-list.virtual > .vl-spacer { display: block; pointer-events: none; }
+.entry-list.virtual > .vl-viewport { position: absolute; top: 0; left: 0; right: 0; }
+.entry-list.virtual > .vl-viewport > .entry { margin-bottom: 10px; }
+
+/* 设定库页面布局：让内容区域填满可用高度 */
+#bibleBody { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+#bibleBody > .bible-block { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+#bibleBody > .bible-block > .entry-list { flex: 1; min-height: 0; }
 .entry {
   padding: 13px 15px; background: var(--surface-2);
   border: 1px solid var(--border); border-radius: var(--r-lg);
