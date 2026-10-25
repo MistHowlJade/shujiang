@@ -10,6 +10,38 @@ import { buildCharacterAppearances, appearancesForCharacter, collectThreads, ope
  * 几件事摆出来：章节长度、重复段落、口头禅、超长段落、对话密度、
  * 人物断档、未回收线索。所有条目都能直接跳到对应章节。
  * ============================================================ */
+
+// Levenshtein 编辑距离（用于模糊重复检测）
+function levenshteinDistance(a, b) {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const matrix = Array.from({ length: a.length + 1 }, (_, i) => Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) matrix[i][0] = i;
+  for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return matrix[a.length][b.length];
+}
+
+// 相似度判定：编辑距离 / max(len) < 0.25 视为相似（段落较长时更严格）
+function isSimilarParagraph(a, b, threshold = 0.25) {
+  if (a === b) return true;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen < 40) return false;
+  // 段落较长时降低阈值
+  const adjustedThreshold = maxLen > 200 ? threshold * 0.8 : threshold;
+  const dist = levenshteinDistance(a, b);
+  return dist / maxLen < adjustedThreshold;
+}
+
 export const HEALTH_PHRASES = [
   '不由得', '仿佛', '似乎', '一丝', '一抹', '眼中闪过', '嘴角勾起', '深吸一口气',
   '缓缓', '微微', '淡淡', '沉默片刻', '空气仿佛凝固', '心中一震', '瞳孔骤缩',
@@ -62,6 +94,7 @@ export function buildHealthReport(novel) {
   const outlierTotal = outliers.length;
 
   // 重复段落：去空白和标点后比对，长段落才有意义
+  // 先做精确匹配（归一化后完全相同）
   const paraMap = new Map();
   for (const c of written) {
     for (const raw of c.content.split(/\n+/)) {
@@ -74,6 +107,7 @@ export function buildHealthReport(novel) {
           count: 0,
           chapters: new Map(),
           sample: text.length > 96 ? `${text.slice(0, 96)}…` : text,
+          norm,
         };
         paraMap.set(norm, item);
       }
@@ -81,6 +115,24 @@ export function buildHealthReport(novel) {
       item.chapters.set(c.id, { id: c.id, no: c.no, title: c.title });
     }
   }
+
+  // 再做模糊匹配（编辑距离相似）
+  const norms = [...paraMap.keys()];
+  for (let i = 0; i < norms.length; i++) {
+    for (let j = i + 1; j < norms.length; j++) {
+      if (isSimilarParagraph(norms[i], norms[j])) {
+        // 合并到第一个
+        const item1 = paraMap.get(norms[i]);
+        const item2 = paraMap.get(norms[j]);
+        item1.count += item2.count;
+        for (const [chId, chInfo] of item2.chapters) {
+          item1.chapters.set(chId, chInfo);
+        }
+        paraMap.delete(norms[j]);
+      }
+    }
+  }
+
   const duplicateGroups = [...paraMap.values()]
     .filter((x) => x.count >= 2)
     .sort((a, b) => b.count - a.count || b.sample.length - a.sample.length);
