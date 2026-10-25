@@ -404,10 +404,26 @@ async function main() {
   // 人物行为一致性
   await put(`${BASE}/api/novels/${id}/chapters/${cid}`, {
     title: '一致性测试章',
-    content: '张三不会用剑，李四从未见过这招。王五做不到筑基期的功法。',
+    content: '张三不会用剑，李四从未见过这招。王五做不到筑基期的功法。这是一个关于修仙界弱肉强食的故事。张三本是御剑宗的天才弟子，却在一次秘境探险中遭遇背叛，丹田被废，跌落尘埃。他不甘心，发誓要重回巅峰，向那些曾经看不起他的人证明：真正的强者，不是靠天赋，而是靠意志。',
     stage: 'draft',
     outline: { scene: '测试', characters: '张三,李四,王五', summary: '测试一致性' }
   });
+  // 创建第2章：文风截然不同（长句、华丽辞藻、高词汇丰富度、复杂句式）
+  const ch2 = await post(`${BASE}/api/novels/${id}/chapters`, {
+    title: '文风异常章·长句华丽',
+    content: '晨曦微露之时，苍穹云雾缭绕，金色的阳光透过层层叠叠的云层洒落在古老的青石板路上，仿佛给这沉睡了千年的城市披上了一层圣洁而庄严的金色纱衣，微风轻拂，带来了淡淡的松柏香气与远处溪流潺潺的清脆声响，万物在晨光中苏醒，万籁俱寂之中唯有鸟鸣声声，清脆悦耳，宛如天籁之音。张三伫立于剑峰之巅，望着那轮徐徐升起的红日，心中涌起一股难以名状的豪迈之情，仿佛整个世界都在他的脚下，任由他驰骋纵横。',
+    stage: 'draft',
+    outline: { scene: '测试2', characters: '张三', summary: '测试长句华丽风格' }
+  });
+  const cid2 = ch2.chapter.id;
+  // 创建第3章：文风截然不同（短句、口语化、低词汇丰富度、大量重复词、简单句式）
+  const ch3 = await post(`${BASE}/api/novels/${id}/chapters`, {
+    title: '文风异常章·短句口语',
+    content: '天亮了。太阳出来了。很亮。很暖和。风吹过来。有味道。松树的味道。水流声。哗哗的。鸟在叫。叽叽喳喳。好吵。但也好听。张三醒了。他睁眼。看天。看树。看路。心里想：今天也要修炼。要变强。不服输。就要拼。累了就睡。醒了就练。日子就这样过。',
+    stage: 'draft',
+    outline: { scene: '测试3', characters: '张三', summary: '测试短句口语风格' }
+  });
+  const cid3 = ch3.chapter.id;
   await put(`${BASE}/api/novels/${id}`, {
     bible: {
       characters: [
@@ -424,6 +440,9 @@ async function main() {
   check('一致性检查：技能不一致被检出', ccReport.byKind.character > 0);
   check('一致性检查：知识不一致被检出', ccReport.byKind.character > 0);
   check('一致性检查：境界不一致被检出', ccReport.byKind.character > 0);
+
+  // 语风一致性新增检测项（现在有3章且文风差异巨大，应能触发多种异常）
+  check('一致性检查：词汇丰富度异常被检出', ccReport.byKind.voice > 0);
 
   // ---------------------------------------------------------------
   group('片段导入（11 个板块）');
