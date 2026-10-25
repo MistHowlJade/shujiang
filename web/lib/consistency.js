@@ -401,11 +401,39 @@ function checkTimelineConflicts(novel) {
       if (!byTime.has(key)) byTime.set(key, []);
       byTime.get(key).push(e);
     }
+    // 互斥动作对：无法同时发生
+    const mutexPairs = [
+      [/死|逝世|殒命|牺牲|阵亡|去逝/, /活|生存|复活|苏醒|醒来/],
+      [/在.*?睡|入睡|睡着|熟睡|沉睡/, /醒|醒来|苏醒|睁眼|起身/],
+      [/离开|出发|动身|启程|远去|走远/, /到达|抵达|归来|回到|返回/],
+      [/开始|起始|开启|发端/, /结束|终结|完结|落幕|收尾/],
+      [/获得|得到|拥有|拾获|捡到/, /失去|丢失|遗失|不见了/],
+      [/结婚|成亲|完婚|拜堂/, /离婚|和离|分手|决裂/],
+      [/突破|晋升|进阶|晋入/, /跌落|境界跌|修为废|丹田碎/],
+    ];
     for (const [timeKey, timeEvs] of byTime) {
       if (timeEvs.length > 1) {
-        // 简单检查：描述中是否有互斥关键词
-        const descs = timeEvs.map(e => e.description || e.event || '').join('；');
-        // 这里可以扩展更复杂的语义冲突检测
+        const descs = timeEvs.map(e => e.description || e.event || '');
+        // 两两比较描述，检查互斥
+        for (let i = 0; i < descs.length; i++) {
+          for (let j = i + 1; j < descs.length; j++) {
+            const d1 = descs[i];
+            const d2 = descs[j];
+            for (const [pos, neg] of mutexPairs) {
+              const hasPos = pos.test(d1) && neg.test(d2) || pos.test(d2) && neg.test(d1);
+              if (hasPos) {
+                issues.push({
+                  kind: 'timeline',
+                  type: 'simultaneous_conflict',
+                  message: `同一时间「${timeKey}」出现互斥事件：「${d1}」与「${d2}」无法同时发生`,
+                  loc: `第${timeEvs[0]?.chapterNo || ''}章 ${chap}`,
+                  fingerprint: `consistency|timeline|simultaneous_conflict|${chap}|${timeKey}`,
+                  severity: 'warn',
+                });
+              }
+            }
+          }
+        }
       }
     }
   }
