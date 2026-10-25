@@ -479,6 +479,55 @@ function checkCharacterConsistency(novel) {
     { pattern: /(?:修为|境界|修为已至|已至|晋入|突破至|达到了?).*?([^\s，。！？]+?)(?:期|境|重|层|阶|级)/, field: 'cultivation', msg: '表现的修为境界与设定不符' },
   ];
 
+  // 性格特质反义词对（用于检测性格表现矛盾）
+  const personalityAntonyms = [
+    [/胆小|怕事|畏缩|懦弱|不敢|害怕|恐惧|惊恐/, /勇敢|大胆|无畏|豪迈|果断|冲锋|迎难而上/],
+    [/暴躁|易怒|脾气差|火爆|冲动|急躁/, /冷静|沉稳|克制|忍耐|温和|平静/],
+    [/贪婪|贪财|爱财|吝啬|小气|自私/, /大方|慷慨|豁达|不计较|舍得/],
+    [/傲慢|自大|狂妄|目中无人|看不起/, /谦逊|低调|恭敬|谦虚|不骄不躁/],
+    [/懒惰|偷懒|拖延|不思进取|安逸/, /勤奋|努力|上进|刻苦|拼命/],
+    [/多疑|猜忌|不信任|防备|心思重/, /信任|坦荡|直爽|豁达/],
+    [/冷漠|无情|薄情|寡情|绝情/, /深情|重情|多情|温情/],
+    [/老实|木讷|笨拙|不会变通|死板/, /机灵|灵活|圆滑|善变/],
+    [/悲观|消极|颓废|绝望|灰心/, /乐观|积极|向上|坚韧/],
+    [/冲动|鲁莽|莽撞|不计后果/, /深思熟虑|三思而行|谨慎/],
+  ];
+
+  // 从性格描述中提取关键特质词
+  function extractPersonalityTraits(text) {
+    if (!text) return [];
+    const traits = [];
+    const traitKeywords = [
+      '胆小', '勇敢', '暴躁', '冷静', '贪婪', '大方', '傲慢', '谦逊',
+      '懒惰', '勤奋', '多疑', '信任', '冷漠', '深情', '老实', '机灵',
+      '悲观', '乐观', '冲动', '谨慎', '内向', '外向', '敏感', '迟钝',
+      '固执', '柔和', '自卑', '自信', '嫉妒', '宽容', '记仇', '不记仇',
+      '完美主义', '随性', '强迫症', '洁癖', '拖延症', '选择困难症',
+    ];
+    for (const kw of traitKeywords) {
+      if (text.includes(kw)) traits.push(kw);
+    }
+    return traits;
+  }
+
+  // 检查文本中是否表现出与特质相反的行为
+  function checkPersonalityContradiction(text, definedTraits) {
+    const contradictions = [];
+    for (const trait of definedTraits) {
+      for (const [neg, pos] of personalityAntonyms) {
+        // 如果设定有负面特质，但正文表现正面行为
+        if (neg.test(trait) && pos.test(text)) {
+          contradictions.push(`设定「${trait}」但表现「${text.match(pos)[0]}」`);
+        }
+        // 如果设定有正面特质，但正文表现负面行为
+        if (pos.test(trait) && neg.test(text)) {
+          contradictions.push(`设定「${trait}」但表现「${text.match(neg)[0]}」`);
+        }
+      }
+    }
+    return contradictions;
+  }
+
   for (const ch of novel?.chapters || []) {
     if (!ch.content?.trim()) continue;
     const text = ch.content;
@@ -534,6 +583,36 @@ function checkCharacterConsistency(novel) {
               message: `第 ${ch.no} 章《${ch.title}》中「${charName}」${msg}：「${matched}」`,
               location: `第 ${ch.no} 章 ${ch.title}`,
               fingerprint: `consistency|character|${field}_unexpected|${charName}|${ch.id}|${matched}`,
+            });
+          }
+        }
+      }
+
+      // --- 性格特质一致性检查 ---
+      const personalityText = String(def.personality || def.flaw || def.speech || '').trim();
+      if (personalityText) {
+        const definedTraits = extractPersonalityTraits(personalityText);
+        if (definedTraits.length > 0) {
+          // 提取人物相关的上下文片段（以人物名为中心前后各 200 字）
+          const nameRegex = new RegExp(escapeRegExp(charName), 'g');
+          let match;
+          const contexts = [];
+          while ((match = nameRegex.exec(text)) !== null) {
+            const start = Math.max(0, match.index - 200);
+            const end = Math.min(text.length, match.index + match[0].length + 200);
+            contexts.push(text.slice(start, end));
+          }
+          // 如果没有找到人物名（可能用代词），取全文
+          const searchText = contexts.length > 0 ? contexts.join(' ') : text;
+          const contradictions = checkPersonalityContradiction(searchText, definedTraits);
+          for (const msg of contradictions) {
+            issues.push({
+              kind: 'character',
+              type: 'personality_contradiction',
+              message: `第 ${ch.no} 章《${ch.title}》中「${charName}」性格矛盾：${msg}`,
+              location: `第 ${ch.no} 章 ${ch.title}`,
+              fingerprint: `consistency|character|personality_contradiction|${charName}|${ch.id}|${msg}`,
+              severity: 'warn',
             });
           }
         }
