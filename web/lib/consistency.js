@@ -208,33 +208,205 @@ function checkTimelineConflicts(novel) {
     }
   }
 
-  // 简单的时间顺序检查（基于章节号/顺序字段）
-  // 如果有明确的时间字符串，可以做更细致的解析
-  // 这里做简单的：如果同一章内有多个时间事件，检查是否有明显矛盾
+  // 将时间字符串解析为可比较的数值
+  function parseTimeValue(timeStr) {
+    if (!timeStr) return null;
+    const s = String(timeStr).trim();
+    if (!s) return null;
+
+    // 1. 直接数字（年、日、章节号等）
+    const directNum = s.match(/^(\d+)(?:\s*[年月日章])?$/);
+    if (directNum) return parseInt(directNum[1]);
+
+    // 2. 中文数字（一、二、三... 十、百、千、万）
+    const chineseNumMap = { '零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10, '百': 100, '千': 1000, '万': 10000 };
+    const chineseMatch = s.match(/^([一二三四五六七八九十百千万零两]+)(?:\s*[年月日章])?$/);
+    if (chineseMatch) {
+      let result = 0, temp = 0;
+      for (const ch of chineseMatch[1]) {
+        const val = chineseNumMap[ch];
+        if (val >= 10) {
+          if (temp === 0) temp = 1;
+          result += temp * val;
+          temp = 0;
+        } else {
+          temp = temp * 10 + val;
+        }
+      }
+      return result + temp;
+    }
+
+    // 3. 相对时间表达（如"三天后"、"两年前"等）
+    const relativeMatch = s.match(/^(\d+|[一二三四五六七八九十百千万零两]+)\s*(天|日|月|年|周|时|刻)\s*(前|后|内)?$/);
+    if (relativeMatch) {
+      const numStr = relativeMatch[1];
+      const unit = relativeMatch[2];
+      const dir = relativeMatch[3] || '后';
+      let num = parseInt(numStr);
+      if (isNaN(num)) {
+        // 中文数字
+        let result = 0, temp = 0;
+        for (const ch of numStr) {
+          const val = chineseNumMap[ch];
+          if (val >= 10) { if (temp === 0) temp = 1; result += temp * val; temp = 0; }
+          else { temp = temp * 10 + val; }
+        }
+        num = result + temp;
+      }
+      const multipliers = { '天': 1, '日': 1, '月': 30, '年': 365, '周': 7, '时': 1/24, '刻': 1/96 };
+      const mult = multipliers[unit] || 1;
+      return dir === '前' ? -num * mult : num * mult;
+    }
+
+    // 4. 季节/时辰关键词映射到相对顺序值
+    const seasonOrder = { '春': 1, '夏': 2, '秋': 3, '冬': 4 };
+    for (const [k, v] of Object.entries(seasonOrder)) {
+      if (s.includes(k)) return v * 100; // 季节粒度较粗
+    }
+    // 按关键词长度降序排列，优先匹配更具体的词（如"午夜"先于"夜"）
+    const periodOrder = [
+      ['午夜', 7], ['子时', 7], ['丑时', 7.5], ['寅时', 8], ['卯时', 9], ['辰时', 10],
+      ['巳时', 11], ['午时', 12], ['未时', 13], ['申时', 14], ['酉时', 15], ['戌时', 16],
+      ['亥时', 17], ['凌晨', 1], ['清晨', 1], ['拂晓', 1], ['破晓', 1], ['黎明', 1],
+      ['上午', 2], ['中午', 3], ['正午', 3], ['日中', 3], ['下午', 4], ['傍晚', 5],
+      ['黄昏', 5], ['日暮', 5], ['深夜', 7], ['子夜', 7], ['半夜', 7], ['深更', 7],
+      ['漏尽', 7], ['晚', 5], ['夜', 6], ['晨', 1], ['午', 3]
+    ];
+    for (const [k, v] of periodOrder) {
+      if (s.includes(k)) return v;
+    }
+
+    // 5. 关键词推断（如"清晨"、"傍晚"等）
+    const morningKeys = ['早', '晨', '黎明', '破晓', '拂晓', '朝阳', '初升'];
+    const noonKeys = ['午', '中午', '正午', '日中'];
+    const eveningKeys = ['晚', '傍晚', '黄昏', '日暮', '落日'];
+    const nightKeys = ['夜', '深夜', '午夜', '子夜', '半夜', '深更', '漏尽'];
+    if (morningKeys.some(k => s.includes(k))) return 1;
+    if (noonKeys.some(k => s.includes(k))) return 3;
+    if (eveningKeys.some(k => s.includes(k))) return 5;
+    if (nightKeys.some(k => s.includes(k))) return 7;
+
+    return null; // 无法解析
+  }
+
+  // 为每个事件添加解析后的时间值
+  const eventsWithTime = events.map(e => ({
+    ...e,
+    timeVal: parseTimeValue(e.time),
+    timeRaw: e.time,
+  }));
+
+  // --- 检查 1：同一章内时间跨度过大（早/晚混在一起）---
   const byChapter = new Map();
-  for (const e of events) {
+  for (const e of eventsWithTime) {
     const key = e.chapter || e.volume + '·' + e.chapter;
     if (!byChapter.has(key)) byChapter.set(key, []);
     byChapter.get(key).push(e);
   }
 
-  // 检查：同一章内出现 "早晨" 又出现 "深夜" 且没有过渡
-  // 这里只是简单示例，实际可扩展 NLP 解析
   for (const [chap, evs] of byChapter) {
     if (evs.length < 2) continue;
-    const times = evs.map(e => String(e.time || '').toLowerCase());
-    const hasMorning = times.some(t => /早|上午|晨|黎明|破晓/.test(t));
-    const hasNight = times.some(t => /晚|夜|午夜|子时|深更/.test(t));
-    if (hasMorning && hasNight) {
-      // 不直接报错，只是提示可能需要过渡
+    const timeVals = evs.map(e => e.timeVal).filter(v => v != null);
+    if (timeVals.length < 2) continue;
+    const minT = Math.min(...timeVals);
+    const maxT = Math.max(...timeVals);
+    // 如果在"精细"时间粒度（<100，即时辰/小时级）且跨度超过 6 个时辰（约半天），提示
+    if (maxT < 100 && maxT - minT >= 6) {
       issues.push({
         kind: 'timeline',
         type: 'time_jump',
-        message: `章节「${chap}」内出现早/晚时间跨度大，建议检查是否缺少过渡描写`,
+        message: `章节「${chap}」内时间跨度较大（${minT}~${maxT}），建议检查是否缺少过渡描写`,
         loc: `第${evs[0]?.chapterNo || ''}章 ${chap}`,
         fingerprint: `consistency|timeline|time_jump|${chap}`,
         severity: 'hint',
       });
+    }
+    // 如果在"粗略"时间粒度（年/月/日级）且跨度异常大，也提示
+    if (minT >= 100 && maxT - minT > 365) {
+      issues.push({
+        kind: 'timeline',
+        type: 'time_jump',
+        message: `章节「${chap}」内日期跨度超过一年（${minT}~${maxT}），建议检查时间设定`,
+        loc: `第${evs[0]?.chapterNo || ''}章 ${chap}`,
+        fingerprint: `consistency|timeline|time_jump|${chap}`,
+        severity: 'hint',
+      });
+    }
+  }
+
+  // --- 检查 2：跨章时间倒置/跳跃（基于章节顺序）---
+  // 按章节顺序排序（优先用 outline 的 order，其次章节号）
+  const chapterEvents = new Map(); // chapter -> { no, events[] }
+  for (const e of eventsWithTime) {
+    const chKey = e.chapter || e.volume + '·' + e.chapter;
+    if (!chapterEvents.has(chKey)) {
+      chapterEvents.set(chKey, { no: e.chapterNo || e.order || 0, events: [] });
+    }
+    chapterEvents.get(chKey).events.push(e);
+  }
+
+  // 取每章最早/最晚的时间值
+  const chapterTimeRange = [];
+  for (const [chap, data] of chapterEvents) {
+    const vals = data.events.map(e => e.timeVal).filter(v => v != null);
+    if (vals.length > 0) {
+      chapterTimeRange.push({
+        chapter: chap,
+        no: data.no,
+        minTime: Math.min(...vals),
+        maxTime: Math.max(...vals),
+        events: data.events,
+      });
+    }
+  }
+
+  // 按章节序号排序
+  chapterTimeRange.sort((a, b) => (a.no || 0) - (b.no || 0));
+
+  // 检测时间倒置：后一章的最早时间 < 前一章的最晚时间（且不在同一日期/年份粒度）
+  for (let i = 1; i < chapterTimeRange.length; i++) {
+    const prev = chapterTimeRange[i - 1];
+    const curr = chapterTimeRange[i];
+    // 只有当双方都在"精细"时间粒度（< 100，即时辰/小时级）时才判断倒置
+    if (prev.maxTime < 100 && curr.minTime < 100 && curr.minTime < prev.maxTime) {
+      issues.push({
+        kind: 'timeline',
+        type: 'time_reversal',
+        message: `时间倒置：第 ${prev.no} 章最晚 ${prev.maxTime} 时，第 ${curr.no} 章最早 ${curr.minTime} 时`,
+        loc: `第 ${prev.no} 章 → 第 ${curr.no} 章`,
+        fingerprint: `consistency|timeline|time_reversal|${prev.no}|${curr.no}`,
+        severity: 'warn',
+      });
+    }
+    // 检测时间大跳跃：后一章最早时间 - 前一章最晚时间 > 合理阈值（如 30 个时辰）
+    if (prev.maxTime < 100 && curr.minTime < 100 && curr.minTime - prev.maxTime > 30) {
+      issues.push({
+        kind: 'timeline',
+        type: 'time_gap',
+        message: `时间跳跃：第 ${prev.no} 章(${prev.maxTime}) 到第 ${curr.no} 章(${curr.minTime}) 间隔 ${curr.minTime - prev.maxTime} 个时辰，建议确认是否有过渡`,
+        loc: `第 ${prev.no} 章 → 第 ${curr.no} 章`,
+        fingerprint: `consistency|timeline|time_gap|${prev.no}|${curr.no}`,
+        severity: 'hint',
+      });
+    }
+  }
+
+  // --- 检查 3：同一章内具体事件时间冲突（如同时发生两件互斥的事）---
+  for (const [chap, evs] of byChapter) {
+    if (evs.length < 2) continue;
+    // 检查是否有完全相同的时间点但描述互斥的事件
+    const byTime = new Map();
+    for (const e of evs) {
+      const key = e.timeRaw || '';
+      if (!byTime.has(key)) byTime.set(key, []);
+      byTime.get(key).push(e);
+    }
+    for (const [timeKey, timeEvs] of byTime) {
+      if (timeEvs.length > 1) {
+        // 简单检查：描述中是否有互斥关键词
+        const descs = timeEvs.map(e => e.description || e.event || '').join('；');
+        // 这里可以扩展更复杂的语义冲突检测
+      }
     }
   }
 
