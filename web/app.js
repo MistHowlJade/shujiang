@@ -3850,6 +3850,9 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
   mask.innerHTML = `
     <header class="reader-top">
       <div class="reader-brand">${ico('book')}<span>${esc(S.novel.title)}</span></div>
+      <div class="reader-progress" id="readerProgress" title="阅读进度">
+        <span class="reader-progress-bar" id="readerProgressBar"></span>
+      </div>
       <div class="reader-tools">
         <button type="button" class="btn btn-sm btn-text" id="readerPrev" title="上一章（←）">上一章</button>
         <select class="select reader-select" id="readerSelect" aria-label="选择章节"></select>
@@ -3941,6 +3944,13 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
     select.value = ch.id;
     prev.disabled = prev2.disabled = idx <= 0;
     next.disabled = next2.disabled = idx >= chapters.length - 1;
+    // 更新阅读进度条
+    const progressBar = $r('#readerProgressBar');
+    if (progressBar) {
+      const maxScroll = scroll.scrollHeight - scroll.clientHeight;
+      const pct = maxScroll > 0 ? Math.min(100, Math.max(0, (scroll.scrollTop / maxScroll) * 100)) : 0;
+      progressBar.style.width = `${pct}%`;
+    }
     // 恢复滚动位置
     if (restore) {
       const prog = getReaderProgress(S.novel.id);
@@ -3979,6 +3989,10 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
     if (window.getSelection() && !window.getSelection().isCollapsed) return;
     if (e.key === 'ArrowLeft') { e.preventDefault(); go(idx - 1); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); go(idx + 1); }
+    else if (e.key === 'PageUp') { e.preventDefault(); scroll.scrollTop -= scroll.clientHeight * 0.9; }
+    else if (e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); scroll.scrollTop += scroll.clientHeight * 0.9; }
+    else if (e.key === 'Home') { e.preventDefault(); scroll.scrollTop = 0; }
+    else if (e.key === 'End') { e.preventDefault(); scroll.scrollTop = scroll.scrollHeight; }
   };
 
   select.innerHTML = chapters.map((c, i) => `<option value="${esc(c.id)}">第 ${i + 1} 章 · ${esc(c.title || '未命名')}</option>`).join('');
@@ -4004,6 +4018,13 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
   scroll.addEventListener('scroll', () => {
     if (scrollTimer) clearTimeout(scrollTimer);
     scrollTimer = setTimeout(saveProgress, 200);
+    // 实时更新进度条
+    const progressBar = $r('#readerProgressBar');
+    if (progressBar) {
+      const maxScroll = scroll.scrollHeight - scroll.clientHeight;
+      const pct = maxScroll > 0 ? Math.min(100, Math.max(0, (scroll.scrollTop / maxScroll) * 100)) : 0;
+      progressBar.style.width = `${pct}%`;
+    }
   });
 }
 
