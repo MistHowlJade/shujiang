@@ -9861,6 +9861,15 @@ function cmdkSource() {
       setTimeout(() => $('#revInput')?.focus(), 80);
     });
     op('全书修订清单', 'layers', () => openRevisionInbox());
+    op('场景拆解 / 幕布视图', 'columns', () => { setView('studio'); showAssistTab('scenes'); });
+    op('结构/节拍表', 'pulse', () => { setView('studio'); setView('bible'); document.querySelector('#bibleTabs button[data-bible="beats"]')?.click(); });
+    op('人物关系图谱', 'users', () => { setView('studio'); setView('bible'); document.querySelector('#bibleTabs button[data-bible="relations"]')?.click(); });
+    op('时间轴可视化', 'calendar', () => { setView('studio'); setView('bible'); document.querySelector('#bibleTabs button[data-bible="timelineViz"]')?.click(); });
+    op('线索追踪', 'git-branch', () => { setView('studio'); setView('bible'); document.querySelector('#bibleTabs button[data-bible="threads"]')?.click(); });
+    op('人物弧光', 'activity', () => { setView('studio'); setView('bible'); document.querySelector('#bibleTabs button[data-bible="arcs"]')?.click(); });
+    if (S.novel) {
+      op('从一句话生成全书大纲', 'spark', () => { setView('studio'); setView('bible'); document.querySelector('#bibleTabs button[data-bible="outline"]')?.click(); $('#genOutlineFromLogline')?.click(); });
+    }
   }
   op('立即保存', 'check', manualSave, 'Ctrl+S');
   op('切换明暗主题', 'moon', () => $('#themeBtn').click());
