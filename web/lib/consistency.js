@@ -521,6 +521,34 @@ function escapeRegExp(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Levenshtein 编辑距离（用于模糊匹配）
+function levenshteinDistance(a, b) {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const matrix = Array.from({ length: a.length + 1 }, (_, i) => Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) matrix[i][0] = i;
+  for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,      // 删除
+        matrix[i][j - 1] + 1,      // 插入
+        matrix[i - 1][j - 1] + cost // 替换
+      );
+    }
+  }
+  return matrix[a.length][b.length];
+}
+
+// 相似度阈值：编辑距离 / max(len) < 0.3 视为相似
+function isSimilar(a, b, threshold = 0.3) {
+  if (a === b) return true;
+  const dist = levenshteinDistance(a, b);
+  const maxLen = Math.max(a.length, b.length);
+  return maxLen > 0 && dist / maxLen < threshold;
+}
+
 // 辅助函数：模糊匹配技能/知识
 function hasSimilar(set, target) {
   if (!target) return false;
@@ -529,9 +557,10 @@ function hasSimilar(set, target) {
     const itemLower = item.toLowerCase();
     if (itemLower === targetLower) return true;
     if (itemLower.includes(targetLower) || targetLower.includes(itemLower)) return true;
-    // 简单的编辑距离检查（前缀/后缀匹配）
     if (itemLower.startsWith(targetLower) || targetLower.startsWith(itemLower)) return true;
     if (itemLower.endsWith(targetLower) || targetLower.endsWith(itemLower)) return true;
+    // 编辑距离模糊匹配
+    if (isSimilar(itemLower, targetLower)) return true;
   }
   return false;
 }
@@ -737,11 +766,40 @@ function checkVoiceConsistency(novel) {
 }
 
 export function detectPerson(text) {
-  const first = (text.match(/我[的们]|我的|我[^的们]/g) || []).length;
-  const third = (text.match(/(?:他|她|它|其)[的们]?/g) || []).length;
-  // 简单启发式：第一人称词汇 > 第三人称 * 2 判定为第一人称
-  if (first > third * 2) return 'first';
-  if (third > first * 2) return 'third';
+  // 第一人称指标词
+  const firstPersonPatterns = [
+    /我[的们]/g, /我的/g, /我[^的们]/g,        // 我、我们、我的
+    /俺[的们]?/g, /鄙人/g, /在下/g,            // 方言/谦称
+    /本[人座主]/g, /吾/g, /吾等/g,            // 文言/自称
+  ];
+  // 第三人称指标词
+  const thirdPersonPatterns = [
+    /(?:他|她|它|其)[的们]?/g,                // 他/她/它/其 + 的/们
+    /(?:他|她|它)(?:说|想|看|走|跑|笑|哭|怒|喜)/g, // 他/她/它 + 动词
+    /(?:此人|该|其人|彼|旁人|别人|众人|他人)/g, // 指代词
+    /主角|男主|女主|配角|反派|路人/g,         // 角色称呼
+  ];
+  // 第二人称指标词（对话中常见）
+  const secondPersonPatterns = [
+    /你[的们]?/g, /您[的们]?/g, /汝[的们]?/g, /尔[的们]?/g,
+  ];
+
+  let first = 0, third = 0, second = 0;
+  for (const p of firstPersonPatterns) first += (text.match(p) || []).length;
+  for (const p of thirdPersonPatterns) third += (text.match(p) || []).length;
+  for (const p of secondPersonPatterns) second += (text.match(p) || []).length;
+
+  // 计算比例而非绝对数量，避免文本长度影响
+  const total = first + third + second;
+  if (total === 0) return 'mixed';
+
+  const firstRatio = first / total;
+  const thirdRatio = third / total;
+
+  // 判定阈值：占比 > 50% 且领先第二名 2 倍以上
+  if (firstRatio > 0.5 && first > third * 2) return 'first';
+  if (thirdRatio > 0.5 && third > first * 2) return 'third';
+  // 对话密集时可能出现大量第二人称，不作为叙述人称判定依据
   return 'mixed';
 }
 
