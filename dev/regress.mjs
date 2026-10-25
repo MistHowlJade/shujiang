@@ -400,6 +400,32 @@ async function main() {
   check('非法 stage 退回草稿', stBad.chapter?.stage === 'draft', stBad.chapter?.stage);
 
   // ---------------------------------------------------------------
+  group('一致性检查（本地）');
+  // 人物行为一致性
+  await put(`${BASE}/api/novels/${id}/chapters/${cid}`, {
+    title: '一致性测试章',
+    content: '张三不会用剑，李四从未见过这招。王五做不到筑基期的功法。',
+    stage: 'draft',
+    outline: { scene: '测试', characters: '张三,李四,王五', summary: '测试一致性' }
+  });
+  await put(`${BASE}/api/novels/${id}`, {
+    bible: {
+      characters: [
+        { id: 'c1', name: '张三', skills: [{ name: '御剑术' }], knowledge: [{ name: '御剑心法' }], cultivation: '金丹期' },
+        { id: 'c2', name: '李四', skills: [], knowledge: [], cultivation: '筑基期' },
+        { id: 'c3', name: '王五', skills: [{ name: '筑基功法' }], knowledge: [], cultivation: '元婴期' },
+      ]
+    }
+  });
+  const ccNovel = (await get(`${BASE}/api/novels/${id}`)).novel;
+  // 直接使用本地一致性检查函数（类似前端做法）
+  const { scanConsistency } = await import('../web/lib/consistency.js');
+  const ccReport = scanConsistency(ccNovel, 'book');
+  check('一致性检查：技能不一致被检出', ccReport.byKind.character > 0);
+  check('一致性检查：知识不一致被检出', ccReport.byKind.character > 0);
+  check('一致性检查：境界不一致被检出', ccReport.byKind.character > 0);
+
+  // ---------------------------------------------------------------
   group('片段导入（11 个板块）');
   // 目标作品里第一章的 id 就是 cid，章节类板块直接按这个 id 归位
   const remap = (arr) => (arr || []).map((x) => x);
