@@ -256,21 +256,134 @@ function checkCharacterConsistency(novel) {
   for (const c of bible.characters) {
     const name = String(c.name || '').trim();
     if (name) charDefs.set(name.toLowerCase(), c);
+    // 别名支持
+    if (c.alias?.length) {
+      for (const alias of c.alias) {
+        charDefs.set(alias.toLowerCase(), c);
+      }
+    }
   }
 
-  // 简单的正文扫描：检查明显的能力/性格违背
-  // 这里只做关键词匹配示例，实际可接入 NLP
-  const checkPatterns = [
-    // { pattern: /不能|不会|不懂/, defField: 'skill', msg: '设定会但正文写不会' },
-    // { pattern: /从未|没见过|不知/, defField: 'knowledge', msg: '设定知晓但正文写不知' },
+  // 建立关键词模式库
+  const inabilityPatterns = [
+    { pattern: /(?:不会|不会|做不到|使不出|用不出|施展不了|使不来)/, field: 'skill', msg: '设定拥有但正文表现为不会' },
+    { pattern: /(?:从未|从来没|从不曾|未曾|从未见过|没见过|未曾见过|从未听闻|未曾听闻|不知|不晓|不了解|不清楚|不认识)/, field: 'knowledge', msg: '设定知晓但正文表现为不知' },
+    { pattern: /(?:做不到|办不到|力不从心|能力不足|修为不够|境界不够|修为尚浅)/, field: 'cultivation', msg: '设定境界足够但正文表现为修为不足' },
+    { pattern: /(?:性格|脾气|脾性|个性|秉性).*?(?:改变|大变|突变|判若两人|完全不同|截然不同)/, field: 'personality', msg: '性格设定与正文表现不符' },
   ];
 
-  // 这里先返回空，避免误报。后续可扩展为：
-  // - 提取正文中人物的动作/台词
-  // 与设定中的 personality/skill/cultivation 对比
-  // 需要更复杂的 NLP，暂不实现
+  // 正面能力/知识表达模式
+  const abilityPatterns = [
+    { pattern: /(?:运用|施展|使出|施展出|催动|激发|使用|动用).*?([^\s，。！？]+?)(?:功|法|术|诀|招|式|技|能|力)/, field: 'skill', msg: '使用了未在设定中的技能' },
+    { pattern: /(?:知晓|知悉|清楚|了解|熟知|精通|精研|深谙|洞悉|了然于胸).*?([^\s，。！？]+)/, field: 'knowledge', msg: '表现知晓未在设定中的知识' },
+    { pattern: /(?:修为|境界|修为已至|已至|晋入|突破至|达到了?).*?([^\s，。！？]+?)(?:期|境|重|层|阶|级)/, field: 'cultivation', msg: '表现的修为境界与设定不符' },
+  ];
+
+  for (const ch of novel?.chapters || []) {
+    if (!ch.content?.trim()) continue;
+    const text = ch.content;
+    const chapterNo = ch.no || 0;
+
+    for (const [charName, def] of charDefs) {
+      // 检查人物是否在本章出现
+      const nameRegex = new RegExp(escapeRegExp(charName), 'g');
+      if (!nameRegex.test(text)) continue;
+
+      // 检查负面表达（不应该有的）
+      for (const { pattern, field, msg } of inabilityPatterns) {
+        if (pattern.test(text)) {
+          issues.push({
+            kind: 'character',
+            type: `${field}_inconsistency`,
+            message: `第 ${ch.no} 章《${ch.title}》中「${charName}」${msg}`,
+            location: `第 ${ch.no} 章 ${ch.title}`,
+            fingerprint: `consistency|character|${field}_inconsistency|${charName}|${ch.id}`,
+          });
+        }
+      }
+
+      // 检查正面表达（不应该有的能力/知识）
+      const definedSkills = new Set([
+        ...(def.skills || []).map(s => String(s.name || s).trim()),
+        ...(def.specialAbilities || []).map(s => String(s.name || s).trim()),
+        ...(def.techniques || []).map(s => String(s.name || s).trim()),
+      ].filter(Boolean));
+
+      const definedKnowledge = new Set([
+        ...(def.knowledge || []).map(k => String(k.name || k).trim()),
+        ...(def.expertise || []).map(k => String(k.name || k).trim()),
+      ].filter(Boolean));
+
+      const definedCultivation = String(def.cultivation || def.realm || def.level || '').trim();
+
+      for (const { pattern, field, msg } of abilityPatterns) {
+        let match;
+        while ((match = pattern.exec(text)) !== null) {
+          const matched = match[1]?.trim() || '';
+          if (!matched) continue;
+
+          let conflict = false;
+          if (field === 'skill' && !hasSimilar(definedSkills, matched)) conflict = true;
+          if (field === 'knowledge' && !hasSimilar(definedKnowledge, matched)) conflict = true;
+          if (field === 'cultivation' && definedCultivation && !cultivationMatches(definedCultivation, matched)) conflict = true;
+
+          if (conflict) {
+            issues.push({
+              kind: 'character',
+              type: `${field}_unexpected`,
+              message: `第 ${ch.no} 章《${ch.title}》中「${charName}」${msg}：「${matched}」`,
+              location: `第 ${ch.no} 章 ${ch.title}`,
+              fingerprint: `consistency|character|${field}_unexpected|${charName}|${ch.id}|${matched}`,
+            });
+          }
+        }
+      }
+    }
+  }
 
   return issues;
+}
+
+// 辅助函数：转义正则特殊字符
+function escapeRegExp(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// 辅助函数：模糊匹配技能/知识
+function hasSimilar(set, target) {
+  if (!target) return false;
+  const targetLower = target.toLowerCase();
+  for (const item of set) {
+    const itemLower = item.toLowerCase();
+    if (itemLower === targetLower) return true;
+    if (itemLower.includes(targetLower) || targetLower.includes(itemLower)) return true;
+    // 简单的编辑距离检查（前缀/后缀匹配）
+    if (itemLower.startsWith(targetLower) || targetLower.startsWith(itemLower)) return true;
+    if (itemLower.endsWith(targetLower) || targetLower.endsWith(itemLower)) return true;
+  }
+  return false;
+}
+
+// 辅助函数：境界匹配检查
+function cultivationMatches(defined, text) {
+  if (!defined || !text) return false;
+  const definedNorm = normalizeCultivation(defined);
+  const textNorm = normalizeCultivation(text);
+  return definedNorm === textNorm;
+}
+
+function normalizeCultivation(str) {
+  const map = {
+    '炼气': 1, '筑基': 2, '金丹': 3, '元婴': 4, '化神': 5, '合体': 6, '大乘': 7, '渡劫': 8,
+    '练气': 1, '聚气': 1, '引气': 1,
+    '一重': 1, '二重': 2, '三重': 3, '四重': 4, '五重': 5, '六重': 6, '七重': 7, '八重': 8, '九重': 9,
+    '初期': 1, '中期': 2, '后期': 3, '巅峰': 4, '大圆满': 5,
+  };
+  let result = 0;
+  for (const [key, val] of Object.entries(map)) {
+    if (str.includes(key)) result = Math.max(result, val);
+  }
+  return result;
 }
 
 /* ============================================================
