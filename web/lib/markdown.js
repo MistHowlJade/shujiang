@@ -15,6 +15,14 @@ export function importBibleMarkdown(mdText) {
   let logline = '', synopsis = '', submissionNote = '';
   let inSynopsis = false, inNote = false;
 
+  // 扩展字段
+  let beats = { items: [] };
+  let arcs = { items: [] };
+  let relations = [];
+  let threads = { items: [] };
+  let style = { guide: '', banned: '', tone: '' };
+  let annotations = [];
+
   for (let i = 0; i < Math.min(50, lines.length); i++) {
     const line = lines[i].trim();
     if (!line) continue;
@@ -197,6 +205,326 @@ export function importBibleMarkdown(mdText) {
   }
   if (currentChar) bible.characters.push(currentChar);
 
+  // 解析结构/节拍表
+  let inBeats = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line === '## 结构/节拍表') {
+      inBeats = true;
+      continue;
+    }
+    if (inBeats && line.startsWith('### ')) {
+      const match = line.match(/^### (.+)$/);
+      if (match) {
+        const name = match[1].trim();
+        const existing = beats.items.find(b => b.name === name);
+        if (!existing) {
+          beats.items.push({ id: uid('b'), name, chapterId: '', sceneIdx: -1, words: 0, note: '' });
+        }
+      }
+      continue;
+    }
+    if (inBeats && line.startsWith('- ') && beats.items.length > 0) {
+      const match = line.match(/-\s*(.+?)：(.+)$/);
+      if (match) {
+        const key = match[1].trim();
+        const val = match[2].trim();
+        const lastBeat = beats.items[beats.items.length - 1];
+        const fieldMap = { '关联章节': 'chapterId', '场景索引': 'sceneIdx', '字数': 'words', '备注': 'note' };
+        if (fieldMap[key]) lastBeat[fieldMap[key]] = val;
+      }
+      continue;
+    }
+    if (inBeats && line.startsWith('## ') && !line.startsWith('### ')) {
+      inBeats = false;
+    }
+  }
+
+  // 解析人物弧光
+  let inArcs = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line === '## 人物弧光') {
+      inArcs = true;
+      continue;
+    }
+    if (inArcs && line.startsWith('### ')) {
+      const name = line.slice(4).trim();
+      arcs.items.push({
+        id: uid('a'),
+        name,
+        points: [],
+        totalWords: 0,
+        latestState: ''
+      });
+      continue;
+    }
+    if (inArcs && line.startsWith('- ') && arcs.items.length > 0) {
+      const arc = arcs.items[arcs.items.length - 1];
+      arc.points.push({ chapter: 0, title: line.slice(2).trim(), chapterId: '', state: '', events: '', unresolved: '', words: 0 });
+      continue;
+    }
+    if (inArcs && line.startsWith('## ') && !line.startsWith('### ')) {
+      inArcs = false;
+    }
+  }
+
+  // 解析关系图谱
+  let inRelations = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line === '## 关系图谱') {
+      inRelations = true;
+      continue;
+    }
+    if (inRelations && line.startsWith('- ') && line.includes('：')) {
+      const match = line.match(/-\s*(.+?)：(.+)$/);
+      if (match) {
+        const fromTo = match[1].trim();
+        const type = match[2].trim();
+        const ftMatch = fromTo.match(/^(.+?)\s*[→→]\s*(.+)$/);
+        if (ftMatch) {
+          relations.push({
+            from: ftMatch[1].trim(),
+            to: ftMatch[2].trim(),
+            type,
+            strength: 5,
+            evidence: []
+          });
+        }
+      }
+      continue;
+    }
+    if (inRelations && line.startsWith('## ') && !line.startsWith('### ')) {
+      inRelations = false;
+    }
+  }
+
+  // 解析线索追踪
+  let inThreads = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line === '## 线索追踪') {
+      inThreads = true;
+      continue;
+    }
+    if (inThreads && line.startsWith('### ')) {
+      const text = line.slice(4).trim();
+      threads.items.push({
+        id: uid('t'),
+        kind: 'unresolved',
+        text,
+        nos: [],
+        latest: { no: 0, id: '', title: '' },
+        evidence: []
+      });
+      continue;
+    }
+    if (inThreads && line.startsWith('## ') && !line.startsWith('### ')) {
+      inThreads = false;
+    }
+  }
+
+  // 解析文风与规则
+  let inStyle = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line === '## 文风与规则') {
+      inStyle = true;
+      continue;
+    }
+    if (inStyle && line.startsWith('### ')) {
+      const key = line.slice(4).trim();
+      if (key === '文风档案') style.guide = '';
+      else if (key === '禁用词汇') style.banned = '';
+      else if (key === '基调') style.tone = '';
+      continue;
+    }
+    if (inStyle && line.startsWith('- ')) {
+      const match = line.match(/-\s*(.+)$/);
+      if (match) {
+        const val = match[1].trim();
+        if (style.guide === '') style.guide = val;
+        else if (style.banned === '') style.banned = val;
+        else if (style.tone === '') style.tone = val;
+      }
+      continue;
+    }
+    if (inStyle && line.startsWith('## ') && !line.startsWith('### ')) {
+      inStyle = false;
+    }
+  }
+
+  // 解析批注/高亮
+  let inAnnotations = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line === '## 批注/高亮') {
+      inAnnotations = true;
+      continue;
+    }
+    if (inAnnotations && line.startsWith('### ')) {
+      const chapterTitle = line.slice(4).trim();
+      annotations.push({
+        id: uid('an'),
+        chapterId: '',
+        start: 0,
+        end: 0,
+        text: '',
+        note: chapterTitle,
+        color: 'yellow',
+        createdAt: Date.now()
+      });
+      continue;
+    }
+    if (inAnnotations && line.startsWith('## ') && !line.startsWith('### ')) {
+      inAnnotations = false;
+    }
+  }
+
+  // 解析世界观
+  let inWorld = false;
+  let currentWorld = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line === '## 世界观') {
+      inWorld = true;
+      continue;
+    }
+    if (inWorld && line.startsWith('### ')) {
+      if (currentWorld) bible.world.push(currentWorld);
+      currentWorld = {
+        id: uid('w'),
+        name: line.slice(4).trim(),
+        category: '地理',
+        desc: '',
+        keywords: []
+      };
+      continue;
+    }
+    if (inWorld && line.startsWith('- ') && currentWorld) {
+      const match = line.match(/-\s*(.+?)：(.+)$/);
+      if (match) {
+        const key = match[1].trim();
+        const val = match[2].trim();
+        const fieldMap = { '分类': 'category', '说明': 'desc', '关键词': 'keywords' };
+        if (fieldMap[key]) currentWorld[fieldMap[key]] = val;
+        else if (key === '关键词') currentWorld.keywords = val.split('、').map(k => k.trim()).filter(Boolean);
+      }
+      continue;
+    }
+    if (inWorld && line.startsWith('## ') && !line.startsWith('### ')) {
+      if (currentWorld) bible.world.push(currentWorld);
+      inWorld = false;
+    }
+  }
+  if (currentWorld) bible.world.push(currentWorld);
+
+  // 解析时间线
+  let inTimeline = false;
+  let currentTime = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line === '## 时间线') {
+      inTimeline = true;
+      continue;
+    }
+    if (inTimeline && line.startsWith('### ')) {
+      if (currentTime) bible.timeline.push(currentTime);
+      currentTime = {
+        id: uid('t'),
+        time: '',
+        title: line.slice(4).trim(),
+        desc: ''
+      };
+      continue;
+    }
+    if (inTimeline && line.startsWith('- ') && currentTime) {
+      const match = line.match(/-\s*(.+?)：(.+)$/);
+      if (match) {
+        const key = match[1].trim();
+        const val = match[2].trim();
+        const fieldMap = { '说明': 'desc' };
+        if (fieldMap[key]) currentTime[fieldMap[key]] = val;
+      }
+      continue;
+    }
+    if (inTimeline && line.startsWith('## ') && !line.startsWith('### ')) {
+      if (currentTime) bible.timeline.push(currentTime);
+      inTimeline = false;
+    }
+  }
+  if (currentTime) bible.timeline.push(currentTime);
+
+  // 解析场景卡片
+  let inScenes = false;
+  let currentSceneChapterId = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed === '## 场景卡片') {
+      inScenes = true;
+      continue;
+    }
+    if (inScenes && trimmed.startsWith('### 第') && trimmed.includes('章')) {
+      const match = trimmed.match(/### 第(\d+)章\s+(.+)$/);
+      if (match) {
+        currentSceneChapterId = match[1];
+        continue;
+      }
+    }
+    if (inScenes && trimmed.startsWith('- 场次') && currentSceneChapterId) {
+      const ch = chapters.find(c => c.no === parseInt(currentSceneChapterId));
+      if (ch) {
+        ch.scenes = ch.scenes || [];
+        const sceneMatch = trimmed.match(/-\s*场次\s*(\d+)\s*[·\.]?\s*(.*)/);
+        if (sceneMatch) {
+          ch.scenes.push({
+            id: uid('s'),
+            pov: '',
+            location: '',
+            time: '',
+            characters: '',
+            summary: sceneMatch[2].trim(),
+            hook: '',
+            targetWords: 0
+          });
+        }
+      }
+      continue;
+    }
+    if (inScenes && trimmed.startsWith('## ') && !trimmed.startsWith('### ')) {
+      inScenes = false;
+    }
+  }
+
+  // 解析批注/高亮
+  let inAnnotations2 = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line === '## 批注/高亮') {
+      inAnnotations2 = true;
+      continue;
+    }
+    if (inAnnotations2 && line.startsWith('### ')) {
+      const chapterTitle = line.slice(4).trim();
+      annotations.push({
+        id: uid('an'),
+        chapterId: '',
+        start: 0,
+        end: 0,
+        text: '',
+        note: chapterTitle,
+        color: 'yellow',
+        createdAt: Date.now()
+      });
+      continue;
+    }
+    if (inAnnotations2 && line.startsWith('## ') && !line.startsWith('### ')) {
+      inAnnotations2 = false;
+    }
+  }
+
   return {
     title: title || '导入的作品',
     author: author || '',
@@ -205,5 +533,11 @@ export function importBibleMarkdown(mdText) {
     bible,
     outline,
     chapters,
+    beats,
+    arcs,
+    relations,
+    threads: { items: threads.items },
+    style,
+    annotations,
   };
 }
