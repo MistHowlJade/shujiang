@@ -6021,9 +6021,11 @@ $$('#bibleTabs button').forEach((b) => b.addEventListener('click', () => {
   if (S.novel) {
     api.get(`/api/novels/${S.novel.id}`).then(({ novel }) => {
       S.novel = novel;
+      setView('bible');
       renderBible();
-    }).catch(() => renderBible());  // 网络失败时用本地缓存兜底
+    }).catch(() => { setView('bible'); renderBible(); });  // 网络失败时用本地缓存兜底
   } else {
+    setView('bible');
     renderBible();
   }
 }));
