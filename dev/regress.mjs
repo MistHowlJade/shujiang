@@ -347,6 +347,23 @@ async function main() {
   });
   check('templateKey 命中专属模板', (ctxKey.messages || []).find((m) => m.role === 'user')?.content === '全书');
 
+  // 大小说上下文：曾经 >5 万字会走「流式」分支，结果 pack 变成空数组，
+  // 模型只收到系统提示词、看不到任何设定。这里用一部 6 万字作品守住这个回归。
+  const bigNovel = await post(`${BASE}/api/novels`, { title: '大书上下文测试', genre: '奇幻' });
+  const bigId = bigNovel.novel?.id;
+  const bigBody = '长文验收。'.repeat(12000);
+  const bigCh = await post(`${BASE}/api/novels/${bigId}/chapters`, { title: '长章', content: bigBody });
+  await put(`${BASE}/api/novels/${bigId}`, {
+    meta: { logline: '大书总纲验收', synopsis: '大书梗概验收' },
+    bible: { characters: [{ id: 'cbig', name: '长文角色', role: '主角' }] },
+  });
+  const bigCtx = await post(`${BASE}/api/context`, {
+    task: 'chapter', novelId: bigId, chapterId: bigCh.chapter?.id,
+  });
+  const bigMsgs = (bigCtx.messages || []).map((m) => m.content).join('\n');
+  check('6 万字作品的资料包非空', (bigCtx.stats?.packChars || 0) > 0, JSON.stringify(bigCtx.stats));
+  check('6 万字作品带总纲与人物', bigMsgs.includes('大书总纲验收') && bigMsgs.includes('长文角色'));
+
   // ---------------------------------------------------------------
   group('章节落盘');
   await put(`${BASE}/api/novels/${id}/chapters/${cid}`, {
