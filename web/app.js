@@ -283,14 +283,17 @@ const S = {
   // 虚拟滚动状态（章节列表）
   vl: {
     enabled: false,
-    itemHeight: 34,       // 预估行高（px），首次渲染后实测修正
+    itemHeight: 34,       // 章节行预估高度（px），首次渲染后实测修正
+    headHeight: 30,       // 卷标题行高度（px），与 .vol-row-head 的 CSS 高度一致
     buffer: 5,            // 可视区上下各多渲染几行
     firstIdx: 0,          // 当前渲染的第一行索引
     lastIdx: -1,          // 当前渲染的最后一行索引
     total: 0,             // 总行数
-    rows: [],             // 当前显示的行数据 [{ c, i, filtered, group }]
+    rows: [],             // 当前显示的行数据 [{ kind, c, i, group }]
+    offsets: [0],         // 每行顶部位置的前缀和（卷标题与章节行高度不同）
+    totalHeight: 0,       // 所有行的总高度
     scrollHandler: null,  // 滚动监听器引用
-    measureDone: false,   // 是否已实测行高
+    measureDone: false,   // 是否已实测章节行高
   },
   // 虚拟滚动状态（设定库列表：人物、世界观、时间线、线索、关系、结构等）
   bibleVl: {
@@ -2502,10 +2505,31 @@ function toggleFocus() {
   else enterFocus();
 }
 
+/** 卷标题行（用于虚拟滚动与普通渲染的统一入口） */
+function makeVolHead({ vid, group, open }) {
+  const v = volumeById(vid);
+  const words = group.chapters.reduce((s, c) => s + wordsOf(c), 0);
+  const li = document.createElement('li');
+  li.className = `vol-row-head${open ? '' : ' closed'}`;
+  li.dataset.vid = vid;
+  li.innerHTML = `
+    <div class="vol-head" title="${open ? '点击收起这一卷' : '点击展开这一卷'}">
+      <button class="vol-toggle" type="button">${ico('chev-down')}</button>
+      <span class="vol-name">${v ? esc(volumeTitle(vid)) : '未分卷'}</span>
+      <span class="vol-stat">${group.chapters.length} 章 · ${fmtWords(words)} 字</span>
+      <button class="mini-act" data-a="vmenu" type="button" title="本卷操作">${ico('more')}</button>
+    </div>`;
+  const toggle = () => toggleVol(vid);
+  li.querySelector('.vol-toggle').addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
+  li.querySelector('.vol-head').addEventListener('click', (e) => { if (!e.target.closest('.mini-act')) toggle(); });
+  li.querySelector('[data-a="vmenu"]').addEventListener('click', (e) => { e.stopPropagation(); openVolumeGroupMenu(e.currentTarget, vid, group); });
+  return li;
+}
+
 /** 章节行（含 ⋯ 操作菜单）。分卷模式下按卷塞进不同分组，平铺模式直接进 ul。 */
 function makeChapterItem(c, i, { filtered = false, group = null } = {}) {
   const li = document.createElement('li');
-  li.className = `chapter-item ${c.id === S.chapterId ? 'on' : ''}`;
+  li.className = `chapter-item ${c.id === S.chapterId ? 'on' : ''}${group ? ' has-vol' : ''}`;
   li.dataset.id = c.id;
   li.dataset.stage = stageOf(c);
   if (group) li.dataset.vol = group.id;
@@ -2562,7 +2586,10 @@ function makeChapterItem(c, i, { filtered = false, group = null } = {}) {
   return li;
 }
 
-/** 把章节列表压平成扁平行数组，含分组信息；供虚拟滚动与普通渲染共用 */
+/** 把章节列表压平成扁平行数组，含分组信息；供虚拟滚动与普通渲染共用
+ *  返回 [{ kind: 'head', vid, group, open }, { kind: 'chapter', c, i, filtered, group }, ...]
+ *  在筛选模式下只返回章节行（无分组头）。
+ */
 function buildChapterRows(n, stageLabels) {
   const filterActive = !!S.stageFilter;
   const filteredRows = filterActive
@@ -2575,7 +2602,7 @@ function buildChapterRows(n, stageLabels) {
 
   const rows = [];
   if (filterActive) {
-    filteredRows.forEach(({ c, i }) => rows.push({ c, i, filtered: true }));
+    filteredRows.forEach(({ c, i }) => rows.push({ kind: 'chapter', c, i, filtered: true }));
   } else if (groupMode) {
     const groups = [];
     n.chapters.forEach((c, i) => {
@@ -2585,11 +2612,15 @@ function buildChapterRows(n, stageLabels) {
       else last.chapters.push(c);
     });
     groups.forEach((g) => {
-      let to = g.from;
-      g.chapters.forEach((c) => { rows.push({ c, i: to, group: g }); to += 1; });
+      const open = isVolOpen(g.id);
+      rows.push({ kind: 'head', vid: g.id, group: g, open });
+      if (open) {
+        let to = g.from;
+        g.chapters.forEach((c) => { rows.push({ kind: 'chapter', c, i: to, group: g }); to += 1; });
+      }
     });
   } else {
-    n.chapters.forEach((c, i) => rows.push({ c, i }));
+    n.chapters.forEach((c, i) => rows.push({ kind: 'chapter', c, i }));
   }
   return rows;
 }
@@ -2627,6 +2658,8 @@ function renderChapterList(n, stageLabels) {
     S.vl.measureDone = false;
     S.vl.firstIdx = 0;
     S.vl.lastIdx = -1;
+    // 预计算 offsets 用于虚拟滚动定位
+    computeOffsets(rows);
     renderVirtualList(ul, keepScroll);
     // 挂滚动监听（只挂一次）
     if (!S.vl.scrollHandler) {
@@ -2640,18 +2673,55 @@ function renderChapterList(n, stageLabels) {
       ul.removeEventListener('scroll', S.vl.scrollHandler, { passive: true });
       S.vl.scrollHandler = null;
     }
-    rows.forEach(({ c, i, filtered, group }) => ul.appendChild(makeChapterItem(c, i, { filtered, group })));
+    rows.forEach((r) => {
+      if (r.kind === 'head') ul.appendChild(makeVolHead(r));
+      else ul.appendChild(makeChapterItem(r.c, r.i, { filtered: r.filtered, group: r.group }));
+    });
     ul.scrollTop = keepScroll;
   }
 }
 
-/** 虚拟滚动渲染：只画可视区 + buffer 行 */
+/** 计算每行的顶部偏移（用于虚拟滚动定位），并存入 S.vl.offsets / totalHeight */
+function computeOffsets(rows) {
+  const { itemHeight, headHeight } = S.vl;
+  const offsets = [0];
+  let acc = 0;
+  for (const r of rows) {
+    acc += r.kind === 'head' ? headHeight : itemHeight;
+    offsets.push(acc);
+  }
+  S.vl.offsets = offsets;
+  S.vl.totalHeight = acc;
+}
+
+/** 虚拟滚动渲染：只画可视区 + buffer 行（支持 vol-head 与 chapter-item 混排，高度不同） */
 function renderVirtualList(ul, scrollTop) {
-  const { itemHeight, buffer, total, rows } = S.vl;
+  const { itemHeight, headHeight, buffer, total, rows, offsets, totalHeight } = S.vl;
   const clientH = ul.clientHeight;
-  const first = Math.max(0, Math.floor(scrollTop / itemHeight) - buffer);
-  const visibleCount = Math.ceil(clientH / itemHeight);
-  const last = Math.min(total - 1, first + visibleCount + buffer * 2 - 1);
+  // 容器未显示时用估算高度，避免首次渲染为空
+  const effectiveClientH = clientH || 400;
+
+  // 用二分查找在 offsets 中找到 first / last
+  let first = 0, last = total - 1;
+  // first: 最后一个 offset <= scrollTop + buffer * avgHeight 的索引
+  const avgH = totalHeight / total || itemHeight;
+  const searchTop = Math.max(0, scrollTop - buffer * avgH);
+  let lo = 0, hi = total;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (offsets[mid] <= searchTop) lo = mid + 1;
+    else hi = mid;
+  }
+  first = Math.max(0, lo - 1);
+
+  const searchBottom = scrollTop + effectiveClientH + buffer * avgH;
+  lo = 0; hi = total;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (offsets[mid] < searchBottom) lo = mid + 1;
+    else hi = mid;
+  }
+  last = Math.min(total - 1, lo);
 
   // 首次渲染或范围变了才重画
   if (S.vl.measureDone && first === S.vl.firstIdx && last === S.vl.lastIdx) return;
@@ -2662,21 +2732,22 @@ function renderVirtualList(ul, scrollTop) {
   let viewport = ul.querySelector('.vl-viewport');
   if (!viewport) {
     ul.innerHTML = `
-      <div class="vl-spacer" style="height: ${total * itemHeight}px"></div>
+      <div class="vl-spacer" style="height: ${totalHeight}px"></div>
       <div class="vl-viewport"></div>
     `;
     viewport = ul.querySelector('.vl-viewport');
   } else {
     // 更新 spacer 高度
-    ul.querySelector('.vl-spacer').style.height = `${total * itemHeight}px`;
+    ul.querySelector('.vl-spacer').style.height = `${totalHeight}px`;
   }
 
-  viewport.style.transform = `translateY(${first * itemHeight}px)`;
+  viewport.style.transform = `translateY(${offsets[first]}px)`;
   viewport.innerHTML = '';
   const frag = document.createDocumentFragment();
   for (let idx = first; idx <= last; idx++) {
-    const { c, i, filtered, group } = rows[idx];
-    frag.appendChild(makeChapterItem(c, i, { filtered, group }));
+    const r = rows[idx];
+    if (r.kind === 'head') frag.appendChild(makeVolHead(r));
+    else frag.appendChild(makeChapterItem(r.c, r.i, { filtered: r.filtered, group: r.group }));
   }
   viewport.appendChild(frag);
 
@@ -2687,8 +2758,10 @@ function renderVirtualList(ul, scrollTop) {
       const h = firstRow.getBoundingClientRect().height;
       if (h > 20 && h < 80) {
         S.vl.itemHeight = h;
-        ul.querySelector('.vl-spacer').style.height = `${total * h}px`;
-        viewport.style.transform = `translateY(${first * h}px)`;
+        // 重新计算 offsets
+        computeOffsets(rows);
+        ul.querySelector('.vl-spacer').style.height = `${S.vl.totalHeight}px`;
+        viewport.style.transform = `translateY(${S.vl.offsets[first]}px)`;
       }
       S.vl.measureDone = true;
     }
@@ -2700,10 +2773,10 @@ function syncChapterSelection() {
   const ul = $('#chapterList');
   if (S.vl.enabled) {
     // 虚拟滚动模式：确保当前章在渲染范围内
-    const idx = S.vl.rows.findIndex(r => r.c.id === S.chapterId);
+    const idx = S.vl.rows.findIndex(r => r.kind === 'chapter' && r.c.id === S.chapterId);
     if (idx >= 0 && (idx < S.vl.firstIdx || idx > S.vl.lastIdx)) {
-      // 不在可视区，滚过去
-      ul.scrollTop = idx * S.vl.itemHeight;
+      // 不在可视区，滚过去（用 offsets 定位）
+      ul.scrollTop = S.vl.offsets[idx];
     }
     // 更新 on 类
     const prev = ul.querySelector('.chapter-item.on');

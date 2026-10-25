@@ -908,6 +908,11 @@ kbd {
 
 /* --- 分卷分组：卷标题 + 折叠的章节 --- */
 .vol-group { margin-bottom: 1px; }
+
+/* 虚拟滚动用的卷标题行（扁平结构，无 vol-group 包裹） */
+.vol-row-head { margin-bottom: 1px; }
+.vol-row-head.closed .vol-toggle { transform: rotate(-90deg); }
+
 .vol-head {
   display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto;
   align-items: center; gap: 6px; padding: 6px 6px 6px 2px;
@@ -933,6 +938,9 @@ kbd {
 .vol-items { list-style: none; margin: 0; padding: 0 0 3px 12px; }
 .vol-group.closed .vol-items { display: none; }
 .vol-items .chapter-item { padding-left: 6px; }
+.vol-row-head .vol-head:hover { background: var(--surface-2); }
+.vol-row-head .vol-head:hover .vol-toggle { color: var(--text-2); }
+.chapter-item.has-vol { padding-left: 18px; }
 .bible-block.flash, .chapter-item.flash, .outline-row.flash { animation: flashRing 1.3s var(--ease); border-radius: var(--r-sm); }
 @keyframes flashRing {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
