@@ -309,6 +309,13 @@ const S = {
     scrollHandler: null,
     measureDone: false,
   },
+  // 虚拟滚动状态（章节看板：每列独立）
+  kbVl: {
+    enabled: false,
+    itemHeight: 80,       // 卡片预估高度（px），首次渲染后实测修正
+    buffer: 3,            // 可视区上下各多渲染几张卡片
+    cols: {},             // stage -> { firstIdx, lastIdx, total, rows, offsets, totalHeight, scrollHandler, measureDone }
+  },
 };
 
 function setSave(flag, text) {
@@ -2277,6 +2284,143 @@ function openChapterBoard() {
       selectChapter(id);
     };
 
+    /** 构建某一列的卡片数据 */
+    function buildBoardRows(stage) {
+      return n.chapters
+        .map((c, i) => ({ c, i }))
+        .filter(({ c }) => stageOf(c) === stage)
+        .map(({ c, i }) => ({
+          id: c.id,
+          index: i,
+          title: c.title || '未命名',
+          words: wordsOf(c),
+          target: targetOf(c),
+          pct: progressOf(c),
+          revs: openRevisionCount(c),
+          memory: c.memory,
+          vol: volumeTitle(effVolumeIds()[i] || ''),
+          isCurrent: c.id === S.chapterId,
+          stage: stageOf(c),
+        }));
+    }
+
+    /** 计算虚拟滚动偏移量 */
+    function computeBoardOffsets(rows, itemHeight) {
+      const offsets = [0];
+      let acc = 0;
+      for (let i = 0; i < rows.length; i++) {
+        acc += itemHeight;
+        offsets.push(acc);
+      }
+      return { offsets, totalHeight: acc };
+    }
+
+    /** 渲染单列的虚拟滚动 */
+    function renderBoardVirtualList(listEl, stage, scrollTop) {
+      const vl = S.kbVl;
+      const colVl = vl.cols[stage];
+      if (!colVl) return;
+      const { itemHeight, buffer, total, rows, offsets, totalHeight } = colVl;
+      const clientH = listEl.clientHeight;
+      if (clientH === 0) return;
+
+      const effectiveClientH = clientH;
+      const avgH = totalHeight / total || itemHeight;
+
+      // 二分查找 first / last
+      let first = 0, last = total - 1;
+      const searchTop = Math.max(0, scrollTop - buffer * avgH);
+      let lo = 0, hi = total;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (offsets[mid] <= searchTop) lo = mid + 1;
+        else hi = mid;
+      }
+      first = Math.max(0, lo - 1);
+
+      const searchBottom = scrollTop + effectiveClientH + buffer * avgH;
+      lo = 0; hi = total;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (offsets[mid] < searchBottom) lo = mid + 1;
+        else hi = mid;
+      }
+      last = Math.min(total - 1, lo);
+
+      if (colVl.measureDone && first === colVl.firstIdx && last === colVl.lastIdx) return;
+      colVl.firstIdx = first;
+      colVl.lastIdx = last;
+
+      let viewport = listEl.querySelector('.kb-vl-viewport');
+      if (!viewport) {
+        listEl.innerHTML = `
+          <div class="kb-vl-spacer" style="height: ${totalHeight}px"></div>
+          <div class="kb-vl-viewport"></div>
+        `;
+        viewport = listEl.querySelector('.kb-vl-viewport');
+      } else {
+        listEl.querySelector('.kb-vl-spacer').style.height = `${totalHeight}px`;
+      }
+
+      viewport.style.transform = `translateY(${offsets[first]}px)`;
+      viewport.innerHTML = '';
+      const frag = document.createDocumentFragment();
+      for (let idx = first; idx <= last; idx++) {
+        const r = rows[idx];
+        frag.appendChild(makeKbCard(r));
+      }
+      viewport.appendChild(frag);
+
+      if (!colVl.measureDone) {
+        const firstCard = viewport.querySelector('.kb-card');
+        if (firstCard) {
+          const h = firstCard.getBoundingClientRect().height;
+          if (h > 50 && h < 200) {
+            colVl.itemHeight = h;
+            const recalc = computeBoardOffsets(rows, h);
+            colVl.offsets = recalc.offsets;
+            colVl.totalHeight = recalc.totalHeight;
+            listEl.querySelector('.kb-vl-spacer').style.height = `${colVl.totalHeight}px`;
+            viewport.style.transform = `translateY(${colVl.offsets[first]}px)`;
+          }
+          colVl.measureDone = true;
+        }
+      }
+    }
+
+    /** 创建单张卡片元素 */
+    function makeKbCard(r) {
+      const article = document.createElement('article');
+      article.className = `kb-card ${r.isCurrent ? 'on' : ''}`;
+      article.draggable = true;
+      article.dataset.id = r.id;
+      article.dataset.index = r.index;
+      article.tabIndex = 0;
+      article.role = 'button';
+      article.setAttribute('aria-label', `第 ${r.index + 1} 章 ${r.title}`);
+      article.innerHTML = `
+        <div class="kb-card-top">
+          <span class="kb-no">${r.index + 1}</span>
+          <span class="kb-card-title">${esc(r.title)}</span>
+        </div>
+        <div class="kb-card-meta">
+          <span${r.target && r.pct >= 100 ? ' class="kb-goal-done"' : ''}>${r.target ? `${fmtWords(r.words)} / ${fmtWords(r.target)} 字` : (r.words ? `${fmtWords(r.words)} 字` : '空章')}</span>
+          ${r.target ? `<span class="kb-pct">${r.pct}%</span>` : ''}
+          ${r.revs ? `<span class="kb-rev">${r.revs} 项待改</span>` : ''}
+          ${r.memory ? '<span class="kb-mem">有记忆</span>' : ''}
+        </div>
+        ${r.target ? `<div class="kb-goal" title="目标 ${fmtWords(r.target)} 字"><span class="${r.pct >= 100 ? 'done' : ''}" style="width:${r.pct}%"></span></div>` : ''}
+        <div class="kb-card-foot">
+          <span class="kb-vol">${r.vol ? esc(r.vol) : ''}</span>
+          <select class="kb-stage" aria-label="修改第 ${r.index + 1} 章状态">
+            ${BOARD_STAGES.map((s) => `<option value="${s}"${r.stage === s ? ' selected' : ''}>${STAGE_LABEL[s]}</option>`).join('')}
+          </select>
+        </div>`;
+      return article;
+    }
+
+    const VIRTUAL_THRESHOLD = 80;  // 单列超过 80 张卡片启用虚拟滚动
+
     const render = () => {
       const scrolls = {};
       $$('.kb-list', board).forEach((el) => { scrolls[el.dataset.stage] = el.scrollTop; });
@@ -2294,34 +2438,27 @@ function openChapterBoard() {
         <span class="kb-legend-item"><i class="kb-dot ${stage}"></i>${STAGE_LABEL[stage]} <b>${counts[stage]}</b></span>`).join('');
 
       board.innerHTML = BOARD_STAGES.map((stage) => {
-        const rows = n.chapters.map((c, i) => ({ c, i })).filter(({ c }) => stageOf(c) === stage);
-        const words = rows.reduce((sum, { c }) => sum + wordsOf(c), 0);
-        const cards = rows.map(({ c, i }) => {
-          const w = wordsOf(c);
-          const target = targetOf(c);
-          const pct = progressOf(c);
-          const revs = openRevisionCount(c);
-          const vol = volumeTitle(effVolumeIds()[i] || '');
-          return `<article class="kb-card ${c.id === S.chapterId ? 'on' : ''}" draggable="true" data-id="${esc(c.id)}" data-index="${i}" tabindex="0" role="button" aria-label="第 ${i + 1} 章 ${esc(c.title || '未命名')}">
-            <div class="kb-card-top">
-              <span class="kb-no">${i + 1}</span>
-              <span class="kb-card-title">${esc(c.title || '未命名')}</span>
-            </div>
-            <div class="kb-card-meta">
-              <span${target && pct >= 100 ? ' class="kb-goal-done"' : ''}>${target ? `${fmtWords(w)} / ${fmtWords(target)} 字` : (w ? `${fmtWords(w)} 字` : '空章')}</span>
-              ${target ? `<span class="kb-pct">${pct}%</span>` : ''}
-              ${revs ? `<span class="kb-rev">${revs} 项待改</span>` : ''}
-              ${c.memory ? '<span class="kb-mem">有记忆</span>' : ''}
-            </div>
-            ${target ? `<div class="kb-goal" title="目标 ${fmtWords(target)} 字"><span class="${pct >= 100 ? 'done' : ''}" style="width:${pct}%"></span></div>` : ''}
-            <div class="kb-card-foot">
-              <span class="kb-vol">${vol ? esc(vol) : ''}</span>
-              <select class="kb-stage" aria-label="修改第 ${i + 1} 章状态">
-                ${BOARD_STAGES.map((s) => `<option value="${s}"${stageOf(c) === s ? ' selected' : ''}>${STAGE_LABEL[s]}</option>`).join('')}
-              </select>
-            </div>
-          </article>`;
-        }).join('');
+        const rows = buildBoardRows(stage);
+        const words = rows.reduce((sum, r) => sum + r.words, 0);
+        const useVirtual = rows.length >= VIRTUAL_THRESHOLD;
+        if (useVirtual) {
+          S.kbVl.enabled = true;
+          S.kbVl.cols[stage] = {
+            firstIdx: 0,
+            lastIdx: -1,
+            total: rows.length,
+            rows,
+            itemHeight: S.kbVl.itemHeight,
+            buffer: S.kbVl.buffer,
+            scrollHandler: null,
+            measureDone: false,
+            enabled: true,
+            ...computeBoardOffsets(rows, S.kbVl.itemHeight),
+          };
+        } else {
+          S.kbVl.enabled = false;
+          S.kbVl.cols[stage] = { enabled: false };
+        }
         return `<section class="kb-col" data-stage="${stage}">
           <div class="kb-col-head">
             <span class="kb-dot ${stage}"></span>
@@ -2329,8 +2466,8 @@ function openChapterBoard() {
             <span class="kb-col-count">${rows.length}</span>
             <span class="kb-col-words">${rows.length ? `${fmtWords(words)} 字` : ''}</span>
           </div>
-          <div class="kb-list" data-stage="${stage}">
-            ${rows.length ? cards : `<div class="kb-empty">${BOARD_EMPTY[stage]}<br>把卡片拖到这里</div>`}
+          <div class="kb-list${useVirtual ? ' virtual' : ''}" data-stage="${stage}">
+            ${rows.length ? '' : `<div class="kb-empty">${BOARD_EMPTY[stage]}<br>把卡片拖到这里</div>`}
           </div>
         </section>`;
       }).join('');
@@ -2344,7 +2481,8 @@ function openChapterBoard() {
         return true;
       };
 
-      $$('.kb-card', board).forEach((card) => {
+      // 绑定卡片事件（普通渲染和虚拟渲染共用）
+      function bindCardEvents(card) {
         const id = card.dataset.id;
         const index = Number(card.dataset.index);
         const stageSelect = $('.kb-stage', card);
@@ -2373,8 +2511,35 @@ function openChapterBoard() {
           }
         });
         stageSelect?.addEventListener('change', () => applyStage(index, stageSelect.value, true));
+      }
+
+      $$('.kb-list', board).forEach((listEl) => {
+        const stage = listEl.dataset.stage;
+        const vl = S.kbVl.cols[stage];
+        if (vl && vl.enabled !== false) {
+          // 虚拟滚动模式
+          listEl.classList.add('virtual');
+          renderBoardVirtualList(listEl, stage, scrolls[stage] || 0);
+          if (!vl.scrollHandler) {
+            vl.scrollHandler = () => renderBoardVirtualList(listEl, stage, listEl.scrollTop);
+            listEl.addEventListener('scroll', vl.scrollHandler, { passive: true });
+          }
+        } else {
+          // 普通渲染模式
+          listEl.classList.remove('virtual');
+          const rows = buildBoardRows(stage);
+          const words = rows.reduce((sum, r) => sum + r.words, 0);
+          const cards = rows.map((r) => makeKbCard(r));
+          listEl.innerHTML = '';
+          cards.forEach((card) => {
+            listEl.appendChild(card);
+            bindCardEvents(card);
+          });
+        }
+        if (scrolls[stage]) listEl.scrollTop = scrolls[stage];
       });
 
+      // 拖放目标列（非虚拟滚动时用 listEl，虚拟滚动时用 col）
       $$('.kb-col', board).forEach((col) => {
         const stage = col.dataset.stage;
         col.addEventListener('dragover', (e) => {
@@ -2394,10 +2559,6 @@ function openChapterBoard() {
           const index = n.chapters.findIndex((c) => c.id === id);
           if (index >= 0) applyStage(index, stage);
         });
-      });
-
-      $$('.kb-list', board).forEach((el) => {
-        if (scrolls[el.dataset.stage]) el.scrollTop = scrolls[el.dataset.stage];
       });
     };
 

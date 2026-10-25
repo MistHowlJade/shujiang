@@ -801,6 +801,13 @@ kbd {
   flex: 1; min-height: 0; overflow: auto;
   display: flex; flex-direction: column; gap: 6px; padding: 8px;
 }
+
+/* 看板虚拟滚动 */
+.kb-list.virtual { position: relative; padding: 0; overflow: auto; }
+.kb-list.virtual > .kb-vl-spacer { display: block; pointer-events: none; }
+.kb-list.virtual > .kb-vl-viewport { position: absolute; top: 0; left: 8px; right: 8px; }
+.kb-list.virtual > .kb-vl-viewport > .kb-card { margin-bottom: 6px; }
+
 .kb-empty {
   margin: auto 0; padding: 24px 8px; text-align: center;
   color: var(--text-4); font-size: 11px; line-height: 1.75;
