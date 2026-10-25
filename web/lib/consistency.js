@@ -388,7 +388,7 @@ function normalizeCultivation(str) {
 
 /* ============================================================
  * 口吻/语风一致性（可选，较重，仅在用户开启时跑）
- * 对比不同章节的：平均句长、常用词频、标点风格、人称视角
+ * 对比不同章节的：平均句长、常用词频、标点风格、人称视角、词汇丰富度、功能词分布、句式多样性
  * ============================================================ */
 function checkVoiceConsistency(novel) {
   const issues = [];
@@ -408,19 +408,49 @@ function checkVoiceConsistency(novel) {
       question: (text.match(/？/g) || []).length,
       ellipse: (text.match(/…/g) || []).length,
     };
+    // 词汇丰富度指标
+    const words = text.match(/[\u4e00-\u9fff\w]+/g) || [];
+    const uniqueWords = new Set(words.map(w => w.toLowerCase()));
+    const typeTokenRatio = words.length ? uniqueWords.size / words.length : 0;
+    const hapaxLegomena = [...uniqueWords].filter(w => words.filter(x => x.toLowerCase() === w).length === 1).length;
+    const hapaxRatio = words.length ? hapaxLegomena / words.length : 0;
+
+    // 功能词频率（更稳健的文体指纹）
+    const functionWords = ['的','了','在','是','我','有','和','就','不','人','都','一','一个','上','也','很','到','说','要','去','你','会','着','没有','看','好','自己','这','那','里','就是','还是','觉得','觉得','时候','因为','所以','但是','然后','如果','虽然','只有','什么','怎么','为什么','哪里','谁','怎么','多少','可以','应该','可能','必须','需要','想要','喜欢','讨厌','害怕','担心','开心','难过','生气','惊讶','恐惧','愤怒','平静','激动','紧张','放松'];
+    const functionWordCounts = {};
+    for (const fw of functionWords) {
+      const count = (text.match(new RegExp(fw, 'g')) || []).length;
+      if (count > 0) functionWordCounts[fw] = count;
+    }
+
+    // 句式结构多样性
+    const simpleSentences = text.match(/[^，。！？,!.?]+[，。！？]/g) || [];
+    const compoundSentences = text.match(/[^，。！？,!.?]+(?:[,，][^，。！？,!.?]+)*[。！？]/g) || [];
+    const complexRatio = compoundSentences.length ? compoundSentences.length / (simpleSentences.length + compoundSentences.length) : 0;
+
     const person = detectPerson(text);
     return {
       chapter: ch,
       avgSentLen: Math.round(avgSentLen),
       dialogRatio: Math.round(dialogRatio * 1000) / 1000,
-      punctCounts,
+      punctCounts: {
+        comma: (text.match(/，/g) || []).length,
+        period: (text.match(/。/g) || []).length,
+        exclaim: (text.match(/！/g) || []).length,
+        question: (text.match(/？/g) || []).length,
+        ellipse: (text.match(/…/g) || []).length,
+      },
       person,
+      // 新增指标
+      typeTokenRatio: Math.round(typeTokenRatio * 10000) / 10000,
+      hapaxRatio: Math.round(hapaxRatio * 10000) / 10000,
+      functionWordProfile: functionWordCounts,
+      complexRatio: Math.round(complexRatio * 1000) / 1000,
     };
   });
 
   // 检测人称视角突变
   const persons = stats.map(s => s.person);
-  // 只要相邻章节人称不同就报告，不限于 first/third
   for (let i = 1; i < stats.length; i++) {
     if (stats[i].person !== stats[i-1].person) {
       issues.push({
@@ -460,6 +490,72 @@ function checkVoiceConsistency(novel) {
         message: `第 ${s.chapter.no} 章《${s.chapter.title}》对话占比 ${Math.round(s.dialogRatio * 100)}%，显著偏离全书均值 ${Math.round(globalDialog * 100)}%`,
         loc: `第 ${s.chapter.no} 章 ${s.chapter.title}`,
         fingerprint: `consistency|voice|dialog_ratio|${s.chapter.id}`,
+        severity: 'hint',
+      });
+    }
+  }
+
+  // 词汇丰富度突变（TTR 突变）
+  const ttrs = stats.map(s => s.typeTokenRatio).filter(v => v > 0);
+  const globalTTR = ttrs.reduce((a, b) => a + b, 0) / ttrs.length;
+  for (const s of stats) {
+    if (s.typeTokenRatio > 0 && (s.typeTokenRatio > globalTTR * 1.5 || s.typeTokenRatio < globalTTR * 0.6)) {
+      issues.push({
+        kind: 'voice',
+        type: 'ttr_anomaly',
+        message: `第 ${s.chapter.no} 章《${s.chapter.title}》词汇丰富度 ${(s.typeTokenRatio * 100).toFixed(1)}%，显著偏离全书均值 ${(globalTTR * 100).toFixed(1)}%`,
+        loc: `第 ${s.chapter.no} 章 ${s.chapter.title}`,
+        fingerprint: `consistency|voice|ttr|${s.chapter.id}`,
+        severity: 'hint',
+      });
+    }
+  }
+
+  // 功能词分布异常（余弦相似度）
+  const fwNames = Object.keys(stats[0]?.functionWordProfile || {});
+  if (fwNames.length > 0) {
+    const globalFW = {};
+    for (const fw of Object.keys(stats[0]?.functionWordProfile || {})) {
+      const counts = stats.map(s => s.functionWordProfile?.[fw] || 0);
+      const total = counts.reduce((a, b) => a + b, 0);
+      globalFW[fw] = total / counts.reduce((a, b) => a + b, 1);
+    }
+    for (const s of stats) {
+      const profile = s.functionWordProfile || {};
+      // 计算余弦相似度
+      let dot = 0, normA = 0, normB = 0;
+      for (const fw of Object.keys(globalFW)) {
+        const a = profile[fw] || 0;
+        const b = globalFW[fw] || 0;
+        dot += a * b;
+        normA += a * a;
+        normB += b * b;
+      }
+      const similarity = (normA && normB) ? dot / (Math.sqrt(normA) * Math.sqrt(normB)) : 1;
+      if (similarity < 0.7) {
+        issues.push({
+          kind: 'voice',
+          type: 'function_word_anomaly',
+          message: `第 ${s.chapter.no} 章《${s.chapter.title}》功能词分布与全书风格差异较大（相似度 ${Math.round(similarity * 100)}%）`,
+          loc: `第 ${s.chapter.no} 章 ${s.chapter.title}`,
+          fingerprint: `consistency|voice|function_word|${s.chapter.id}`,
+          severity: 'hint',
+        });
+      }
+    }
+  }
+
+  // 句式复杂度突变
+  const complexRatios = stats.map(s => s.complexRatio).filter(v => v > 0);
+  const globalComplex = complexRatios.reduce((a, b) => a + b, 0) / complexRatios.length;
+  for (const s of stats) {
+    if (s.complexRatio > 0 && (s.complexRatio > globalComplex * 2 || s.complexRatio < globalComplex * 0.5)) {
+      issues.push({
+        kind: 'voice',
+        type: 'complexity_anomaly',
+        message: `第 ${s.chapter.no} 章《${s.chapter.title}》句式复杂度 ${(s.complexRatio * 100).toFixed(1)}%，显著偏离全书均值 ${(globalComplex * 100).toFixed(1)}%`,
+        loc: `第 ${s.chapter.no} 章 ${s.chapter.title}`,
+        fingerprint: `consistency|voice|complexity|${s.chapter.id}`,
         severity: 'hint',
       });
     }
