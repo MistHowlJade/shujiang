@@ -295,19 +295,14 @@ const S = {
     scrollHandler: null,  // 滚动监听器引用
     measureDone: false,   // 是否已实测章节行高
   },
-  // 虚拟滚动状态（设定库列表：人物、世界观、时间线、线索、关系、结构等）
+  // 虚拟滚动状态（设定库列表：人物、世界观、时间线、线索、弧光、关系等）
+  // 每个列表独立维护虚拟滚动状态，通过 listKey 区分
   bibleVl: {
-    enabled: false,
-    itemHeight: 280,      // 预估条目高度（px），首次渲染后实测修正
-    buffer: 2,            // 可视区上下各多渲染几条
-    firstIdx: 0,
-    lastIdx: -1,
-    total: 0,
-    items: [],            // 当前列表的数据项
-    renderItem: null,     // 渲染函数 (item, index) => HTMLElement
-    listEl: null,         // 当前的 entry-list 元素
-    scrollHandler: null,
-    measureDone: false,
+    lists: {},            // listKey -> { enabled, itemHeight, buffer, firstIdx, lastIdx, total, items, renderItem, listEl, scrollHandler, measureDone }
+    // 兼容旧代码：当前激活的列表（用于旧版单列表模式）
+    currentKey: null,
+    get current() { return this.lists[this.currentKey] || { enabled: false }; },
+    set current(v) { if (this.currentKey) this.lists[this.currentKey] = v; },
   },
   // 虚拟滚动状态（章节看板：每列独立）
   kbVl: {
@@ -2958,25 +2953,42 @@ function syncChapterSelection() {
  * 设定库虚拟滚动（通用）
  * ============================================================ */
 
-/** 初始化设定库虚拟列表容器 */
-function initBibleVirtualList(listEl, items, renderItem) {
+/** 初始化设定库虚拟列表容器（多列表支持） */
+function initBibleVirtualList(listEl, items, renderItem, listKey) {
   const vl = S.bibleVl;
-  vl.enabled = items.length >= 100;  // 100 条以上启用虚拟滚动
-  vl.items = items;
-  vl.renderItem = renderItem;
-  vl.listEl = listEl;
-  vl.total = items.length;
-  vl.firstIdx = 0;
-  vl.lastIdx = -1;
-  vl.measureDone = false;
-  vl.itemHeight = 280;  // 预估高度，首帧后实测
+  vl.currentKey = listKey;
+  if (!vl.lists[listKey]) {
+    vl.lists[listKey] = {
+      enabled: false,
+      itemHeight: 280,      // 预估条目高度（px），首帧后实测修正
+      buffer: 2,            // 可视区上下各多渲染几条
+      firstIdx: 0,
+      lastIdx: -1,
+      total: 0,
+      items: [],            // 当前列表的数据项
+      renderItem: null,     // 渲染函数 (item, index) => HTMLElement
+      listEl: null,         // 当前的 entry-list 元素
+      scrollHandler: null,
+      measureDone: false,
+    };
+  }
+  const l = vl.lists[listKey];
+  l.enabled = items.length >= 100;  // 100 条以上启用虚拟滚动
+  l.items = items;
+  l.renderItem = renderItem;
+  l.listEl = listEl;
+  l.total = items.length;
+  l.firstIdx = 0;
+  l.lastIdx = -1;
+  l.measureDone = false;
+  l.itemHeight = 280;
 
-  if (!vl.enabled) {
+  if (!l.enabled) {
     // 普通渲染
     listEl.classList.remove('virtual');
-    if (vl.scrollHandler) {
-      listEl.removeEventListener('scroll', vl.scrollHandler);
-      vl.scrollHandler = null;
+    if (l.scrollHandler) {
+      listEl.removeEventListener('scroll', l.scrollHandler);
+      l.scrollHandler = null;
     }
     listEl.innerHTML = '';
     items.forEach((item, idx) => listEl.appendChild(renderItem(item, idx)));
@@ -2985,22 +2997,24 @@ function initBibleVirtualList(listEl, items, renderItem) {
 
   // 虚拟模式初始化
   listEl.classList.add('virtual');
-  vl.firstIdx = 0;
-  vl.lastIdx = -1;
-  vl.measureDone = false;
-  renderBibleVirtualList(listEl, 0);
+  l.firstIdx = 0;
+  l.lastIdx = -1;
+  l.measureDone = false;
+  renderBibleVirtualList(listEl, 0, listKey);
 
   // 挂滚动监听
-  if (!vl.scrollHandler) {
-    vl.scrollHandler = () => renderBibleVirtualList(listEl, listEl.scrollTop);
-    listEl.addEventListener('scroll', vl.scrollHandler, { passive: true });
+  if (!l.scrollHandler) {
+    l.scrollHandler = () => renderBibleVirtualList(listEl, listEl.scrollTop, listKey);
+    listEl.addEventListener('scroll', l.scrollHandler, { passive: true });
   }
 }
 
-/** 设定库虚拟滚动渲染 */
-function renderBibleVirtualList(listEl, scrollTop) {
+/** 设定库虚拟滚动渲染（多列表支持） */
+function renderBibleVirtualList(listEl, scrollTop, listKey) {
   const vl = S.bibleVl;
-  const { itemHeight, buffer, total, items, renderItem } = vl;
+  const l = vl.lists[listKey];
+  if (!l) return;
+  const { itemHeight, buffer, total, items, renderItem } = l;
   const clientH = listEl.clientHeight;
   if (clientH === 0) return;  // 容器未显示
 
@@ -3008,9 +3022,9 @@ function renderBibleVirtualList(listEl, scrollTop) {
   const visibleCount = Math.ceil(clientH / itemHeight);
   const last = Math.min(total - 1, first + visibleCount + buffer * 2 - 1);
 
-  if (vl.measureDone && first === vl.firstIdx && last === vl.lastIdx) return;
-  vl.firstIdx = first;
-  vl.lastIdx = last;
+  if (l.measureDone && first === l.firstIdx && last === l.lastIdx) return;
+  l.firstIdx = first;
+  l.lastIdx = last;
 
   let viewport = listEl.querySelector('.vl-viewport');
   if (!viewport) {
@@ -3032,16 +3046,16 @@ function renderBibleVirtualList(listEl, scrollTop) {
   viewport.appendChild(frag);
 
   // 首帧后实测条目高度并修正
-  if (!vl.measureDone) {
+  if (!l.measureDone) {
     const firstEntry = viewport.querySelector('.entry');
     if (firstEntry) {
       const h = firstEntry.getBoundingClientRect().height;
       if (h > 100 && h < 800) {
-        vl.itemHeight = h;
+        l.itemHeight = h;
         listEl.querySelector('.vl-spacer').style.height = `${total * h}px`;
         viewport.style.transform = `translateY(${first * h}px)`;
       }
-      vl.measureDone = true;
+      l.measureDone = true;
     }
   }
 }
@@ -7031,7 +7045,7 @@ function renderCharactersTab(host, n) {
   }
 
   // 虚拟列表：100 条以上启用
-  initBibleVirtualList(list, n.bible.characters, (c, i) => renderCharacterEntry(c, i, charIndex));
+  initBibleVirtualList(list, n.bible.characters, (c, i) => renderCharacterEntry(c, i, charIndex), 'characters');
 
   list.addEventListener('click', (e) => {
     const chapterBtn = e.target.closest('[data-chapter]');
@@ -7106,7 +7120,7 @@ function renderWorldTab(host, n) {
     list.innerHTML = '<p class="dim">还没有世界观条目。</p>';
     return;
   }
-  initBibleVirtualList(list, n.bible.world, (w, i) => renderWorldEntry(w, i));
+  initBibleVirtualList(list, n.bible.world, (w, i) => renderWorldEntry(w, i), 'world');
 
   $('#addWorld', host).onclick = () => {
     n.bible.world.push({ id: uid('w'), name: '新设定', category: '地理', desc: '', keywords: [] });
@@ -7375,7 +7389,7 @@ function renderThreadsTab(host, n) {
   const memCount = (n.chapters || []).filter((c) => c.memory).length;
   const filter = ['all', 'unresolved', 'foreshadowing'].includes(S.threadFilter) ? S.threadFilter : 'all';
   const visible = filter === 'all' ? threads : threads.filter((t) => t.kind === filter);
-  
+
   host.innerHTML = `
     <div class="bible-block">
       <h2>线索追踪
@@ -7395,29 +7409,31 @@ function renderThreadsTab(host, n) {
           ['foreshadowing', '伏笔', counts.foreshadowing],
         ].map(([kind, label, count]) => `<button data-tf="${kind}" class="${filter === kind ? 'on' : ''}">${label} ${count}</button>`).join('')}
       </div>` : ''}
-      <div class="thread-list">
-        ${visible.length ? visible.map(renderThreadEntry).join('') : `<div class="thread-empty">${total
-          ? '没有符合当前筛选的线索。'
-          : memCount
-            ? '章节记忆里还没有未决或伏笔记录。'
-            : '还没有章节记忆。先给已写章节批量补记忆，这里才会出现未决和伏笔。'}</div>`}
-      </div>
+      <div class="thread-list" id="threadList"></div>
       ${memCount > 0 && memCount < n.chapters.length ? `<p class="dim small thread-hint">还有 ${n.chapters.length - memCount} 章没有章节记忆，线索可能不完整。</p>` : ''}
     </div>`;
-  
+
   $$('#threadFilter button', host).forEach((btn) => {
     btn.onclick = () => {
       S.threadFilter = btn.dataset.tf;
       renderThreadsTab(host, n);
     };
   });
-  $$('.thread-row', host).forEach((row) => {
-    row.onclick = () => openChapterFromIndex(row.dataset.threadCh);
-  });
   $('#threadsBatch', host).onclick = () => {
     setView('studio');
     openBatchMemory();
   };
+
+  // 虚拟滚动：线索数量大时启用
+  const list = $('#threadList', host);
+  if (list) {
+    initBibleVirtualList(list, visible, (t, i) => renderThreadEntry(t, i), 'threads');
+    // 点击跳转
+    list.addEventListener('click', (e) => {
+      const row = e.target.closest('.thread-row');
+      if (row) openChapterFromIndex(row.dataset.threadCh);
+    });
+  }
 }
 
 /** 人物弧光追踪：基于章节记忆自动生成每个角色的情感/状态曲线 */
@@ -7446,9 +7462,10 @@ function renderArcsTab(host, n) {
     }
   }
 
-  const arcsHtml = [...characters.values()].map((char) => {
+  // 准备弧光数据项（每项是一个角色的完整弧光卡片）
+  const arcItems = [...characters.values()].map((char) => {
     const appearances = appearancesForCharacter(char, index);
-    if (!appearances.length) return '';
+    if (!appearances.length) return null;
 
     const points = appearances.map((ch, idx) => {
       const mem = ch.memory || {};
@@ -7469,44 +7486,63 @@ function renderArcsTab(host, n) {
     const totalWords = points.reduce((s, p) => s + p.words, 0);
     const latestState = points[points.length - 1]?.state || '无记录';
 
-    return `
-      <div class="arc-card" data-char-id="${char.id}">
-        <div class="arc-head">
-          <span class="arc-name">${esc(char.name)}</span>
-          <span class="arc-count">${points.length} 章 · ${totalWords} 字</span>
-          <button class="btn btn-sm btn-text arc-goto" data-ch="${points[points.length - 1].chapterId}">跳到最新</button>
-        </div>
-        <div class="arc-timeline">
-          ${points.map((p) => `
-            <div class="arc-point" data-ch="${p.chapterId}">
-              <span class="arc-ch">第 ${p.chapter} 章</span>
-              <span class="arc-title">${esc(p.title || '未命名')}</span>
-              ${p.state ? `<span class="arc-state">${esc(p.state)}</span>` : ''}
-              ${p.events ? `<span class="arc-events dim">${esc(p.events)}</span>` : ''}
-            </div>
-          `).join('')}
-        </div>
-        <div class="arc-summary">
-          <span class="arc-label">最新状态：</span>
-          <span class="arc-state">${esc(latestState)}</span>
-        </div>
+    return {
+      char,
+      points,
+      totalWords,
+      latestState,
+    };
+  }).filter(Boolean);
+
+  // 单个弧光卡片渲染函数（供虚拟列表复用）
+  function renderArcEntry(item, idx) {
+    const { char, points, totalWords, latestState } = item;
+    const div = document.createElement('div');
+    div.className = 'arc-card';
+    div.dataset.charId = char.id;
+    div.innerHTML = `
+      <div class="arc-head">
+        <span class="arc-name">${esc(char.name)}</span>
+        <span class="arc-count">${points.length} 章 · ${totalWords} 字</span>
+        <button class="btn btn-sm btn-text arc-goto" data-ch="${points[points.length - 1].chapterId}">跳到最新</button>
+      </div>
+      <div class="arc-timeline">
+        ${points.map((p) => `
+          <div class="arc-point" data-ch="${p.chapterId}">
+            <span class="arc-ch">第 ${p.chapter} 章</span>
+            <span class="arc-title">${esc(p.title || '未命名')}</span>
+            ${p.state ? `<span class="arc-state">${esc(p.state)}</span>` : ''}
+            ${p.events ? `<span class="arc-events dim">${esc(p.events)}</span>` : ''}
+          </div>
+        `).join('')}
+      </div>
+      <div class="arc-summary">
+        <span class="arc-label">最新状态：</span>
+        <span class="arc-state">${esc(latestState)}</span>
       </div>
     `;
-  }).filter(Boolean).join('');
+    return div;
+  }
 
   host.innerHTML = `
     <div class="bible-block">
       <h2>人物弧光</h2>
       <p class="dim small">基于章节记忆自动提取每个角色的出场轨迹、状态变化与未决线索。点章次号可跳转正文。</p>
-      <div class="arcs-list">${arcsHtml}</div>
+      <div class="arcs-list" id="arcList"></div>
     </div>`;
 
-  $$('.arc-goto', host).forEach((btn) => {
-    btn.onclick = () => openChapterFromIndex(btn.dataset.ch);
-  });
-  $$('.arc-point', host).forEach((pt) => {
-    pt.onclick = () => openChapterFromIndex(pt.dataset.ch);
-  });
+  // 虚拟滚动：角色数量大时启用
+  const list = $('#arcList', host);
+  if (list) {
+    initBibleVirtualList(list, arcItems, renderArcEntry, 'arcs');
+    // 点击跳转（事件委托）
+    list.addEventListener('click', (e) => {
+      const goto = e.target.closest('.arc-goto');
+      if (goto) return openChapterFromIndex(goto.dataset.ch);
+      const point = e.target.closest('.arc-point');
+      if (point) openChapterFromIndex(point.dataset.ch);
+    });
+  }
 }
 
 /** Save the Cat 风格的故事节拍表 */
@@ -7627,7 +7663,7 @@ function renderTimelineTab(host, n) {
     list.innerHTML = '<p class="dim">还没有时间节点。</p>';
     return;
   }
-  initBibleVirtualList(list, n.bible.timeline, (t, i) => renderTimelineEntry(t, i));
+  initBibleVirtualList(list, n.bible.timeline, (t, i) => renderTimelineEntry(t, i), 'timeline');
 
   $('#addTl', host).onclick = () => {
     n.bible.timeline.push({ id: uid('t'), time: '', title: '', desc: '' });
