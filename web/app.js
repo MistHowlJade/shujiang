@@ -1,6 +1,6 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
-import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo } from './lib/util.js';
+import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
 import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads } from './lib/data.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -9,6 +9,7 @@ import { diffProse, diffHtml, diffSideHtml } from './lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from './lib/goal.js';
 import { buildSubmitCheck, submitCheckHtml } from './lib/submit.js';
 import { PAPER_DEFAULTS, normalizePaper, nextPaperSize, paperVars, paperLabel } from './lib/paper.js';
+import { importBibleMarkdown } from './lib/markdown.js';
 
 /* 阅读进度只存在本浏览器，不写作品 JSON，也不走服务端 */
 const READER_PROGRESS_KEY = 'shu.reader.progress.v1';
@@ -79,7 +80,6 @@ function readerFontSize() {
 function saveReaderFontSize(size) {
   try { localStorage.setItem(READER_SIZE_KEY, String(size)); } catch {}
 }
-const uid = (p = 'x') => `${p}_${Math.random().toString(36).slice(2, 10)}`;
 
 /** 极简 Markdown 渲染（标题 / 加粗 / 列表 / 行内代码），全部转义后拼装，安全 */
 function mdLite(text) {
@@ -6243,10 +6243,9 @@ function importBible(jsonText) {
   }
 }
 
+/** 解析导出的 Markdown，还原为小说数据结构（委托给 lib/markdown.js） */
 function importBibleMarkdown(mdText) {
-  // 简单的 Markdown 导入：只支持提取基本字段，不完整
-  // 这里只做简单演示，实际建议用 JSON 导入
-  throw new Error('Markdown 导入暂不支持完整还原，请使用 JSON 格式');
+  return importBibleMarkdown(mdText);
 }
 
 async function applyBibleData(data, opts = {}) {

@@ -10,6 +10,9 @@ export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const ico = (name, cls = '') => `<svg class="ico ${cls}"><use href="#i-${name}" /></svg>`;
 
+/** 生成简短唯一 ID：前缀 + 随机字符串 */
+export const uid = (p = 'x') => `${p}_${Math.random().toString(36).slice(2, 10)}`;
+
 export function debounce(fn, ms) {
   let t;
   const d = (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };

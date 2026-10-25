@@ -19,6 +19,7 @@
 import zlib from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
+import { importBibleMarkdown } from '../web/lib/markdown.js';
 
 const BASE = process.env.SHU_BASE || 'http://127.0.0.1:8848';
 
@@ -325,6 +326,17 @@ async function main() {
   const cid = ch.chapter?.id;
   check('建章节成功', !!cid);
 
+  // Markdown 往返测试：导出 -> 解析 -> 验证关键字段（在章节被修改前进行）
+  const md = await req('GET', `${BASE}/api/novels/${id}/export?format=md`);
+  check('Markdown 导出 200', md.status === 200 && md.buf.length > 50);
+  const mdText = md.buf.toString('utf8');
+  const imported = importBibleMarkdown(mdText);
+  check('Markdown 导入：标题还原', imported.title === '回归测试' || imported.title.includes('回归'));
+  check('Markdown 导入：作者还原', imported.author === '测试');
+  check('Markdown 导入：章节数一致', imported.chapters.length === 1);
+  check('Markdown 导入：首章标题还原', imported.chapters[0].title === '第一章');
+  check('Markdown 导入：正文内容还原', imported.chapters[0].content.includes('正文'));
+
   const ctx = await post(`${BASE}/api/context`, {
     task: 'chapter', novelId: id, chapterId: cid,
     payload: { targetWords: 888, instruction: '要求' },
@@ -419,8 +431,6 @@ async function main() {
   const restoreRes = await post(`${BASE}/api/novels/${id}/restore`, { ts: snaps[0].ts });
   check('恢复版本成功', !!restoreRes.novel);
 
-  const md = await req('GET', `${BASE}/api/novels/${id}/export?format=md`);
-  check('Markdown 导出 200', md.status === 200 && md.buf.length > 50);
   const txt = await req('GET', `${BASE}/api/novels/${id}/export?format=txt`);
   check('TXT 导出 200', txt.status === 200 && txt.buf.length > 50);
   const epub = await req('GET', `${BASE}/api/novels/${id}/export?format=epub`);

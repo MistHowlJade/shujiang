@@ -24,6 +24,7 @@ const FILES = [
   'web/lib/submit.js',
   'web/lib/paper.js',
   'web/lib/consistency.js',
+  'web/lib/markdown.js',
 ];
 
 const all = FILES.map((f) => [f.replace(/\\/g, '/'), fs.readFileSync(f, 'utf8')]);
