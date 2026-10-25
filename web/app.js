@@ -8009,6 +8009,15 @@ function syncPaperControls() {
   $$('#paperLh button').forEach((b) => b.classList.toggle('on', Number(b.dataset.lh) === paperPref.lh));
   $$('#paperFont button').forEach((b) => b.classList.toggle('on', b.dataset.font === paperPref.font));
   $('#paperHint').textContent = paperLabel(paperPref);
+  updatePaperSample();
+}
+
+/** 更新稿纸样本预览：同步字号、行距、字体 */
+function updatePaperSample() {
+  const sample = $('#paperSample');
+  if (!sample) return;
+  const vars = paperVars(paperPref);
+  for (const [k, v] of Object.entries(vars)) sample.style.setProperty(k, v);
 }
 
 /** 快捷放大 / 缩小；到头给个提示，别让人以为坏了 */
