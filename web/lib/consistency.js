@@ -10,6 +10,7 @@ export const CONSISTENCY_KINDS = {
   setting: '设定冲突',      // 功法/境界/地理/物品/设定冲突
   timeline: '时间线',       // 事件顺序/时间跨度矛盾
   character: '人物行为',    // 人物行为/性格/能力不符设定
+  name: '人物姓名',         // 姓名笔误 / 设定库近似重名
   voice: '口吻/语风',       // 语感/叙述口吻差异
 };
 
@@ -623,6 +624,197 @@ function checkCharacterConsistency(novel) {
   return issues;
 }
 
+/* ============================================================
+ * 人物姓名笔误检测
+ * ------------------------------------------------------------
+ * 设定库里的姓名是权威写法。正文里如果出现「只差一个字」的写法，
+ * 而且正好落在「说道 / 点了点头 / 的 + 身体部位」这类只有人名才会
+ * 出现的位置，就提示可能是笔误。只做字符串比较，不调用模型。
+ * ============================================================ */
+
+// 姓名后面跟着这些内容，基本可以确定是在指人，而不是「林中」「江上」
+// 这类普通词语。单字「道 / 说 / 问」必须紧跟标点，避免把「林中道路」
+// 误当成「林中道」。
+const NAME_CONTEXT_AFTER = [
+  /^(?:说道|问道|答道|喊道|叫道|骂道|喝道|笑道|叹道|低声道|沉声道|冷笑道|苦笑道|冷哼道|开口道)/,
+  /^[说道问答喊叫骂喝笑叹](?=[：:，,。！？!?、“”「」"'…\s]|$)/,
+  /^(?:说|问|答|喊|叫|笑|叹)(?:了|着)/,
+  /^(?:点了点头|摇了摇头|皱了皱眉|抬了抬头|低了低头|转过身(?:来)?|回过头(?:来)?|站起身来|坐了下来|伸出手|沉默(?:片刻|了一会)?|愣了(?:一下)?|怔了(?:一下)?|冷笑|苦笑|冷哼|点头|摇头|皱眉|抬头|低头|转身|回头|看向|望向|看着|看了|盯着|打量|站起|坐下|伸手)(?:道|了|着)?/,
+  /^的(?:手|眼|眼睛|脸|脸上|声音|目光|心|心里|背影|肩膀|嘴角|眉头|名字|身份|语气|神色|眼中|手里|剑|刀)/,
+  /^(?:一眼|一下|一声|一番)/,
+  /^[：:]/,
+];
+
+function isNameContext(text, start, end) {
+  const after = text.slice(end, end + 10);
+  if (!after) return false;
+  return NAME_CONTEXT_AFTER.some((re) => re.test(after));
+}
+
+function isHanName(name) {
+  return /^[\u4e00-\u9fa5]{2,4}$/.test(name);
+}
+
+// 章节标题本身可能已经带「第 1 章」，定位文字里就不再重复一遍
+function nameChapterLoc(ch) {
+  const no = Number(ch.no) || 0;
+  const title = String(ch.title || '').trim();
+  if (!title) return `第 ${no} 章`;
+  if (/^第\s*[0-9一二三四五六七八九十百千零两]+\s*章/.test(title)) return title;
+  return `第 ${no} 章 ${title}`;
+}
+
+// 两个等长名字是否只差一个字
+function oneCharDiff(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) {
+      diff += 1;
+      if (diff > 1) return false;
+    }
+  }
+  return diff === 1;
+}
+
+function checkNameTypos(novel) {
+  const issues = [];
+  const bible = novel?.bible || {};
+  const characters = Array.isArray(bible.characters) ? bible.characters : [];
+  if (!characters.length) return issues;
+
+  // 设定库里的正式姓名（同一姓名重复出现只算一次，交给设定冲突去报）
+  const names = [];
+  const seen = new Set();
+  for (const c of characters) {
+    const name = String(c?.name || '').trim();
+    if (!isHanName(name) || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  if (!names.length) return issues;
+
+  // 1. 设定库里只差一个字的两个人物：先确认是不是同一张卡写了两遍
+  for (let i = 0; i < names.length; i += 1) {
+    for (let j = i + 1; j < names.length; j += 1) {
+      if (!oneCharDiff(names[i], names[j])) continue;
+      issues.push({
+        kind: 'name',
+        type: 'name_duplicate',
+        message: `人物卡里「${names[i]}」与「${names[j]}」只差一个字，确认不是同一个人或姓名笔误`,
+        loc: '设定库 · 人物',
+        fingerprint: `consistency|name|name_duplicate|${names[i]}|${names[j]}`,
+        severity: 'hint',
+      });
+    }
+  }
+
+  // 2. 正文里的近似写法。按姓名长度建「通配签名」索引：
+  //    「林昭」会生成「林□」「□昭」，正文里的「林招」命中「林□」。
+  //    二字名只查名不查姓（□昭 不建），因为「林中」「江上」这类
+  //    普通词太多，改姓的笔误交给更长的名字去兜。
+  const byLength = new Map();
+  for (const name of names) {
+    let bySig = byLength.get(name.length);
+    if (!bySig) {
+      bySig = new Map();
+      byLength.set(name.length, bySig);
+    }
+    for (let p = 0; p < name.length; p += 1) {
+      if (name.length === 2 && p === 0) continue;
+      const sig = `${name.slice(0, p)}\u0000${name.slice(p + 1)}`;
+      let arr = bySig.get(sig);
+      if (!arr) {
+        arr = [];
+        bySig.set(sig, arr);
+      }
+      arr.push(name);
+    }
+  }
+
+  // 设定库里其它实体的名字不能当成笔误：门派、地点、功法、物品都可能
+  // 和人物名只差一个字（比如人物「林昭」、宗门「林照宗」）。
+  const knownNames = new Set(seen);
+  const addKnown = (value) => {
+    const n = String(value || '').trim();
+    if (n) knownNames.add(n);
+  };
+  for (const c of characters) {
+    const aliases = [
+      ...(Array.isArray(c.alias) ? c.alias : c.alias ? [c.alias] : []),
+      ...(Array.isArray(c.aliases) ? c.aliases : c.aliases ? [c.aliases] : []),
+      ...(Array.isArray(c.keywords) ? c.keywords : c.keywords ? [c.keywords] : []),
+    ];
+    for (const alias of aliases) addKnown(alias);
+  }
+  for (const key of ['world', 'skills', 'items', 'organizations', 'locations']) {
+    for (const item of bible[key] || []) addKnown(item?.name);
+  }
+
+  const hits = new Map(); // canonical + 候选 -> 统计
+  for (const ch of novel?.chapters || []) {
+    const text = String(ch.content || '');
+    if (!text) continue;
+    for (const [len, bySig] of byLength) {
+      if (text.length < len) continue;
+      for (let i = 0; i + len <= text.length; i += 1) {
+        const window = text.slice(i, i + len);
+        if (!isHanName(window)) continue;
+        if (knownNames.has(window)) continue;
+
+        let matched = null;
+        for (let p = 0; p < len; p += 1) {
+          if (len === 2 && p === 0) continue;
+          const sig = `${window.slice(0, p)}\u0000${window.slice(p + 1)}`;
+          const arr = bySig.get(sig);
+          if (arr) {
+            matched = arr;
+            break;
+          }
+        }
+        if (!matched) continue;
+        if (!isNameContext(text, i, i + len)) continue;
+
+        for (const canonical of matched) {
+          const key = `${canonical}\u0000${window}`;
+          let hit = hits.get(key);
+          if (!hit) {
+            hit = { canonical, candidate: window, count: 0, chapters: new Map(), sample: '' };
+            hits.set(key, hit);
+          }
+          hit.count += 1;
+          if (!hit.chapters.has(ch.id)) {
+            hit.chapters.set(ch.id, { id: ch.id, no: Number(ch.no) || 0, title: ch.title || '' });
+          }
+          if (!hit.sample) {
+            const from = Math.max(0, i - 12);
+            const to = Math.min(text.length, i + len + 12);
+            hit.sample = text.slice(from, to).replace(/\s+/g, ' ').trim();
+          }
+        }
+      }
+    }
+  }
+
+  for (const hit of hits.values()) {
+    const chapters = [...hit.chapters.values()].sort((a, b) => a.no - b.no);
+    const first = chapters[0];
+    const nos = chapters.map((c) => c.no).filter(Boolean);
+    const noText = nos.slice(0, 4).join('、') + (nos.length > 4 ? ' 等' : '');
+    issues.push({
+      kind: 'name',
+      type: 'name_typo',
+      message: `疑似姓名笔误：「${hit.candidate}」应为「${hit.canonical}」（${hit.count} 次，第 ${noText} 章）`,
+      loc: `首次出现：${nameChapterLoc(first)} · 上下文：…${hit.sample}…`,
+      chapterNo: first.no,
+      fingerprint: `consistency|name|name_typo|${hit.canonical}|${hit.candidate}`,
+      severity: 'hint',
+    });
+  }
+
+  return issues;
+}
+
 // 辅助函数：转义正则特殊字符
 function escapeRegExp(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -926,11 +1118,13 @@ export function scanConsistency(novel, scope = 'book', currentChapterId = null) 
   const timelineIssues = checkTimelineConflicts(novel);
   // 人物行为（全书范围）
   const charIssues = checkCharacterConsistency(novel);
+  // 人物姓名笔误（全书范围）
+  const nameIssues = checkNameTypos(novel);
   // 口吻/语风（仅全书范围有意义）
   const voiceIssues = scope === 'book' ? checkVoiceConsistency(novel) : [];
 
-  const allIssues = [...settingIssues, ...timelineIssues, ...charIssues, ...voiceIssues];
-  allIssues.sort((a, b) => (a.chapterNo || 0) - (b.chapterNo || 0) || a.start - b.start);
+  const allIssues = [...settingIssues, ...timelineIssues, ...charIssues, ...nameIssues, ...voiceIssues];
+  allIssues.sort((a, b) => (a.chapterNo || 0) - (b.chapterNo || 0) || (a.start || 0) - (b.start || 0));
 
   const issueKinds = new Set(allIssues.map(i => i.kind)).size;
 
@@ -943,6 +1137,7 @@ export function scanConsistency(novel, scope = 'book', currentChapterId = null) 
       setting: settingIssues.length,
       timeline: timelineIssues.length,
       character: charIssues.length,
+      name: nameIssues.length,
       voice: voiceIssues.length,
     },
   };
@@ -962,6 +1157,7 @@ export function applyConsistencyIgnored(report, ignored = []) {
     setting: after.filter(i => i.kind === 'setting').length,
     timeline: after.filter(i => i.kind === 'timeline').length,
     character: after.filter(i => i.kind === 'character').length,
+    name: after.filter(i => i.kind === 'name').length,
     voice: after.filter(i => i.kind === 'voice').length,
   };
   out.issueKinds = new Set(after.map(i => i.kind)).size;
@@ -990,7 +1186,7 @@ export function consistencyMarkdown(r) {
     byKind[i.kind].push(i);
   }
 
-  const kindLabels = { setting: '设定冲突', timeline: '时间线', character: '人物行为', voice: '口吻/语风' };
+  const kindLabels = { setting: '设定冲突', timeline: '时间线', character: '人物行为', name: '人物姓名', voice: '口吻/语风' };
 
   for (const [kind, list] of Object.entries(byKind)) {
     push(`## ${kindLabels[kind] || kind} (${list.length})`);

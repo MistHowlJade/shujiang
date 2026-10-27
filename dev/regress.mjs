@@ -404,7 +404,7 @@ async function main() {
   // 人物行为一致性
   await put(`${BASE}/api/novels/${id}/chapters/${cid}`, {
     title: '一致性测试章',
-    content: '张三不会用剑，李四从未见过这招。王五做不到筑基期的功法。这是一个关于修仙界弱肉强食的故事。张三本是御剑宗的天才弟子，却在一次秘境探险中遭遇背叛，丹田被废，跌落尘埃。他不甘心，发誓要重回巅峰，向那些曾经看不起他的人证明：真正的强者，不是靠天赋，而是靠意志。',
+    content: '张三不会用剑，李四从未见过这招。王五做不到筑基期的功法。这是一个关于修仙界弱肉强食的故事。张叁道：“我是谁？”张三本是御剑宗的天才弟子，却在一次秘境探险中遭遇背叛，丹田被废，跌落尘埃。他不甘心，发誓要重回巅峰，向那些曾经看不起他的人证明：真正的强者，不是靠天赋，而是靠意志。',
     stage: 'draft',
     outline: { scene: '测试', characters: '张三,李四,王五', summary: '测试一致性' }
   });
@@ -443,6 +443,10 @@ async function main() {
 
   // 语风一致性新增检测项（现在有3章且文风差异巨大，应能触发多种异常）
   check('一致性检查：词汇丰富度异常被检出', ccReport.byKind.voice > 0);
+  check('一致性检查：姓名笔误被检出', ccReport.byKind.name > 0, `name=${ccReport.byKind.name}`);
+  await put(`${BASE}/api/novels/${id}`, { meta: { consistencyIgnored: [{ key: 'consistency|name|test', label: '测试', ts: 1 }] } });
+  const savedIgnored = (await get(`${BASE}/api/novels/${id}`)).novel.meta?.consistencyIgnored;
+  check('一致性忽略清单能持久化', Array.isArray(savedIgnored) && savedIgnored[0]?.key === 'consistency|name|test', JSON.stringify(savedIgnored));
 
   // ---------------------------------------------------------------
   group('片段导入（11 个板块）');

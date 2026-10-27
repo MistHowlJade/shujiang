@@ -5532,8 +5532,59 @@ function renderIssues(text) {
 
 function renderConsistencyReport(report) {
   const box = $('#checkBox');
+  const ignoredList = Array.isArray(S.novel?.meta?.consistencyIgnored) ? S.novel.meta.consistencyIgnored : [];
+  const ignoredHtml = ignoredList.length ? `
+    <div class="proof-ignored" id="consistencyIgnoredBox">
+      <div class="proof-ignored-head">
+        <span>已忽略 ${ignoredList.length} 条</span>
+        <span style="flex:1"></span>
+        <button type="button" class="btn btn-sm btn-text" id="consistencyRestoreAll">全部恢复</button>
+      </div>
+      <div class="proof-ignored-list">
+        ${ignoredList.slice().reverse().map((x) => {
+          const key = typeof x === 'string' ? x : x?.key || '';
+          const label = typeof x === 'string' ? x : x?.label || key;
+          return `<div class="proof-ignored-row">
+            <span class="proof-main"><span class="proof-msg">${esc(label)}</span></span>
+            <button type="button" class="btn btn-sm btn-text" data-consistency-restore="${esc(key)}">恢复</button>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : '';
+
+  const restoreIgnored = async (keys) => {
+    const remove = new Set(keys);
+    const list = (S.novel.meta?.consistencyIgnored || []).filter((x) => {
+      const key = typeof x === 'string' ? x : x?.key;
+      return key && !remove.has(key);
+    });
+    try {
+      await api.put(`/api/novels/${S.novel.id}`, { meta: { consistencyIgnored: list } });
+    } catch (err) {
+      toast(err.message, 'err');
+      return;
+    }
+    S.novel.meta = { ...(S.novel.meta || {}), consistencyIgnored: list };
+    toast(keys.length > 1 ? '已恢复全部忽略项' : '已恢复这一条', 'ok');
+    $('#consistencyBtn').click();
+  };
+  const bindConsistencyIgnored = (host) => {
+    host.querySelectorAll('[data-consistency-restore]').forEach((btn) => {
+      btn.onclick = () => restoreIgnored([btn.dataset.consistencyRestore]);
+    });
+    const all = host.querySelector('#consistencyRestoreAll');
+    if (all) {
+      all.onclick = () => restoreIgnored(
+        (S.novel.meta?.consistencyIgnored || [])
+          .map((x) => (typeof x === 'string' ? x : x?.key))
+          .filter(Boolean),
+      );
+    }
+  };
+
   if (!report.issues?.length) {
-    box.innerHTML = '<div class="status-ok">✓ 一致性检查通过，未发现明显矛盾。</div>';
+    box.innerHTML = `<div class="status-ok">✓ 一致性检查通过，未发现明显矛盾。</div>${ignoredHtml}`;
+    bindConsistencyIgnored(box);
     return;
   }
   const byKind = {};
@@ -5541,11 +5592,18 @@ function renderConsistencyReport(report) {
     if (!byKind[it.kind]) byKind[it.kind] = [];
     byKind[it.kind].push(it);
   }
-  const kindLabels = { setting: '设定冲突', timeline: '时间线', character: '人物行为', voice: '口吻/语风' };
+  const kindMeta = {
+    setting: { icon: '🛡️', label: '设定冲突' },
+    timeline: { icon: '🕰️', label: '时间线矛盾' },
+    character: { icon: '👤', label: '人物行为异常' },
+    name: { icon: '✍️', label: '人物姓名笔误' },
+    voice: { icon: '🎙️', label: '口吻/语风差异' },
+  };
   const sevClass = (s) => s === 'hint' ? 'hint' : '';
-  let html = '<div class="consistency-report">';
+  let html = ignoredHtml + '<div class="consistency-report">';
   for (const [kind, list] of Object.entries(byKind)) {
-    html += `<div class="consistency-kind"><h4>${kind === 'setting' ? '🛡️' : kind === 'timeline' ? '🕰️' : kind === 'character' ? '👤' : '🎙️'} ${kind === 'setting' ? '设定冲突' : kind === 'timeline' ? '时间线矛盾' : kind === 'character' ? '人物行为异常' : '口吻/语风差异'} (${list.length})</h4>`;
+    const meta = kindMeta[kind] || { icon: '•', label: kind };
+    html += `<div class="consistency-kind"><h4>${meta.icon} ${meta.label} (${list.length})</h4>`;
     for (const it of list) {
       const sev = sevClass(it.severity);
       const fingerprint = it.fingerprint || consistencyKey(it.kind, it.id);
@@ -5564,6 +5622,7 @@ function renderConsistencyReport(report) {
   }
   html += '</div>';
   box.innerHTML = html;
+  bindConsistencyIgnored(box);
   // 绑定忽略按钮
   box.querySelectorAll('.ignore-btn').forEach(btn => {
     btn.onclick = async () => {
@@ -5572,8 +5631,13 @@ function renderConsistencyReport(report) {
       const label = btn.dataset.label;
       const ign = (S.novel.meta?.consistencyIgnored || []).slice();
       ign.push({ key: fp, label: `${kind}: ${label}`, ts: Date.now() });
-      await api.send(`/api/novels/${S.novel.id}`, { meta: { consistencyIgnored: ign } });
-      S.novel.meta.consistencyIgnored = ign;
+      try {
+        await api.put(`/api/novels/${S.novel.id}`, { meta: { consistencyIgnored: ign } });
+      } catch (err) {
+        toast(err.message, 'err');
+        return;
+      }
+      S.novel.meta = { ...(S.novel.meta || {}), consistencyIgnored: ign };
       toast('已加入忽略清单', 'ok');
       // 重新渲染
       const scope = $('#checkScope').value;

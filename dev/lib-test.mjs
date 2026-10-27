@@ -921,5 +921,50 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('一致性检查：Markdown 报告生成', consistencyMarkdown({ title: '测试', issues: report.issues, byKind: { setting: 1, timeline: 0, character: 0, voice: 0 } }).includes('一致性检查报告') && consistencyMarkdown({ title: '测试', issues: report.issues, byKind: { setting: 1, timeline: 0, character: 0, voice: 0 } }).includes('设定冲突'), `md=...`);
 }
 
+// ---------------------------------------------------------------
+// 一致性检查：人物姓名笔误
+{
+  const novel = {
+    title: '姓名笔误测试',
+    bible: {
+      characters: [
+        { name: '林昭', role: '主角' },
+        { name: '沈青梧', role: '配角' },
+      ],
+      world: [{ name: '林照' }],
+      skills: [],
+      items: [],
+      organizations: [],
+      locations: [],
+    },
+    chapters: [
+      { id: 'n1', no: 1, title: '初见', content: '林昭站在门前。林中传来鸟鸣。他走进林中道路。林昭点了点头。林照说道：“宗门规矩。”' },
+      { id: 'n2', no: 2, title: '夜谈', content: '林招道：“你来了。”他看向林招的眼睛。沈青梧没有说话。' },
+      { id: 'n3', no: 3, title: '第 3 章 误写', content: '沈青悟转过身来，低声道：“走吧。”' },
+    ],
+  };
+  const r = scanConsistency(novel, 'book');
+  const typos = r.issues.filter((i) => i.type === 'name_typo');
+  check('一致性检查：姓名笔误被检出', typos.some((i) => i.message.includes('林招') && i.message.includes('林昭')), JSON.stringify(typos.map((i) => i.message)));
+  check('一致性检查：三字姓名笔误被检出', typos.some((i) => i.message.includes('沈青悟') && i.message.includes('沈青梧')), JSON.stringify(typos.map((i) => i.message)));
+  check('一致性检查：章节标题带章号时不重复', typos.some((i) => i.message.includes('沈青悟') && i.loc?.startsWith('首次出现：第 3 章 误写')), JSON.stringify(typos.map((i) => i.loc)));
+  check('一致性检查：姓名笔误统计次数与章节', typos.some((i) => i.message.includes('2 次') && i.loc?.includes('第 2 章')), JSON.stringify(typos.map((i) => ({ message: i.message, loc: i.loc }))));
+  check('一致性检查：普通词语不误报为姓名笔误', !typos.some((i) => i.message.includes('林中')), JSON.stringify(typos.map((i) => i.message)));
+  check('一致性检查：设定库实体名不误报为姓名笔误', !typos.some((i) => i.message.includes('林照')), JSON.stringify(typos.map((i) => i.message)));
+  check('一致性检查：姓名类按 kind 统计', r.byKind.name === typos.length && typos.length >= 2, `byKind=${r.byKind.name} typos=${typos.length}`);
+
+  // 设定库里只差一个字的两个人物：提示确认是不是同一张卡
+  const dupNovel = {
+    title: '近似重名',
+    bible: {
+      characters: [{ name: '林昭' }, { name: '林招' }, { name: '沈青梧' }],
+      world: [],
+    },
+    chapters: [{ id: 'd1', no: 1, title: '一', content: '林昭与林招站在门前。' }],
+  };
+  const dupReport = scanConsistency(dupNovel, 'book');
+  check('一致性检查：设定库近似重名被提示', dupReport.issues.some((i) => i.type === 'name_duplicate'), JSON.stringify(dupReport.issues.map((i) => i.message)));
+}
+
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
 process.exit(fail ? 1 : 0);
