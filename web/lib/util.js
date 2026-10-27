@@ -19,13 +19,41 @@ export function debounce(fn, ms) {
   d.cancel = () => { clearTimeout(t); t = null; };
   return d;
 }
-export function toast(msg, kind = '') {
+/**
+ * 提示条。action 可选：{ label, onClick }，带动作的提示条会多留几秒。
+ * 返回移除函数，调用方可以提前收起。
+ */
+export function toast(msg, kind = '', action = null) {
   const box = document.createElement('div');
   box.className = `toast ${kind}`;
-  box.textContent = msg;
+  const text = document.createElement('span');
+  text.className = 'toast-msg';
+  text.textContent = msg;
+  box.appendChild(text);
+  let hideTimer = 0;
+  let removeTimer = 0;
+  const remove = () => {
+    clearTimeout(hideTimer);
+    clearTimeout(removeTimer);
+    box.remove();
+  };
+  const hasAction = action && action.label && typeof action.onClick === 'function';
+  if (hasAction) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action';
+    btn.textContent = action.label;
+    btn.onclick = () => {
+      remove();
+      try { action.onClick(); } catch (err) { console.error(err); }
+    };
+    box.appendChild(btn);
+  }
   $('#toastWrap').appendChild(box);
-  setTimeout(() => { box.style.opacity = '0'; box.style.transition = '.3s'; }, 2600);
-  setTimeout(() => box.remove(), 3000);
+  const life = hasAction ? 8000 : 2600;
+  hideTimer = setTimeout(() => { box.style.opacity = '0'; box.style.transition = '.3s'; }, life);
+  removeTimer = setTimeout(() => box.remove(), life + 400);
+  return remove;
 }
 export const countWords = (t) => String(t || '').replace(/\s+/g, '').length;
 

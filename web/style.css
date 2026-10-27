@@ -2114,6 +2114,13 @@ kbd {
 .toast::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
 .toast.ok::before { background: var(--success); }
 .toast.err::before { background: var(--danger); }
+.toast-msg { min-width: 0; }
+.toast-action {
+  flex: 0 0 auto; padding: 2px 5px; border: 0; border-radius: var(--r-xs);
+  background: transparent; color: var(--accent-hover);
+  font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer;
+}
+.toast-action:hover { background: var(--surface-3); }
 @keyframes toastIn { from { opacity: 0; transform: translateX(14px); } }
 
 /* ==========================================================================

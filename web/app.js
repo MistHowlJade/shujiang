@@ -750,14 +750,22 @@ $('#emptyNewBtn').addEventListener('click', openNewNovelModal);
 async function openNovel(id, opts = {}) {
   // 换作品前先把当前作品的改动落盘 —— 一旦换过去，旧作品的内存内容就被替换了，
   // 没落盘的部分谁也救不回来。落不下去时明确问一句，别默默丢。
-  if (S.novel && S.novel.id !== id && S.unsaved.size) {
-    const ok = await flushSave();
-    if (!ok) {
-      const go = confirm(`《${S.novel.title}》还有 ${S.unsaved.size} 章没能保存（${S.saveErr || '未知原因'}）。\n继续打开别的作品会丢掉这些改动。仍要继续吗？`);
+  if (S.novel && S.novel.id !== id) {
+    // 设定库 / 大纲的防抖保存也要先落盘：它记的是旧作品的对象，不能等切完再发
+    const partsOk = await saveNovelPart.flush();
+    if (!partsOk) {
+      const go = confirm(`《${S.novel.title}》的设定或大纲还有改动没能保存。\n继续打开别的作品会丢掉这些改动。仍要继续吗？`);
       if (!go) return;
-      S.unsaved.clear();
-      S.dirty = false;
-      refreshSavePill();
+    }
+    if (S.unsaved.size) {
+      const ok = await flushSave();
+      if (!ok) {
+        const go = confirm(`《${S.novel.title}》还有 ${S.unsaved.size} 章没能保存（${S.saveErr || '未知原因'}）。\n继续打开别的作品会丢掉这些改动。仍要继续吗？`);
+        if (!go) return;
+        S.unsaved.clear();
+        S.dirty = false;
+        refreshSavePill();
+      }
     }
   }
   const { novel } = await api.get(`/api/novels/${id}`);
@@ -6681,17 +6689,87 @@ $('#bibleImportBtn')?.addEventListener('click', () => {
   });
 });
 
-const saveNovelPart = debounce(async (part, msg) => {
-  if (!S.novel) return;
+/* 设定库 / 作品字段的保存：防抖 700ms，但请求必须认准「这次是哪个作品」。
+ * 以前在回调里才读 S.novel.id，切作品时会把旧作品的设定写进新作品。 */
+let novelSaveTimer = 0;
+let pendingNovelSave = null;
+let novelSaveInFlight = null;
+
+async function putNovelPart(novelId, part, msg) {
   setSave('saving');
   try {
-    const { novel } = await api.put(`/api/novels/${S.novel.id}`, part);
-    S.novel = novel;
-    refreshSavePill();
+    const { novel } = await api.put(`/api/novels/${novelId}`, part);
+    if (S.novel?.id === novelId) {
+      S.novel = novel;
+      refreshSavePill();
+    }
     if (msg) toast(msg, 'ok');
     loadNovels();
-  } catch (err) { setSave('dirty', '保存失败'); toast(err.message, 'err'); }
-}, 700);
+    return true;
+  } catch (err) {
+    if (S.novel?.id === novelId) setSave('dirty', '保存失败');
+    toast(err.message, 'err');
+    return false;
+  }
+}
+
+function saveNovelPartNow() {
+  clearTimeout(novelSaveTimer);
+  novelSaveTimer = 0;
+  const pending = pendingNovelSave;
+  pendingNovelSave = null;
+  if (!pending) return novelSaveInFlight || Promise.resolve(true);
+  // 串行落盘：先等上一次 PUT 回来，避免旧请求晚到把新状态盖掉
+  const start = () => putNovelPart(pending.id, pending.part, pending.msg);
+  const run = novelSaveInFlight ? novelSaveInFlight.then(start, start) : start();
+  novelSaveInFlight = run;
+  run.finally(() => { if (novelSaveInFlight === run) novelSaveInFlight = null; });
+  return run;
+}
+
+function saveNovelPart(part, msg) {
+  if (!S.novel) return;
+  pendingNovelSave = { id: S.novel.id, part, msg };
+  clearTimeout(novelSaveTimer);
+  novelSaveTimer = setTimeout(saveNovelPartNow, 700);
+}
+saveNovelPart.flush = saveNovelPartNow;
+saveNovelPart.cancel = () => {
+  clearTimeout(novelSaveTimer);
+  novelSaveTimer = 0;
+  pendingNovelSave = null;
+};
+
+/* ---- 设定库删除撤销 ---- */
+/** 删除人物 / 世界观 / 时间线条目，并在提示条里留一个 8 秒的撤销入口。
+ *  撤销时优先按「原来排在它后面的条目」定位，连续删除多条也不会乱序。 */
+function removeBibleEntry(section, index, label) {
+  const n = S.novel;
+  const arr = n?.bible?.[section];
+  if (!Array.isArray(arr) || index < 0 || index >= arr.length) return;
+  const item = arr[index];
+  const nextId = arr[index + 1]?.id || null;
+  const novelId = n.id;
+  const name = item.name || item.title || '未命名';
+  arr.splice(index, 1);
+  renderBible();
+  saveNovelPart({ bible: n.bible });
+  toast(`已删除${label}「${name}」`, '', {
+    label: '撤销',
+    onClick: () => {
+      if (S.novel?.id !== novelId) return toast('已切换作品，无法撤销这次删除', 'err');
+      const cur = S.novel?.bible?.[section];
+      if (!Array.isArray(cur)) return;
+      let at = nextId ? cur.findIndex((x) => x.id === nextId) : -1;
+      if (at < 0) at = Math.min(index, cur.length);
+      cur.splice(at, 0, item);
+      renderBible();
+      saveNovelPart({ bible: S.novel.bible });
+      toast(`已恢复${label}「${name}」`, 'ok');
+    },
+  });
+}
+
 const SKIP_KEYS = new Set(['kwText', 'relText', 'notes']);
 
 function field(label, key, obj, opts = {}) {
@@ -7099,9 +7177,7 @@ function renderCharacterEntry(c, i, charIndex, n) {
   kw.addEventListener('change', paintAppear);
   div.querySelector('.del').onclick = () => {
     if (!confirm(`删除人物「${c.name || i + 1}」？`)) return;
-    n.bible.characters.splice(i, 1);
-    renderBible();
-    saveNovelPart({ bible: n.bible });
+    removeBibleEntry('characters', i, '人物');
   };
   return div;
 }
@@ -7177,9 +7253,7 @@ function renderWorldEntry(w, i, n) {
   });
   div.querySelector('.del').onclick = () => {
     if (!confirm(`删除设定「${w.name || i + 1}」？`)) return;
-    n.bible.world.splice(i, 1);
-    renderBible();
-    saveNovelPart({ bible: n.bible });
+    removeBibleEntry('world', i, '设定');
   };
   return div;
 }
@@ -7721,9 +7795,7 @@ function renderTimelineEntry(t, i, n) {
     ${field('说明', 'desc', t, { area: true, rows: 2 })}`;
   bindFields(div, t, () => saveNovelPart({ bible: n.bible }));
   div.querySelector('.del').onclick = () => {
-    n.bible.timeline.splice(i, 1);
-    renderBible();
-    saveNovelPart({ bible: n.bible });
+    removeBibleEntry('timeline', i, '时间节点');
   };
   return div;
 }
