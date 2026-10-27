@@ -672,8 +672,11 @@ async function main() {
   const trash2 = (await get(`${BASE}/api/trash`)).items || [];
   check('恢复后就不在回收站里了', !trash2.some((i) => i.id === id));
 
-  const search = await get(`${BASE}/api/library-search?q=${encodeURIComponent('正文')}`);
-  check('全局搜索能搜到', (search.hits?.length || search.results?.length || 0) >= 1);
+  // 搜一个当前测试作品里确实存在的词：这一章的正文在一致性测试时已经改写过，
+  // 早先搜「正文」其实靠的是别的测试残留作品，数据清干净后就搜不到了。
+  const search = await get(`${BASE}/api/library-search?q=${encodeURIComponent('修仙界')}`);
+  const hits = search.hits || search.results || [];
+  check('全局搜索能搜到', hits.some((h) => h.novelId === id), JSON.stringify(hits.map((h) => h.novelTitle)));
 
   // ---------------------------------------------------------------
   group('稿件头部的作者联系方式');

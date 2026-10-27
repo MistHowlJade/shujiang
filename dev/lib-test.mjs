@@ -326,6 +326,80 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('体检能扫出人物断档', r.gaps.length >= 1, JSON.stringify(r.gaps.map((g) => g.name)));
   check('体检能扫出未回收线索', r.staleThreads.length >= 1, JSON.stringify(r.staleThreads.map((t) => t.text)));
 
+  // 模糊重复检测：改了几个字的长段落应归到同一组
+  const fuzzyBase = '林昭站在门前，心中有些忐忑。风吹过树叶，发出沙沙的声音，像是有人在低语。他深吸一口气，推门而入。屋里坐着一个老人，须发皆白，眼神却锐利如鹰。老人淡淡地说：“你来了。”林昭点点头，没有说话。';
+  const fuzzyNear = fuzzyBase
+    .replace('忐忑。', '忐忑不安。')
+    .replace('发出沙沙', '发出了沙沙')
+    .replace('淡淡地说', '淡淡地说道');
+  const novelFuzzy = {
+    id: 'n_hf', title: '模糊重复测试',
+    bible: { characters: [], world: [], timeline: [] },
+    chapters: [
+      { id: 'c_f1', no: 1, title: '第一章', content: fuzzyBase },
+      { id: 'c_f2', no: 2, title: '第二章', content: fuzzyNear },
+    ],
+  };
+  const rFuzzy = buildHealthReport(novelFuzzy);
+  const fuzzyGroup = rFuzzy.duplicates.find((d) => d.sample.includes('林昭站在门前'));
+  check('体检能扫出模糊重复段落', !!fuzzyGroup, JSON.stringify(rFuzzy.duplicates.map((d) => d.sample.slice(0, 20))));
+  check('模糊重复归到同一组并统计两次', fuzzyGroup?.count === 2, `count=${fuzzyGroup?.count}`);
+  check('模糊重复标出两章', fuzzyGroup?.chapters.length === 2, JSON.stringify(fuzzyGroup?.chapters.map((c) => c.no)));
+
+  // 三段「接力改写」：A≈B、B≈C，但 A 与 C 差得远。
+  // 旧实现合并删除 B 之后还会去取 B，直接抛 TypeError。
+  const chainA = '夜色沉下来的时候，他还在院子里站着，手里攥着那封没有拆开的信，指节因为用力而微微发白。'
+    + '风从墙头吹过，带着一点凉意，也带着远处集市散去的喧闹，院子里的老槐树轻轻晃了晃。'
+    + '院门外传来脚步声，很轻，却在安静的巷子里显得格外清楚，像是有人刻意放慢了步子。'
+    + '他没有回头，只是把信往袖子里又塞了塞，然后慢慢走到石阶边坐下，抬头看着天。';
+  const filler = '甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉戌亥'.repeat(4);
+  const chainB = chainA.slice(0, 10) + filler.slice(0, 30) + chainA.slice(40);
+  const chainC = chainB.slice(0, 110) + filler.slice(30, 60) + chainB.slice(140);
+  const novelChain = {
+    id: 'n_hc', title: '连锁相似',
+    bible: { characters: [], world: [], timeline: [] },
+    chapters: [
+      { id: 'c_a', no: 1, title: '一', content: chainA },
+      { id: 'c_b', no: 2, title: '二', content: chainB },
+      { id: 'c_c', no: 3, title: '三', content: chainC },
+    ],
+  };
+  const rChain = buildHealthReport(novelChain);
+  check('连锁相似段落能归组且不崩', rChain.duplicates[0]?.count === 3, JSON.stringify(rChain.duplicates.map((d) => d.count)));
+
+  // 不相干的长段落不能被误判
+  const novelDistinct = {
+    id: 'n_hd', title: '不相干',
+    bible: { characters: [], world: [], timeline: [] },
+    chapters: [
+      { id: 'c_d1', no: 1, title: '一', content: '山门前的石阶被雨水打湿了，青苔顺着缝隙往上爬，几只麻雀在檐下抖着翅膀，把水珠甩得到处都是。' },
+      { id: 'c_d2', no: 2, title: '二', content: '集市上人声鼎沸，卖糖人的老汉把铜勺敲得叮当响，孩子们围成一圈，眼睛盯着那只会转的风车。' },
+    ],
+  };
+  check('不相干的长段落不会被误判为重复', buildHealthReport(novelDistinct).duplicates.length === 0);
+
+  // 超过 40 段会走二元组倒排，长篇里也要能找出近似段落、且不误报
+  {
+    const pool = '的一是在不了有和人这中大为上个国我以要他时来用们生到作地于出就分对成会可主发年动同工也能下过子说产种面而方后多定行学法所民得经十三之进着等部度家电力里如水化高自二理起小物现实加量都两体制机当使点从业本去把性好应开它合还因由其些然前外天政四日那社义事平形相全表间样与关各重新线内数正心反你明看原又么利比或但质气第向道命此变条只没结解问意建月公无系军很情者最立代想已通并提直题党程展五果料象员革位入常文总次品式活设及管特件长求老头基资边流路级少图山统接知较将组见计别她手角期根论运农指几九区强放决西被干做必战先回则任取据处队南给色光门即保治北造百规热领七海口东导器压志世金增争济阶油思术极交受联什认六共权收证改清己美再采转更单风切打白教速花带安场身车例真务具万每目至达走积示议声报斗完类八离华名确才科张信马节话米整空元况今集温传土许步群广石记需段研界拉林律叫且究观越织装影算低持音众书布复容儿须际商非验连断深难近矿千周委素技备半办青省列习响约支般史感劳便团往酸历市克何除消构府称太准精值号率族维划选标写存候毛亲快效斯院查江型眼王按格养易置派层片始却专状育厂京识适属圆包火住调满县局照参红细引听该铁价严龙飞';
+    let seed = 7;
+    const rand = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const make = (len) => Array.from({ length: len }, () => pool[Math.floor(rand() * pool.length)]).join('');
+    const paras = Array.from({ length: 160 }, () => make(100));
+    paras.push(paras[0].slice(0, 40) + '忽然' + paras[0].slice(40));
+    const novelLarge = {
+      id: 'n_hl', title: '长篇去重',
+      bible: { characters: [], world: [], timeline: [] },
+      chapters: paras.map((text, i) => ({ id: `c_l${i}`, no: i + 1, title: `第${i + 1}章`, content: text })),
+    };
+    const rLarge = buildHealthReport(novelLarge);
+    check('长篇（倒排预筛）能找出近似段落', rLarge.duplicates.length === 1 && rLarge.duplicates[0].count === 2, JSON.stringify(rLarge.duplicates.map((d) => d.count)));
+  }
+
   // 指纹格式
   check('体检指纹带种类和标识', healthKey('gap', '甲') === 'health|gap|甲', healthKey('gap', '甲'));
 

@@ -11,35 +11,161 @@ import { buildCharacterAppearances, appearancesForCharacter, collectThreads, ope
  * 人物断档、未回收线索。所有条目都能直接跳到对应章节。
  * ============================================================ */
 
-// Levenshtein 编辑距离（用于模糊重复检测）
-function levenshteinDistance(a, b) {
-  if (a.length === 0) return b.length;
-  if (b.length === 0) return a.length;
-  const matrix = Array.from({ length: a.length + 1 }, (_, i) => Array(b.length + 1).fill(0));
-  for (let i = 0; i <= a.length; i++) matrix[i][0] = i;
-  for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      matrix[i][j] = Math.min(
-        matrix[i - 1][j] + 1,
-        matrix[i][j - 1] + 1,
-        matrix[i - 1][j - 1] + cost
-      );
-    }
+// 带提前退出的编辑距离：只要当前行的最小值已经超过 limit，
+// 后面的行只会更大，可以立刻判定「超出上限」，不必算完整个矩阵。
+function editDistanceWithin(a, b, limit) {
+  if (a === b) return true;
+  // 相同的前后缀不影响编辑距离，先剥掉能让矩阵小很多
+  let start = 0;
+  const minLen = Math.min(a.length, b.length);
+  while (start < minLen && a[start] === b[start]) start += 1;
+  let endA = a.length;
+  let endB = b.length;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
+    endA -= 1;
+    endB -= 1;
   }
-  return matrix[a.length][b.length];
+  const sa = a.slice(start, endA);
+  const sb = b.slice(start, endB);
+  const la = sa.length;
+  const lb = sb.length;
+  if (Math.abs(la - lb) > limit) return false;
+  if (!la || !lb) return Math.max(la, lb) <= limit;
+
+  let prev = new Array(lb + 1);
+  let curr = new Array(lb + 1);
+  for (let j = 0; j <= lb; j += 1) prev[j] = j;
+  for (let i = 1; i <= la; i += 1) {
+    curr[0] = i;
+    let rowMin = i;
+    const ai = sa[i - 1];
+    for (let j = 1; j <= lb; j += 1) {
+      const cost = ai === sb[j - 1] ? 0 : 1;
+      let v = prev[j] + 1;
+      if (curr[j - 1] + 1 < v) v = curr[j - 1] + 1;
+      if (prev[j - 1] + cost < v) v = prev[j - 1] + cost;
+      curr[j] = v;
+      if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > limit) return false;
+    const tmp = prev;
+    prev = curr;
+    curr = tmp;
+  }
+  return prev[lb] <= limit;
 }
 
-// 相似度判定：编辑距离 / max(len) < 0.25 视为相似（段落较长时更严格）
+// 相似段落：编辑距离占较长段落的比例低于阈值。
+// 段落越长阈值越严（200 字以上从 25% 收到 20%），
+// 免得长段落里正常的措辞差异被当成重复。
 function isSimilarParagraph(a, b, threshold = 0.25) {
-  if (a === b) return true;
   const maxLen = Math.max(a.length, b.length);
   if (maxLen < 40) return false;
-  // 段落较长时降低阈值
-  const adjustedThreshold = maxLen > 200 ? threshold * 0.8 : threshold;
-  const dist = levenshteinDistance(a, b);
-  return dist / maxLen < adjustedThreshold;
+  if (a === b) return true;
+  const adjusted = maxLen > 200 ? threshold * 0.8 : threshold;
+  const limit = Math.ceil(maxLen * adjusted) - 1;
+  if (limit < 1) return false;
+  return editDistanceWithin(a, b, limit);
+}
+
+/**
+ * 把归一化后的段落归成「重复组」。
+ * 先精确归组，再把改了几个字的近似段落并进来；相似会连锁传递
+ * （A≈B、B≈C 视为同一组），统计总出现次数与涉及章节。
+ */
+function groupSimilarParagraphs(items) {
+  const n = items.length;
+  if (!n) return [];
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = (x) => {
+    let root = x;
+    while (parent[root] !== root) root = parent[root];
+    while (parent[x] !== root) {
+      const next = parent[x];
+      parent[x] = root;
+      x = next;
+    }
+    return root;
+  };
+  const union = (a, b) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[rb] = ra;
+  };
+
+  if (n <= 40) {
+    // 段落很少时直接两两比，结果最稳，也不会慢
+    for (let i = 0; i < n; i += 1) {
+      for (let j = i + 1; j < n; j += 1) {
+        if (isSimilarParagraph(items[i].norm, items[j].norm)) union(i, j);
+      }
+    }
+  } else {
+    // 长篇里段落成千上万，两两全比会卡死。先用「二元组倒排」找出
+    // 共享片段足够多的候选，再算编辑距离；太常见的二元组不进索引，
+    // 否则「的是」「了他」这类片段会把候选集炸开。
+    const grams = new Array(n);
+    const df = new Map();
+    for (let i = 0; i < n; i += 1) {
+      const s = items[i].norm;
+      const set = new Set();
+      for (let k = 0; k + 1 < s.length; k += 1) set.add(s.slice(k, k + 2));
+      grams[i] = set;
+      for (const g of set) df.set(g, (df.get(g) || 0) + 1);
+    }
+    const dfCap = Math.max(16, Math.floor(n * 0.02));
+    const index = new Map();
+    const indexed = new Int32Array(n);
+    for (let i = 0; i < n; i += 1) {
+      for (const g of grams[i]) {
+        if (df.get(g) > dfCap) continue;
+        let bucket = index.get(g);
+        if (!bucket) {
+          bucket = [];
+          index.set(g, bucket);
+        }
+        bucket.push(i);
+        indexed[i] += 1;
+      }
+    }
+    for (let i = 0; i < n; i += 1) {
+      if (!indexed[i]) continue;
+      const counts = new Map();
+      for (const g of grams[i]) {
+        const bucket = index.get(g);
+        if (!bucket) continue;
+        for (const j of bucket) {
+          if (j <= i) continue;
+          counts.set(j, (counts.get(j) || 0) + 1);
+        }
+      }
+      for (const [j, shared] of counts) {
+        if (!indexed[j]) continue;
+        if (shared < Math.min(indexed[i], indexed[j]) * 0.3) continue;
+        if (isSimilarParagraph(items[i].norm, items[j].norm)) union(i, j);
+      }
+    }
+  }
+
+  const grouped = new Map();
+  for (let i = 0; i < n; i += 1) {
+    const root = find(i);
+    const item = items[i];
+    let g = grouped.get(root);
+    if (!g) {
+      g = { count: 0, chapters: new Map(), sample: item.sample, textLen: item.textLen };
+      grouped.set(root, g);
+    }
+    g.count += item.count;
+    if (item.textLen > g.textLen) {
+      g.sample = item.sample;
+      g.textLen = item.textLen;
+    }
+    for (const [chId, info] of item.chapters) g.chapters.set(chId, info);
+  }
+  return [...grouped.values()]
+    .filter((x) => x.count >= 2)
+    .sort((a, b) => b.count - a.count || b.textLen - a.textLen);
 }
 
 export const HEALTH_PHRASES = [
@@ -93,8 +219,8 @@ export function buildHealthReport(novel) {
   }
   const outlierTotal = outliers.length;
 
-  // 重复段落：去空白和标点后比对，长段落才有意义
-  // 先做精确匹配（归一化后完全相同）
+  // 重复段落：去空白和标点后比对，长段落才有意义。
+  // 先精确归组，再把「改了几个字」的近似段落并进来。
   const paraMap = new Map();
   for (const c of written) {
     for (const raw of c.content.split(/\n+/)) {
@@ -107,6 +233,7 @@ export function buildHealthReport(novel) {
           count: 0,
           chapters: new Map(),
           sample: text.length > 96 ? `${text.slice(0, 96)}…` : text,
+          textLen: text.length,
           norm,
         };
         paraMap.set(norm, item);
@@ -115,27 +242,7 @@ export function buildHealthReport(novel) {
       item.chapters.set(c.id, { id: c.id, no: c.no, title: c.title });
     }
   }
-
-  // 再做模糊匹配（编辑距离相似）
-  const norms = [...paraMap.keys()];
-  for (let i = 0; i < norms.length; i++) {
-    for (let j = i + 1; j < norms.length; j++) {
-      if (isSimilarParagraph(norms[i], norms[j])) {
-        // 合并到第一个
-        const item1 = paraMap.get(norms[i]);
-        const item2 = paraMap.get(norms[j]);
-        item1.count += item2.count;
-        for (const [chId, chInfo] of item2.chapters) {
-          item1.chapters.set(chId, chInfo);
-        }
-        paraMap.delete(norms[j]);
-      }
-    }
-  }
-
-  const duplicateGroups = [...paraMap.values()]
-    .filter((x) => x.count >= 2)
-    .sort((a, b) => b.count - a.count || b.sample.length - a.sample.length);
+  const duplicateGroups = groupSimilarParagraphs([...paraMap.values()]);
   const duplicateTotal = duplicateGroups.length;
   const duplicates = duplicateGroups.slice(0, 6)
     .map((x) => ({ ...x, chapters: [...x.chapters.values()].sort((a, b) => a.no - b.no) }));

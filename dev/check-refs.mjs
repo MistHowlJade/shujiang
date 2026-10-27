@@ -5,6 +5,7 @@
 //   2. 别处用了某个函数，却忘了 import（名字在 lib 里存在，所以普通语法检查抓不到）
 //   3. lib 里的模块还在摸 app.js 的全局状态 S
 //   4. 同一个名字被定义了两遍
+//   5. import 进来的名字又在本地声明了一遍（会直接 SyntaxError，整页白屏）
 //
 // 用法：node dev/check-refs.mjs
 // 全通过时退出码为 0。
@@ -123,7 +124,23 @@ for (const [f, c] of all) {
   }
 }
 
-// ---- 4. app.js 用到 lib 导出的名字，就必须真的 import ----
+// ---- 4. import 与本地定义不能撞名 ----
+// JS 会在解析阶段直接报 SyntaxError，页面一片空白，普通引用检查看不出来。
+console.log('\n【import 与本地定义不撞名】');
+for (const [f, c] of all) {
+  const imported = new Set();
+  for (const m of c.matchAll(/import\s*\{([^}]+)\}\s*from/g)) {
+    for (const raw of m[1].split(',')) {
+      const n = raw.trim().split(/\s+as\s+/).pop().trim();
+      if (n) imported.add(n);
+    }
+  }
+  for (const n of topLevelDefs(c)) {
+    if (imported.has(n)) fail(`${f}: ${n} 既 import 又在本地定义`);
+  }
+}
+
+// ---- 5. app.js 用到 lib 导出的名字，就必须真的 import ----
 console.log('\n【app.js 的 import 是否齐全】');
 {
   const app = all.find(([f]) => f === 'web/app.js')[1];
@@ -146,7 +163,7 @@ console.log('\n【app.js 的 import 是否齐全】');
   }
 }
 
-// ---- 5. app.js 里调用的裸函数必须找得到定义 ----
+// ---- 6. app.js 里调用的裸函数必须找得到定义 ----
 console.log('\n【app.js 里的调用都有定义】');
 {
   const app = all.find(([f]) => f === 'web/app.js')[1];

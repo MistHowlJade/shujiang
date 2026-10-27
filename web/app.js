@@ -6243,11 +6243,6 @@ function importBible(jsonText) {
   }
 }
 
-/** 解析导出的 Markdown，还原为小说数据结构（委托给 lib/markdown.js） */
-function importBibleMarkdown(mdText) {
-  return importBibleMarkdown(mdText);
-}
-
 async function applyBibleData(data, opts = {}) {
   const n = S.novel;
   if (!n) return toast('先打开一部作品', 'err');
