@@ -23,6 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters } from '../web/lib/data.js';
 
 let pass = 0;
 let fail = 0;
@@ -858,6 +859,35 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   let zip64Err = '';
   try { unzipEntry(zip64, 'word/document.xml'); } catch (err) { zip64Err = err.message; }
   check('Word 导入：ZIP64 会被拒', /ZIP64/.test(zip64Err), zip64Err);
+}
+
+// ---------------------------------------------------------------
+// 设定条目的提及索引
+{
+  const novel = {
+    chapters: [
+      { id: 'c1', no: 1, title: '青锋', content: '林昭握住青锋剑，剑身微颤。', memory: { summary: '林昭得到青锋剑', foreshadowing: ['神剑出世'] } },
+      { id: 'c2', no: 2, title: '试炼', content: '他空手走进试炼塔。', memory: { stateChanges: ['青锋剑断裂'] } },
+      { id: 'c3', no: 3, title: '访客', content: '艾伦·史密斯来到青云宗。', memory: { events: ['沈青梧提到青云宗'] } },
+      { id: 'c4', no: 4, title: '空白', content: '' },
+    ],
+  };
+  const index = buildMentionIndex(novel);
+  const rows = (entry) => worldMentionChapters(entry, index).map((x) => x.no);
+
+  check('提及索引：归一化去掉空白与间隔符', normalizeMentionText('艾伦·史密斯 A') === '艾伦史密斯a');
+  check('提及索引：正文命中', JSON.stringify(rows({ name: '青锋剑' })) === '[1,2]', JSON.stringify(rows({ name: '青锋剑' })));
+  check('提及索引：关键词命中正文', JSON.stringify(rows({ name: '不存在的名字', keywords: ['青锋剑'] })) === '[1,2]');
+  check('提及索引：章节记忆命中', JSON.stringify(rows({ name: '青云宗' })) === '[3]', JSON.stringify(rows({ name: '青云宗' })));
+  check('提及索引：伏笔里的关键词也算', JSON.stringify(rows({ name: '神剑' })) === '[1]', JSON.stringify(rows({ name: '神剑' })));
+  check('提及索引：间隔符归一化', JSON.stringify(rows({ name: '艾伦 史密斯' })) === '[3]', JSON.stringify(rows({ name: '艾伦 史密斯' })));
+  check('提及索引：括号注释不挡匹配', JSON.stringify(rows({ name: '青锋剑（上品）' })) === '[1,2]', JSON.stringify(rows({ name: '青锋剑（上品）' })));
+  check('提及索引：单字不做检索', rows({ name: '剑' }).length === 0 && worldMentionKeys({ name: '剑' }).length === 0);
+  check('提及索引：未提及返回空', rows({ name: '不存在的名字' }).length === 0);
+  check('提及索引：结果带章节标题与阶段', (() => {
+    const r = worldMentionChapters({ name: '青云宗' }, index)[0];
+    return r.id === 'c3' && r.title === '访客' && 'stage' in r;
+  })());
 }
 
 // ---------------------------------------------------------------

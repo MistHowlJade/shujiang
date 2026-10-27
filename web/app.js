@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys } from './lib/data.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown, CONSISTENCY_KINDS } from './lib/consistency.js';
@@ -2981,6 +2981,7 @@ function initBibleVirtualList(listEl, items, renderItem, listKey) {
     };
   }
   const l = vl.lists[listKey];
+  const prevList = l.listEl;
   l.enabled = items.length >= 100;  // 100 条以上启用虚拟滚动
   l.items = items;
   l.renderItem = renderItem;
@@ -2995,7 +2996,7 @@ function initBibleVirtualList(listEl, items, renderItem, listKey) {
     // 普通渲染
     listEl.classList.remove('virtual');
     if (l.scrollHandler) {
-      listEl.removeEventListener('scroll', l.scrollHandler);
+      (prevList || listEl).removeEventListener('scroll', l.scrollHandler);
       l.scrollHandler = null;
     }
     listEl.innerHTML = '';
@@ -3010,6 +3011,11 @@ function initBibleVirtualList(listEl, items, renderItem, listKey) {
   l.measureDone = false;
   renderBibleVirtualList(listEl, 0, listKey);
 
+  // 切标签页会重建列表元素：旧元素上的监听要解绑，否则新列表滚不动
+  if (l.scrollHandler && prevList !== listEl) {
+    prevList?.removeEventListener('scroll', l.scrollHandler);
+    l.scrollHandler = null;
+  }
   // 挂滚动监听
   if (!l.scrollHandler) {
     l.scrollHandler = () => renderBibleVirtualList(listEl, listEl.scrollTop, listKey);
@@ -7109,9 +7115,9 @@ function openChapterFromIndex(id) {
   });
 }
 
-function openCharacterAppearancesModal(name, chapters) {
-  showModal(`<h3>「${esc(name || '未命名')}」出场索引</h3>
-    <p class="modal-sub">依据章节记忆统计，共 ${chapters.length} 章。点击章节可直接打开。</p>
+function openChapterIndexModal(title, sub, chapters) {
+  showModal(`<h3>${esc(title)}</h3>
+    <p class="modal-sub">${esc(sub)}</p>
     <div class="appear-list">
       ${chapters.map((ch) => `<button type="button" class="appear-row" data-chapter="${esc(ch.id)}">
         <span class="ar-no">第 ${ch.no} 章</span>
@@ -7126,6 +7132,23 @@ function openCharacterAppearancesModal(name, chapters) {
         el.onclick = () => { closeModal(); openChapterFromIndex(el.dataset.chapter); };
       });
     });
+}
+
+function openCharacterAppearancesModal(name, chapters) {
+  openChapterIndexModal(
+    `「${name || '未命名'}」出场索引`,
+    `依据章节记忆统计，共 ${chapters.length} 章。点击章节可直接打开。`,
+    chapters,
+  );
+}
+
+function openWorldMentionsModal(entry, chapters) {
+  const name = entry?.name || '未命名';
+  openChapterIndexModal(
+    `「${name}」提及索引`,
+    `在正文或章节记忆里提到这个名字 / 关键词的章节，共 ${chapters.length} 章。点击章节可直接打开。`,
+    chapters,
+  );
 }
 
 /* ---- 人物条目渲染（供虚拟列表复用） ---- */
@@ -7233,7 +7256,39 @@ function renderCharactersTab(host, n) {
 }
 
 /* ---- 世界观条目渲染（供虚拟列表复用） ---- */
-function renderWorldEntry(w, i, n) {
+/** 条目在正文 / 章节记忆里的提及索引。名字与关键词都参与匹配。 */
+function worldMentionsHtml(w, mentionIndex, entryIndex, cache) {
+  const keys = worldMentionKeys(w);
+  if (!keys.length) {
+    return `<div class="entry-appear">
+      <span class="ca-label">提及</span>
+      <span class="ca-empty">名称至少 2 个字，或补一个检索关键词，才会在正文里查找提及。</span>
+    </div>`;
+  }
+  const cacheKey = keys.join('\u0000');
+  let chapters = cache?.get(cacheKey);
+  if (!chapters) {
+    chapters = worldMentionChapters(w, mentionIndex);
+    cache?.set(cacheKey, chapters);
+  }
+  if (!chapters.length) {
+    return `<div class="entry-appear">
+      <span class="ca-label">提及</span>
+      <span class="ca-empty">正文和章节记忆里还没出现</span>
+    </div>`;
+  }
+  const shown = chapters.slice(0, 8);
+  return `<div class="entry-appear">
+    <span class="ca-label">提及</span>
+    <div class="ca-chips">
+      ${shown.map((ch) => `<button type="button" class="ca-chip" data-chapter="${esc(ch.id)}" title="第 ${ch.no} 章 · ${esc(ch.title || '未命名')}">第 ${ch.no} 章</button>`).join('')}
+      ${chapters.length > shown.length ? `<button type="button" class="ca-chip ca-more" data-mention-more="${entryIndex}" title="查看全部 ${chapters.length} 章">+${chapters.length - shown.length}</button>` : ''}
+    </div>
+    <span class="ca-count">${chapters.length} 章</span>
+  </div>`;
+}
+
+function renderWorldEntry(w, i, n, mentionIndex, mentionCache) {
   const div = document.createElement('div');
   div.className = 'entry';
   div.innerHTML = `
@@ -7244,13 +7299,21 @@ function renderWorldEntry(w, i, n) {
       <button class="del" title="删除">${ico('trash')}</button>
     </div>
     ${field('说明（写具体细节，模型才能用上）', 'desc', w, { area: true, rows: 3 })}
-    ${field('检索关键词（逗号分隔）', 'kwText', { kwText: (w.keywords || []).join('，') })}`;
+    ${field('检索关键词（逗号分隔）', 'kwText', { kwText: (w.keywords || []).join('，') })}
+    <div class="world-mention-slot">${worldMentionsHtml(w, mentionIndex, i, mentionCache)}</div>`;
   bindFields(div, w, () => saveNovelPart({ bible: n.bible }));
   const kw = div.querySelector('[data-key="kwText"]');
   kw.addEventListener('input', () => {
     w.keywords = kw.value.split(/[,，、\s]+/).filter(Boolean);
     saveNovelPart({ bible: n.bible });
   });
+  // 改名字或关键词后，只重画这一张卡的提及索引，不整页重排
+  const paintMention = () => {
+    const slot = div.querySelector('.world-mention-slot');
+    if (slot) slot.innerHTML = worldMentionsHtml(w, mentionIndex, i, mentionCache);
+  };
+  div.querySelector('[data-key="name"]').addEventListener('change', paintMention);
+  kw.addEventListener('change', paintMention);
   div.querySelector('.del').onclick = () => {
     if (!confirm(`删除设定「${w.name || i + 1}」？`)) return;
     removeBibleEntry('world', i, '设定');
@@ -7275,7 +7338,19 @@ function renderWorldTab(host, n) {
     list.innerHTML = '<p class="dim">还没有世界观条目。</p>';
     return;
   }
-  initBibleVirtualList(list, n.bible.world, (w, i) => renderWorldEntry(w, i, n), 'world');
+  const mentionIndex = buildMentionIndex(n);
+  const mentionCache = new Map();
+  initBibleVirtualList(list, n.bible.world, (w, i) => renderWorldEntry(w, i, n, mentionIndex, mentionCache), 'world');
+
+  list.addEventListener('click', (e) => {
+    const chapterBtn = e.target.closest('[data-chapter]');
+    if (chapterBtn) return openChapterFromIndex(chapterBtn.dataset.chapter);
+    const moreBtn = e.target.closest('[data-mention-more]');
+    if (!moreBtn) return;
+    const w = n.bible.world[Number(moreBtn.dataset.mentionMore)];
+    if (!w) return;
+    openWorldMentionsModal(w, worldMentionChapters(w, mentionIndex));
+  });
 
   $('#addWorld', host).onclick = () => {
     n.bible.world.push({ id: uid('w'), name: '新设定', category: '地理', desc: '', keywords: [] });

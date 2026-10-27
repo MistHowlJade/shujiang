@@ -118,3 +118,68 @@ export function memoryItems(mem, key) {
   }).map((text) => String(text).replace(/\s+/g, ' ').trim()).filter(Boolean);
 }
 
+/* ============================================================
+ * 设定条目的「提及索引」
+ * 世界观条目（地理 / 势力 / 物品 / 规则）除了进上下文，还应该能查到
+ * 它在正文里到底出现在哪几章。这里只做本地字符串匹配，不调用模型。
+ * ============================================================ */
+
+/** 提及检索用的归一化：去掉空白与间隔符，统一小写。
+ *  「艾伦·史密斯」和「艾伦 史密斯」应当能互相命中。 */
+export function normalizeMentionText(value) {
+  return String(value || '').toLowerCase().replace(/[\s\u00a0\u3000·•・]+/g, '');
+}
+
+/** 条目名可能带括号注释（「青锋剑（上品）」），检索时把括号里的说明去掉 */
+export function normalizeMentionKey(value) {
+  return normalizeMentionText(String(value || '').replace(/[（(【\[][^）)】\]]*[）)】\]]/g, ''));
+}
+
+/** 一个条目可以用来检索的名字与关键词。单字太容易误命中，直接跳过 */
+export function worldMentionKeys(entry) {
+  const rawKeywords = Array.isArray(entry?.keywords)
+    ? entry.keywords
+    : (typeof entry?.keywords === 'string' ? entry.keywords.split(/[,，、\s]+/) : []);
+  const keys = [entry?.name, ...rawKeywords]
+    .map(normalizeMentionKey)
+    .filter((key) => key.length >= 2);
+  return [...new Set(keys)];
+}
+
+/** 一章里所有可检索的文字：标题、正文、章节记忆（概要 / 事件 / 状态变化 / 伏笔 / 未决） */
+export function chapterMentionText(ch) {
+  return normalizeMentionText([
+    ch?.title || '',
+    ch?.content || '',
+    ...memoryItems(ch?.memory, 'summary'),
+    ...memoryItems(ch?.memory, 'events'),
+    ...memoryItems(ch?.memory, 'characters'),
+    ...memoryItems(ch?.memory, 'stateChanges'),
+    ...memoryItems(ch?.memory, 'foreshadowing'),
+    ...memoryItems(ch?.memory, 'unresolved'),
+  ].join('\n'));
+}
+
+/** 预先把每章压成可检索文本，供多个设定条目反复查询 */
+export function buildMentionIndex(novel) {
+  return (novel?.chapters || []).map((ch, i) => ({
+    ch,
+    no: ch?.no || i + 1,
+    text: chapterMentionText(ch),
+  }));
+}
+
+/** 世界观条目在哪些章被提到。返回按章节号排序的 { id, no, title } */
+export function worldMentionChapters(entry, index) {
+  const keys = worldMentionKeys(entry);
+  if (!keys.length) return [];
+  const out = [];
+  for (const row of Array.isArray(index) ? index : []) {
+    if (!row?.text) continue;
+    if (keys.some((key) => row.text.includes(key))) out.push(row);
+  }
+  return out
+    .sort((a, b) => (a.no || 0) - (b.no || 0))
+    .map((row) => ({ id: row.ch?.id, no: row.no, title: row.ch?.title || '', stage: row.ch?.stage }));
+}
+
