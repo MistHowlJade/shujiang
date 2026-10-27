@@ -590,17 +590,18 @@ async function handleApi(req, res, url) {
       if (!moved) return sendJson(res, 404, { error: '作品不存在' });
       return sendJson(res, 200, { ok: true, trash: moved });
     }
-    /** 按 ID 合并两个数组：新数组里的项按 ID 更新/新增；旧数组里没有在新数组里的 ID 保留 */
-function mergeArrayById(oldArr = [], newArr = []) {
-  if (!Array.isArray(oldArr)) return newArr;
-  if (!Array.isArray(newArr)) return oldArr;
-  const map = new Map(oldArr.map(item => [item.id, item]));
-  for (const item of newArr) {
-    if (item.id) map.set(item.id, { ...map.get(item.id), ...item });
-    else map.set(newId('merge'), item);
-  }
-  return [...map.values()];
-}
+    /** 设定库数组按「整份快照」保存：前端每次保存都带完整数组，
+     *  传了哪个数组就替换哪个，没传的数组保持原样。
+     *  之前按 ID 合并会保留旧条目，导致删除人物 / 世界观 / 时间线永远不生效。 */
+    function replaceBibleArray(arr) {
+      const map = new Map();
+      for (const item of Array.isArray(arr) ? arr : []) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+        const id = item.id || newId('b');
+        map.set(id, { ...item, id });
+      }
+      return [...map.values()];
+    }
 
 /* ------------------------------------------------------------------ */
 /* 导入旧稿 / 导出备份                                                    */
@@ -613,17 +614,22 @@ function mergeArrayById(oldArr = [], newArr = []) {
       meta.targetWords = cleanTargetWords(meta.targetWords);
       if (!['classic', 'minimal', 'band'].includes(meta.coverStyle)) meta.coverStyle = n.meta.coverStyle || '';
       meta.coverPalette = cleanPalette(meta.coverPalette);
+      // 先保留旧设定库（只改 meta / 大纲时不会误清），再按本次带来的板块替换。
+      // 三个主数组之外的旧字段（如早期导入的 skills / items）也原样留着。
+      const incomingBible = body.bible && typeof body.bible === 'object' && !Array.isArray(body.bible)
+        ? body.bible
+        : {};
+      const bible = { ...(n.bible || {}), ...incomingBible };
+      for (const key of ['characters', 'world', 'timeline']) {
+        if (Array.isArray(incomingBible[key])) bible[key] = replaceBibleArray(incomingBible[key]);
+      }
       const merged = {
         ...n,
         ...body,
         id: n.id,
         createdAt: n.createdAt,
         meta,
-        bible: {
-          characters: mergeArrayById(n.bible?.characters, body.bible?.characters),
-          world: mergeArrayById(n.bible?.world, body.bible?.world),
-          timeline: mergeArrayById(n.bible?.timeline, body.bible?.timeline),
-        },
+        bible,
         outline: { ...n.outline, ...(body.outline || {}) },
         chapters: body.chapters || n.chapters,
       };

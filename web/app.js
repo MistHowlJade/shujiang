@@ -7051,7 +7051,7 @@ function openCharacterAppearancesModal(name, chapters) {
 }
 
 /* ---- 人物条目渲染（供虚拟列表复用） ---- */
-function renderCharacterEntry(c, i, charIndex) {
+function renderCharacterEntry(c, i, charIndex, n) {
   const div = document.createElement('div');
   const appearances = appearancesForCharacter(c, charIndex);
   div.className = 'entry';
@@ -7126,7 +7126,7 @@ function renderCharactersTab(host, n) {
   }
 
   // 虚拟列表：100 条以上启用
-  initBibleVirtualList(list, n.bible.characters, (c, i) => renderCharacterEntry(c, i, charIndex), 'characters');
+  initBibleVirtualList(list, n.bible.characters, (c, i) => renderCharacterEntry(c, i, charIndex, n), 'characters');
 
   list.addEventListener('click', (e) => {
     const chapterBtn = e.target.closest('[data-chapter]');
@@ -7157,7 +7157,7 @@ function renderCharactersTab(host, n) {
 }
 
 /* ---- 世界观条目渲染（供虚拟列表复用） ---- */
-function renderWorldEntry(w, i) {
+function renderWorldEntry(w, i, n) {
   const div = document.createElement('div');
   div.className = 'entry';
   div.innerHTML = `
@@ -7201,7 +7201,7 @@ function renderWorldTab(host, n) {
     list.innerHTML = '<p class="dim">还没有世界观条目。</p>';
     return;
   }
-  initBibleVirtualList(list, n.bible.world, (w, i) => renderWorldEntry(w, i), 'world');
+  initBibleVirtualList(list, n.bible.world, (w, i) => renderWorldEntry(w, i, n), 'world');
 
   $('#addWorld', host).onclick = () => {
     n.bible.world.push({ id: uid('w'), name: '新设定', category: '地理', desc: '', keywords: [] });
@@ -7709,7 +7709,7 @@ function renderBeatsTab(host, n) {
   });
 }
 /* ---- 时间线条目渲染（供虚拟列表复用） ---- */
-function renderTimelineEntry(t, i) {
+function renderTimelineEntry(t, i, n) {
   const div = document.createElement('div');
   div.className = 'entry';
   div.innerHTML = `
@@ -7744,7 +7744,7 @@ function renderTimelineTab(host, n) {
     list.innerHTML = '<p class="dim">还没有时间节点。</p>';
     return;
   }
-  initBibleVirtualList(list, n.bible.timeline, (t, i) => renderTimelineEntry(t, i), 'timeline');
+  initBibleVirtualList(list, n.bible.timeline, (t, i) => renderTimelineEntry(t, i, n), 'timeline');
 
   $('#addTl', host).onclick = () => {
     n.bible.timeline.push({ id: uid('t'), time: '', title: '', desc: '' });

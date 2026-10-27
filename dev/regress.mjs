@@ -449,6 +449,62 @@ async function main() {
   check('一致性忽略清单能持久化', Array.isArray(savedIgnored) && savedIgnored[0]?.key === 'consistency|name|test', JSON.stringify(savedIgnored));
 
   // ---------------------------------------------------------------
+  group('设定库整份保存');
+  {
+    const n = await post(`${BASE}/api/novels`, { title: '设定库保存测试' });
+    const nid = n.novel?.id;
+    const bibleOf = async () => (await get(`${BASE}/api/novels/${nid}`)).novel.bible || {};
+
+    await put(`${BASE}/api/novels/${nid}`, {
+      bible: {
+        characters: [
+          { id: 'c1', name: '甲' },
+          { id: 'c2', name: '乙' },
+          { id: 'c3', name: '丙' },
+        ],
+        world: [{ id: 'w1', name: '山门' }, { id: 'w2', name: '剑冢' }],
+        timeline: [{ id: 't1', title: '入门' }],
+      },
+    });
+    let b = await bibleOf();
+    check('设定库：三条人物落盘', b.characters?.length === 3, JSON.stringify(b.characters?.map((c) => c.name)));
+
+    // 前端保存时发的是整份快照：删掉一个人物后，服务端必须真的删掉
+    await put(`${BASE}/api/novels/${nid}`, {
+      bible: { characters: b.characters.slice(0, 2), world: b.world, timeline: b.timeline },
+    });
+    b = await bibleOf();
+    check('设定库：删除人物能落盘', b.characters?.length === 2 && !b.characters.some((c) => c.id === 'c3'), JSON.stringify(b.characters?.map((c) => c.name)));
+
+    // 删到空也要生效
+    await put(`${BASE}/api/novels/${nid}`, { bible: { characters: [] } });
+    b = await bibleOf();
+    check('设定库：删空人物能落盘', b.characters?.length === 0);
+    check('设定库：只发人物时世界观保留', b.world?.length === 2, `world=${b.world?.length}`);
+    check('设定库：只发人物时时间线保留', b.timeline?.length === 1, `timeline=${b.timeline?.length}`);
+
+    // 三个主数组之外的旧字段（早期导入的功法/物品）不能因为保存人物而丢失
+    await put(`${BASE}/api/novels/${nid}`, {
+      bible: { characters: [], world: b.world, timeline: b.timeline, skills: [{ name: '御剑术' }] },
+    });
+    await put(`${BASE}/api/novels/${nid}`, {
+      bible: { characters: [{ name: '丁' }], world: b.world, timeline: b.timeline },
+    });
+    b = await bibleOf();
+    check('设定库：其它板块不因保存人物丢失', b.skills?.[0]?.name === '御剑术', JSON.stringify(b.skills));
+    check('设定库：没有 id 的新人物自动补 id', /^b_/.test(b.characters?.[0]?.id || ''), b.characters?.[0]?.id);
+
+    // 只改 meta 时不能把设定库清空
+    await put(`${BASE}/api/novels/${nid}`, { meta: { logline: '只改一句话' } });
+    b = await bibleOf();
+    const after = (await get(`${BASE}/api/novels/${nid}`)).novel;
+    check('设定库：只改 meta 不清空设定', b.characters?.length === 1 && b.world?.length === 2 && b.timeline?.length === 1);
+    check('设定库：meta 单独保存生效', after.meta?.logline === '只改一句话');
+
+    await req('DELETE', `${BASE}/api/novels/${nid}?permanent=1`);
+  }
+
+  // ---------------------------------------------------------------
   group('片段导入（11 个板块）');
   // 目标作品里第一章的 id 就是 cid，章节类板块直接按这个 id 归位
   const remap = (arr) => (arr || []).map((x) => x);
