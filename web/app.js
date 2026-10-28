@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -7452,6 +7452,7 @@ function openEntryStatesModal(entry, states) {
 function renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache) {
   const div = document.createElement('div');
   div.className = 'entry';
+  if (c.id) div.dataset.entryId = c.id;
   div.innerHTML = `
     <div class="entry-head">
       <input class="input" data-key="name" value="${esc(c.name || '')}" placeholder="姓名" style="max-width:180px;font-weight:600" />
@@ -7720,22 +7721,76 @@ function threadMeta(item) {
   return `第 ${nos[0]}–${nos[nos.length - 1]} 章 · 跨 ${nos.length} 章`;
 }
 
+/** 切到人物页签，清掉搜索，把目标卡滚进视口并闪一下。 */
+function focusCharacterCard(characterId, attempt = 0) {
+  const n = S.novel;
+  const list = $('#charList');
+  if (!n || !list) return false;
+  const idx = n.bible.characters.findIndex((c) => c.id === characterId);
+  if (idx < 0) return false;
+  const vl = S.bibleVl.lists.characters;
+  const virtual = vl?.enabled && vl.listEl === list;
+  if (virtual) {
+    const itemH = vl.itemHeight || 280;
+    const viewH = list.clientHeight || itemH;
+    list.scrollTop = Math.max(0, idx * itemH - Math.max(0, (viewH - itemH) / 2));
+    renderBibleVirtualList(list, list.scrollTop, 'characters');
+  }
+  const card = [...list.querySelectorAll('[data-entry-id]')].find((el) => el.dataset.entryId === characterId);
+  if (!card) {
+    if (attempt < 3) requestAnimationFrame(() => focusCharacterCard(characterId, attempt + 1));
+    return false;
+  }
+  if (!virtual) card.scrollIntoView({ block: 'center' });
+  card.classList.add('flash');
+  setTimeout(() => card.classList.remove('flash'), 1400);
+  return true;
+}
+
+/** 从关系图节点跳到人物卡；只在记忆里出现的人物给一个明确的新增入口。 */
+function jumpToCharacterNode(node) {
+  if (!S.novel) return;
+  const novelId = S.novel.id;
+  if (node.group === 'bible' && S.novel.bible.characters.some((c) => c.id === node.id)) {
+    openCharacterCard(node.id);
+    return;
+  }
+  bibleTab = 'characters';
+  $$('#bibleTabs button').forEach((x) => x.classList.toggle('on', x.dataset.bible === 'characters'));
+  S.bibleSearch.characters = '';
+  setView('bible');
+  toast(`「${node.label}」只出现在章节记忆里，还没有人物卡`, '', {
+    label: '新增人物卡',
+    onClick: () => {
+      if (S.novel?.id !== novelId) return toast('已切换作品，无法新增', 'err');
+      const c = { id: uid('ch'), name: node.label, role: '配角', keywords: [], relations: [] };
+      S.novel.bible.characters.push(c);
+      S.bibleSearch.characters = '';
+      renderBible();
+      saveNovelPart({ bible: S.novel.bible });
+      focusCharacterCard(c.id);
+    },
+  });
+}
+
+/** 切到人物页签并定位到某张人物卡（供关系图双击使用） */
+function openCharacterCard(characterId) {
+  if (!S.novel) return false;
+  if (!S.novel.bible.characters.some((c) => c.id === characterId)) return false;
+  bibleTab = 'characters';
+  $$('#bibleTabs button').forEach((x) => x.classList.toggle('on', x.dataset.bible === 'characters'));
+  S.bibleSearch.characters = '';
+  setView('bible');
+  return focusCharacterCard(characterId);
+}
+
 /** 人物关系图谱：基于设定库与章节记忆自动生成人物关系网络 */
 function renderRelationsTab(host, n) {
-  // 收集所有角色（设定库 + 记忆）
-  const characters = new Map();
-  (n.bible?.characters || []).forEach((c) => {
-    characters.set(c.id, { ...c, fromBible: true });
-  });
+  // 收集所有角色（设定库 + 记忆）：记忆名先按别名归到人物卡，归不上的才建独立节点
   const index = buildCharacterAppearances(n);
-  for (const [name] of index) {
-    const existing = [...characters.values()].find((c) => c.name === name || (c.keywords || []).includes(name));
-    if (!existing) {
-      characters.set(`mem_${name}`, { name, id: `mem_${name}`, fromMemory: true });
-    }
-  }
+  const { characters, mentionToId } = collectCharacterNodes(n);
+  const charList = characters;
 
-  const charList = [...characters.values()];
   if (charList.length < 2) {
     host.innerHTML = `
       <div class="bible-block">
@@ -7745,9 +7800,19 @@ function renderRelationsTab(host, n) {
     return;
   }
 
-  // 从记忆中提取关系
-  const relations = new Map(); // key: "id1-id2" (sorted), value: { type, strength, evidence: [] }
   const REL_TYPES = ['亲密', '敌对', '师徒', '亲属', '盟友', '竞争', '暗恋', '背叛', '保护', '利用'];
+  const relations = new Map(); // key: 排序后的 id 对，value 自带 source / target
+  const relationKey = (a, b) => [a, b].sort().join('\u0000');
+  const ensureRelation = (source, target, type = '关联') => {
+    if (!source || !target || source === target) return null;
+    const key = relationKey(source, target);
+    let rel = relations.get(key);
+    if (!rel) {
+      rel = { source, target, type, strength: 0, evidence: [] };
+      relations.set(key, rel);
+    }
+    return rel;
+  };
 
   // 从设定库关系字段提取（新数据是 { to, type, note } 数组；老数据兼容「对象：关系」字符串）
   (n.bible?.characters || []).forEach((c) => {
@@ -7763,11 +7828,10 @@ function renderRelationsTab(host, n) {
       }).filter(Boolean);
     }
     entries.forEach(({ to, type, note }) => {
-      const target = [...characters.values()].find((ch) => ch.name === to || (ch.keywords || []).includes(to));
+      const target = findCharacterByMention(charList, to);
       if (!target || target.id === c.id) return;
-      const key = [c.id, target.id].sort().join('-');
-      if (!relations.has(key)) relations.set(key, { type, strength: 5, evidence: [] });
-      const rel = relations.get(key);
+      const rel = ensureRelation(c.id, target.id, type);
+      if (!rel) return;
       // 明确关系比共同出场推断更可信：更新类型，并抬到最高强度
       if (type) rel.type = type;
       rel.strength = Math.max(rel.strength, 5);
@@ -7776,51 +7840,57 @@ function renderRelationsTab(host, n) {
   });
 
   // 从记忆推断关系：共同出场、状态变化提及
-  for (const [, chapters] of index) {
-    for (const ch of chapters) {
-      const mem = ch.memory || {};
-      const chars = [...new Set((mem.characters || []).map((c) => String(c)).filter(Boolean))];
-      for (let i = 0; i < chars.length; i++) {
-        for (let j = i + 1; j < chars.length; j++) {
-          const c1 = [...characters.values()].find((c) => c.name === chars[i] || (c.keywords || []).includes(chars[i]));
-          const c2 = [...characters.values()].find((c) => c.name === chars[j] || (c.keywords || []).includes(chars[j]));
-          if (c1 && c2 && c1.id !== c2.id) {
-            const key = [c1.id, c2.id].sort().join('-');
-            if (!relations.has(key)) relations.set(key, { type: '关联', strength: 1, evidence: [] });
-            const rel = relations.get(key);
-            rel.strength += 1;
-            rel.evidence.push(`第 ${ch.no} 章共同出场`);
-            if (mem.stateChanges?.some((s) => s.includes(chars[i]) && s.includes(chars[j]))) {
-              rel.strength += 2;
-              rel.evidence.push(`第 ${ch.no} 章状态变化关联`);
-            }
-          }
+  for (const [chapterIndex, ch] of (n.chapters || []).entries()) {
+    const mem = ch.memory || {};
+    const no = ch.no || chapterIndex + 1;
+    const ids = [];
+    const names = new Map();
+    for (const raw of splitMemoryCharacters(mem.characters)) {
+      const id = mentionToId.get(normalizeCharacterName(raw));
+      if (!id || ids.includes(id)) continue;
+      ids.push(id);
+      names.set(id, raw);
+    }
+    const states = memoryItems(mem, 'stateChanges');
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const rel = ensureRelation(ids[i], ids[j]);
+        if (!rel) continue;
+        rel.strength += 1;
+        rel.evidence.push(`第 ${no} 章共同出场`);
+        const nodeA = charList.find((c) => c.id === ids[i]);
+        const nodeB = charList.find((c) => c.id === ids[j]);
+        const hit = (state, raw, node) => state.includes(raw) || (node?.name && state.includes(node.name));
+        if (states.some((s) => hit(s, names.get(ids[i]), nodeA) && hit(s, names.get(ids[j]), nodeB))) {
+          rel.strength += 2;
+          rel.evidence.push(`第 ${no} 章状态变化关联`);
         }
       }
     }
   }
 
   // 生成节点和边数据
-  const nodes = [...characters.values()].map((c, i) => ({
-    id: c.id,
-    label: c.name,
-    group: c.fromBible ? 'bible' : 'memory',
-    size: 20 + Math.min(30, ([...index.values()].flat().filter((ch) => {
-      const mem = ch.memory || {};
-      return (mem.characters || []).some((cn) => cn === c.name || (c.keywords || []).includes(c.name));
-    }).length * 3)),
-    x: 200 + Math.cos((i / charList.length) * Math.PI * 2) * 180,
-    y: 200 + Math.sin((i / charList.length) * Math.PI * 2) * 180,
-  }));
-
-  const edges = [...relations.entries()].map(([key, rel]) => {
-    const [source, target] = key.split('-');
-    return { source, target, type: rel.type, strength: rel.strength, evidence: rel.evidence.slice(-3) };
-  });
-
-  // SVG 关系图
   const svgWidth = 700;
   const svgHeight = 500;
+  const nodes = charList.map((c, i) => {
+    const appearances = appearancesForCharacter(c, index).length;
+    return {
+      id: c.id,
+      label: c.name || '未命名',
+      group: c.fromBible ? 'bible' : 'memory',
+      size: 20 + Math.min(30, appearances * 3),
+      x: svgWidth / 2 + Math.cos((i / charList.length) * Math.PI * 2) * 180,
+      y: svgHeight / 2 + Math.sin((i / charList.length) * Math.PI * 2) * 150,
+    };
+  });
+
+  const edges = [...relations.values()].map((rel) => ({
+    source: rel.source,
+    target: rel.target,
+    type: rel.type,
+    strength: rel.strength,
+    evidence: rel.evidence.slice(-3),
+  }));
 
   host.innerHTML = `
     <div class="bible-block">
@@ -7834,9 +7904,9 @@ function renderRelationsTab(host, n) {
           <option value="other">其他/推断</option>
         </select>
       </h2>
-      <p class="dim small">基于设定库关系字段 + 章节记忆共同出场/状态关联自动生成。节点大小=出场频度，边粗细=关联强度。拖拽节点可调整布局，双击节点跳转人物卡。</p>
+      <p class="dim small">基于设定库关系字段 + 章节记忆共同出场/状态关联自动生成。人物名会按全名、分段与关键词归并，节点大小=出场频度，边粗细=关联强度。拖拽节点可调整布局，双击节点跳转人物卡。</p>
       <div class="relation-svg-wrap" style="position:relative;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;">
-        <svg id="relationSvg" width="${svgWidth}" height="${svgHeight}" style="display:block;"></svg>
+        <svg id="relationSvg" viewBox="0 0 ${svgWidth} ${svgHeight}" width="100%" style="display:block;height:auto;"></svg>
       </div>
       <div class="relation-legend" style="margin-top:12px;display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--text-3)">
         ${REL_TYPES.map((t) => `<span><span style="display:inline-block;width:12px;height:3px;background:var(--${t === '亲密' ? 'success' : t === '敌对' ? 'danger' : t === '师徒' ? 'warning' : 'accent'});vertical-align:middle;margin-right:4px;border-radius:2px;"></span>${t}</span>`).join('')}
@@ -7880,6 +7950,8 @@ function renderRelationsTab(host, n) {
       line.setAttribute('stroke-width', Math.max(1, Math.min(5, edge.strength / 2)));
       line.setAttribute('stroke-dasharray', REL_TYPES.includes(edge.type) ? 'none' : '4,4');
       line.setAttribute('marker-end', 'url(#arrow)');
+      line.setAttribute('data-source', edge.source);
+      line.setAttribute('data-target', edge.target);
       line.setAttribute('data-evidence', edge.evidence.join('\n'));
       line.setAttribute('data-type', edge.type);
       line.setAttribute('data-strength', edge.strength);
@@ -7898,36 +7970,37 @@ function renderRelationsTab(host, n) {
     nodes.forEach((node) => {
       const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       g.setAttribute('class', 'relation-node');
+      g.setAttribute('data-node-id', node.id);
+      g.setAttribute('data-node-group', node.group);
       g.style.cursor = 'move';
       g.innerHTML = `
-        <circle cx="${node.x}" cy="${node.y}" r="${node.size}" fill="${node.group === 'bible' ? 'var(--brand)' : 'var(--accent)'}" stroke="var(--surface-1)" stroke-width="2" opacity="0.9" />
-        ${showLabelsEl.checked ? `<text x="${node.x}" y="${node.y + node.size + 14}" text-anchor="middle" font-size="11" fill="var(--text-1)" style="pointer-events:none;">${node.label}</text>` : ''}
+        <circle cx="${node.x}" cy="${node.y}" r="${node.size}" style="--size:${node.size}px" fill="${node.group === 'bible' ? 'var(--brand)' : 'var(--accent)'}" stroke="var(--surface-1)" stroke-width="2" opacity="0.9" />
+        ${showLabelsEl.checked ? `<text x="${node.x}" y="${node.y + node.size + 14}" text-anchor="middle" font-size="11" fill="var(--text-1)" style="pointer-events:none;">${esc(node.label)}</text>` : ''}
       `;
       g.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         draggedNode = node;
         g.style.cursor = 'grabbing';
       });
-      g.addEventListener('dblclick', () => {
-        // 跳转到人物卡
-        const charId = node.id;
-        setView('bible');
-        $('#bibleTabs button[data-bible="characters"]')?.click();
-        requestAnimationFrame(() => {
-          const card = $$('.entry', $('#bibleBody')).find((el) => el.querySelector('[data-rk="name"]')?.value === node.label || el.querySelector('[data-rk="name"]')?.value === node.id);
-          if (card) { card.scrollIntoView({ block: 'center' }); card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 1400); }
-        });
-      });
+      g.addEventListener('dblclick', () => jumpToCharacterNode(node));
       svg.appendChild(g);
     });
   }
 
-  // 拖拽逻辑
+  // 拖拽逻辑：CSS 会把 SVG 拉伸到容器宽度，坐标要经过 CTM 换算，否则一拖就偏
+  const toSvgPoint = (e) => {
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const ctm = svg.getScreenCTM();
+    return ctm ? pt.matrixTransform(ctm.inverse()) : { x: e.clientX - svg.getBoundingClientRect().left, y: e.clientY - svg.getBoundingClientRect().top };
+  };
   svg.addEventListener('mousemove', (e) => {
     if (!draggedNode) return;
-    const rect = svg.getBoundingClientRect();
-    draggedNode.x = Math.max(30, Math.min(svgWidth - 30, e.clientX - rect.left));
-    draggedNode.y = Math.max(30, Math.min(svgHeight - 30, e.clientY - rect.top));
+    const p = toSvgPoint(e);
+    const pad = draggedNode.size + 4;
+    draggedNode.x = Math.max(pad, Math.min(svgWidth - pad, p.x));
+    draggedNode.y = Math.max(pad, Math.min(svgHeight - pad, p.y));
     renderGraph();
   });
   svg.addEventListener('mouseup', () => { draggedNode = null; });
@@ -8019,22 +8092,11 @@ function renderArcsTab(host, n) {
     return;
   }
 
-  // 收集所有出场过的角色（来自设定库 + 记忆）
-  const characters = new Map();
-  // 设定库里的人物
-  (n.bible?.characters || []).forEach((c) => {
-    characters.set(c.id, { ...c, fromBible: true });
-  });
-  // 记忆里出现过的人物
-  for (const [name, chapters] of index) {
-    const existing = [...characters.values()].find((c) => c.name === name || (c.keywords || []).includes(name));
-    if (!existing) {
-      characters.set(`mem_${name}`, { name, id: `mem_${name}`, fromMemory: true });
-    }
-  }
+  // 收集所有出场过的角色（设定库 + 记忆）；记忆名先按别名归到人物卡，避免别名重复成多张卡
+  const { characters } = collectCharacterNodes(n);
 
   // 准备弧光数据项（每项是一个角色的完整弧光卡片）
-  const arcItems = [...characters.values()].map((char) => {
+  const arcItems = characters.map((char) => {
     const appearances = appearancesForCharacter(char, index);
     if (!appearances.length) return null;
 

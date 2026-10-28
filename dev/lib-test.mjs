@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1074,6 +1074,50 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('人物出场：关键词支持字符串写法', show({ name: '艾伦', keywords: '史密斯，艾伦' }) === '[1,2,3]', show({ name: '艾伦', keywords: '史密斯，艾伦' }));
   check('人物出场：未出场返回空', nos({ name: '青云宗' }).length === 0);
   check('人物出场：空人物返回空', nos({ name: '' }).length === 0);
+}
+
+// ---------------------------------------------------------------
+// 人物别名解析：关系图 / 弧光把记忆名归到人物卡
+{
+  const cards = [
+    { id: 'c1', name: '艾伦', keywords: ['史密斯'] },
+    { id: 'c2', name: '艾伦·史密斯', keywords: [] },
+    { id: 'c3', name: '林昭', keywords: [] },
+    { id: 'c4', name: '小昭', keywords: [] },
+  ];
+  const idOf = (value) => findCharacterByMention(cards, value)?.id || '';
+  const aliases = characterAliases(cards[1]);
+
+  check('人物别名：全名与分段都进别名', ['艾伦史密斯', '艾伦', '史密斯'].every((x) => aliases.includes(x)), JSON.stringify(aliases));
+  check('人物别名：关键词也进别名', characterAliases(cards[0]).includes('史密斯'), JSON.stringify(characterAliases(cards[0])));
+  check('人物别名：全名卡优先于分段卡', idOf('艾伦·史密斯') === 'c2', idOf('艾伦·史密斯'));
+  check('人物别名：短名精确命中短名卡', idOf('艾伦') === 'c1', idOf('艾伦'));
+  check('人物别名：关键词精确命中', idOf('史密斯') === 'c1', idOf('史密斯'));
+  check('人物别名：括号备注不挡匹配', idOf('艾伦·史密斯（少年）') === 'c2', idOf('艾伦·史密斯（少年）'));
+  check('人物别名：单字不误撞双字名', idOf('昭') === '', idOf('昭'));
+  check('人物别名：找不到返回空', idOf('陌生人') === '', idOf('陌生人'));
+  check('人物别名：没有全名卡时按分段归到短名卡', findCharacterByMention([cards[0]], '艾伦·史密斯')?.id === 'c1');
+
+  const onlyShort = collectCharacterNodes({
+    bible: { characters: [cards[0]] },
+    chapters: [{ id: 'y1', no: 1, memory: { characters: ['艾伦·史密斯'] } }],
+  });
+  check('人物归并：关键词卡吸收全名记忆', onlyShort.characters.length === 1 && onlyShort.characters[0].fromBible && onlyShort.mentionToId.get('艾伦史密斯') === 'c1', `${onlyShort.characters.length} ${JSON.stringify([...onlyShort.mentionToId])}`);
+
+  const novel = {
+    bible: { characters: cards },
+    chapters: [
+      { id: 'x1', no: 1, memory: { characters: ['艾伦·史密斯', '林昭'] } },
+      { id: 'x2', no: 2, memory: { characters: ['艾伦', '陌生人', '陌生人（青年）'] } },
+      { id: 'x3', no: 3, memory: { characters: [{ name: '小昭' }] } },
+    ],
+  };
+  const { characters, mentionToId } = collectCharacterNodes(novel);
+  const memoryNames = characters.filter((c) => c.fromMemory).map((c) => c.name);
+  check('人物归并：记忆名按别名归到人物卡', mentionToId.get('艾伦史密斯') === 'c2' && mentionToId.get('艾伦') === 'c1', JSON.stringify([...mentionToId]));
+  check('人物归并：别名不会重复生成记忆节点', characters.length === 5, `${characters.length} ${characters.map((c) => c.name).join('|')}`);
+  check('人物归并：记忆人物同名只留一个', memoryNames.length === 1 && memoryNames[0] === '陌生人', JSON.stringify(memoryNames));
+  check('人物归并：对象写法也能归并', mentionToId.get('小昭') === 'c4', JSON.stringify([...mentionToId]));
 }
 
 // ---------------------------------------------------------------

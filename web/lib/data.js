@@ -41,15 +41,26 @@ export const THREAD_KINDS = {
 };
 
 
-export function appearancesForCharacter(character, index) {
-  const rawKeywords = Array.isArray(character?.keywords)
-    ? character.keywords
-    : (typeof character?.keywords === 'string' ? character.keywords.split(/[,，、\s]+/) : []);
-  const keys = new Set();
-  for (const value of [character?.name, ...rawKeywords]) {
-    for (const alias of characterNameAliases(value)) keys.add(alias);
+/** 人物卡的检索关键词（兼容字符串写法） */
+export function characterKeywords(character) {
+  const raw = character?.keywords;
+  return Array.isArray(raw)
+    ? raw
+    : (typeof raw === 'string' ? raw.split(/[,，、\s]+/).filter(Boolean) : []);
+}
+
+/** 人物卡的检索别名：姓名 + 关键词，都按全名与分段展开。 */
+export function characterAliases(character) {
+  const aliases = new Set();
+  for (const value of [character?.name, ...characterKeywords(character)]) {
+    for (const alias of characterNameAliases(value)) aliases.add(alias);
   }
-  if (!keys.size) return [];
+  return [...aliases];
+}
+
+export function appearancesForCharacter(character, index) {
+  const keys = characterAliases(character);
+  if (!keys.length) return [];
   const byId = new Map();
   for (const key of keys) {
     for (const ch of index.get(key)?.values() || []) byId.set(ch.id, ch);
@@ -113,6 +124,58 @@ export function splitMemoryCharacters(value) {
   if (Array.isArray(value)) value.forEach(push);
   else push(value);
   return out;
+}
+
+/** 在人物卡里找记忆 / 关系字段提到的名字。
+ *  优先级：姓名全名 > 关键词全名 > 姓名 / 关键词的别名分段。
+ *  这样「艾伦·史密斯」会落到同名卡，而不是先撞上「艾伦」这张卡。 */
+export function findCharacterByMention(characters, value) {
+  const list = Array.isArray(characters) ? characters : [];
+  const full = normalizeCharacterName(value);
+  if (!full) return null;
+  const wanted = new Set(characterNameAliases(value));
+  let best = null;
+  let bestScore = 0;
+  for (const c of list) {
+    if (!c) continue;
+    const name = normalizeCharacterName(c.name);
+    const keywords = characterKeywords(c).map(normalizeCharacterName).filter(Boolean);
+    let score = 0;
+    if (name && name === full) score = 4;
+    else if (keywords.includes(full)) score = 3;
+    else if (characterAliases(c).some((alias) => wanted.has(alias))) score = 2;
+    if (score > bestScore) { best = c; bestScore = score; }
+  }
+  return best;
+}
+
+/** 汇总设定库人物与章节记忆里的人物：
+ *  记忆名先按别名归到人物卡；归不上的同名只留一个「记忆人物」节点。
+ *  mentionToId 用归一化全名作键，供关系图按章提取人物时复用。 */
+export function collectCharacterNodes(novel) {
+  const bible = Array.isArray(novel?.bible?.characters) ? novel.bible.characters : [];
+  const characters = bible.map((c) => ({ ...c, fromBible: true }));
+  const mentionToId = new Map();
+  const memoryNodes = new Map();
+  for (const ch of novel?.chapters || []) {
+    for (const raw of splitMemoryCharacters(ch.memory?.characters)) {
+      const full = normalizeCharacterName(raw);
+      if (!full || mentionToId.has(full)) continue;
+      const matched = findCharacterByMention(bible, raw);
+      if (matched) {
+        mentionToId.set(full, matched.id);
+        continue;
+      }
+      let node = memoryNodes.get(full);
+      if (!node) {
+        node = { id: `mem_${full}`, name: raw, fromMemory: true };
+        memoryNodes.set(full, node);
+        characters.push(node);
+      }
+      mentionToId.set(full, node.id);
+    }
+  }
+  return { characters, mentionToId };
 }
 
 /** 去掉括号备注、空格和连接符后再比对，兼容「张三（少年）」「艾伦·史密斯」这类写法 */
