@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1074,6 +1074,28 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('人物出场：关键词支持字符串写法', show({ name: '艾伦', keywords: '史密斯，艾伦' }) === '[1,2,3]', show({ name: '艾伦', keywords: '史密斯，艾伦' }));
   check('人物出场：未出场返回空', nos({ name: '青云宗' }).length === 0);
   check('人物出场：空人物返回空', nos({ name: '' }).length === 0);
+}
+
+// ---------------------------------------------------------------
+// 设定库搜索：匹配与过滤后的原下标
+{
+  const items = [
+    { name: '艾伦·史密斯', identity: '游侠', keywords: ['北境'] },
+    { name: '林昭', identity: '剑修', keywords: [] },
+    { name: 'Alan', identity: 'Ranger', keywords: ['North'] },
+  ];
+  const textOf = (x) => [x.name, x.identity, ...(x.keywords || [])].join(' ');
+  const indexes = (q) => filterEntriesBySearch(items, q, textOf).map(({ index }) => index);
+
+  check('设定搜索：空查询返回全部并保留原下标', JSON.stringify(indexes('')) === '[0,1,2]', JSON.stringify(indexes('')));
+  check('设定搜索：按姓名匹配', JSON.stringify(indexes('林昭')) === '[1]', JSON.stringify(indexes('林昭')));
+  check('设定搜索：按关键词匹配', JSON.stringify(indexes('北境')) === '[0]', JSON.stringify(indexes('北境')));
+  check('设定搜索：忽略大小写', JSON.stringify(indexes('alan')) === '[2]', JSON.stringify(indexes('alan')));
+  check('设定搜索：忽略空白与间隔符', JSON.stringify(indexes('艾伦 史密斯')) === '[0]', JSON.stringify(indexes('艾伦 史密斯')));
+  check('设定搜索：多个词按都包含匹配', JSON.stringify(indexes('游侠 北境')) === '[0]', JSON.stringify(indexes('游侠 北境')));
+  check('设定搜索：过滤后仍保留原下标', JSON.stringify(indexes('Alan')) === '[2]', JSON.stringify(indexes('Alan')));
+  check('设定搜索：无匹配返回空', indexes('不存在').length === 0);
+  check('设定搜索：空列表不报错', filterEntriesBySearch(null, '林昭', textOf).length === 0);
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);

@@ -1370,6 +1370,10 @@ kbd {
   font-size: 13.5px; font-weight: 600;
 }
 .bible-block > h2 .spacer { flex: 1; }
+.bible-search { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+.bible-search .input { flex: 1; max-width: 420px; height: 32px; }
+.bible-search [hidden] { display: none; }
+.bible-search-count { white-space: nowrap; }
 .entry-list { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
 
 /* 设定库虚拟滚动 */

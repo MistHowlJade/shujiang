@@ -155,6 +155,23 @@ export function normalizeMentionKey(value) {
   return normalizeMentionText(String(value || '').replace(/[（(【\[][^）)】\]]*[）)】\]]/g, ''));
 }
 
+/** 设定库条目搜索：空格分隔多个词时按「都包含」匹配；忽略大小写与间隔符。
+ *  返回 { item, index }，index 是原数组下标，过滤后删除 / 跳章仍要按它来。 */
+export function filterEntriesBySearch(items, query, textOf) {
+  const terms = String(query || '')
+    .trim()
+    .split(/\s+/)
+    .map(normalizeMentionText)
+    .filter(Boolean);
+  return (Array.isArray(items) ? items : [])
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => {
+      if (!terms.length) return true;
+      const text = normalizeMentionText(textOf(item));
+      return terms.every((term) => text.includes(term));
+    });
+}
+
 /** 一个条目可以用来检索的名字与关键词。单字太容易误命中，直接跳过 */
 export function worldMentionKeys(entry) {
   const rawKeywords = Array.isArray(entry?.keywords)

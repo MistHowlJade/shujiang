@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -275,6 +275,7 @@ const S = {
   stageFilter: '',         // 章节列表筛选：'' / 'open' / 'draft' / 'revising' / 'done'
   focusMode: false,        // 专注写作模式：只留稿纸
   threadFilter: 'all',     // 线索页筛选：all / unresolved / foreshadowing
+  bibleSearch: { characters: '', world: '', timeline: '' }, // 设定库搜索词，按页签分别记住
   revisionDraftChapterId: null, // 修订输入框里未提交的草稿属于哪一章
   out: '',
   reasoning: '',
@@ -777,6 +778,7 @@ async function openNovel(id, opts = {}) {
   volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   S.stageFilter = '';          // 筛选也一样，换作品先看全貌
   S.threadFilter = 'all';      // 线索页也回到全部
+  S.bibleSearch = { characters: '', world: '', timeline: '' }; // 搜索词属于上一本书，别带过去
   setView('studio');
   renderStudio();
 }
@@ -6988,6 +6990,68 @@ function bindFields(root, obj, after, numericKeys = []) {
   }));
 }
 
+/* ---- 设定库搜索 ---- */
+function bibleSearchValue(tab) {
+  return S.bibleSearch?.[tab] || '';
+}
+
+function bibleSearchBar(tab, placeholder) {
+  const q = bibleSearchValue(tab);
+  return `<div class="bible-search">
+    <input class="input" data-bible-search="${tab}" value="${esc(q)}" placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}" />
+    <span class="bible-search-count dim small" data-bible-search-count="${tab}"></span>
+    <button type="button" class="btn btn-sm btn-text" data-bible-search-clear="${tab}"${q ? '' : ' hidden'}>清除</button>
+  </div>`;
+}
+
+function bindBibleSearch(host, tab, onChange) {
+  const input = $(`[data-bible-search="${tab}"]`, host);
+  if (!input) return;
+  const clear = $(`[data-bible-search-clear="${tab}"]`, host);
+  const update = () => {
+    S.bibleSearch[tab] = input.value;
+    if (clear) clear.hidden = !input.value;
+    onChange();
+  };
+  input.addEventListener('input', update);
+  clear?.addEventListener('click', () => {
+    input.value = '';
+    update();
+    input.focus();
+  });
+}
+
+function setBibleSearchCount(host, tab, shown, total) {
+  const el = $(`[data-bible-search-count="${tab}"]`, host);
+  if (!el) return;
+  el.textContent = bibleSearchValue(tab).trim() ? `${shown} / ${total}` : `共 ${total} 条`;
+}
+
+function bibleSearchText(values) {
+  return values.flat(Infinity).map((v) => String(v ?? '')).join('\n');
+}
+
+function searchKeywordList(value) {
+  return Array.isArray(value) ? value : (typeof value === 'string' ? value.split(/[,，、\s]+/).filter(Boolean) : []);
+}
+
+function characterSearchText(c) {
+  return bibleSearchText([
+    c?.name, c?.role, c?.identity, c?.desc, c?.age, c?.appearance, c?.personality,
+    c?.goal, c?.flaw, c?.secret, c?.speech, c?.arc,
+    searchKeywordList(c?.keywords),
+    Array.isArray(c?.relations) ? c.relations.flatMap((r) => [r?.to, r?.type, r?.note]) : [],
+  ]);
+}
+
+function worldSearchText(w) {
+  return bibleSearchText([w?.name, w?.category, w?.desc, searchKeywordList(w?.keywords)]);
+}
+
+function timelineSearchText(t) {
+  return bibleSearchText([t?.time, t?.title, t?.desc]);
+}
+
 function renderBible() {
   const host = $('#bibleBody');
   if (!S.novel) { host.innerHTML = '<p class="dim">先打开一部作品。</p>'; return; }
@@ -7447,19 +7511,27 @@ function renderCharactersTab(host, n) {
         <button class="btn btn-sm" id="addChar">${ico('plus')}新增人物</button>
       </h2>
       <p class="dim small">人物卡会自动进入生成上下文。系统用名字与身份做相关度匹配，本章提到谁，就重点带上谁；存过章节记忆后，会按姓名与关键词汇总出场章节（「艾伦·史密斯」这类全名会拆成「艾伦」「史密斯」分别匹配），点章节号即可跳转。章节记忆里的状态变化（如「林昭手臂受伤」）也会归到人物卡下，显示成「状态 N」chip。</p>
+      ${bibleSearchBar('characters', '搜索人物：姓名 / 身份 / 说明 / 关键词 / 关系')}
       <div class="entry-list" id="charList"></div>
     </div>`;
   const list = $('#charList', host);
   const charIndex = buildCharacterAppearances(n);
   const mentionIndex = buildMentionIndex(n);
   const stateCache = new Map();
-  if (!n.bible.characters.length) {
-    list.innerHTML = '<p class="dim">还没有人物卡。</p>';
-    return;
-  }
 
-  // 虚拟列表：100 条以上启用
-  initBibleVirtualList(list, n.bible.characters, (c, i) => renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache), 'characters');
+  const renderList = () => {
+    const rows = filterEntriesBySearch(n.bible.characters, bibleSearchValue('characters'), characterSearchText);
+    setBibleSearchCount(host, 'characters', rows.length, n.bible.characters.length);
+    list.scrollTop = 0;
+    initBibleVirtualList(list, rows, ({ item, index }) => renderCharacterEntry(item, index, charIndex, n, mentionIndex, stateCache), 'characters');
+    if (!rows.length) {
+      list.innerHTML = n.bible.characters.length
+        ? `<p class="dim">没有匹配「${esc(bibleSearchValue('characters').trim())}」的人物。</p>`
+        : '<p class="dim">还没有人物卡。</p>';
+    }
+  };
+  bindBibleSearch(host, 'characters', renderList);
+  renderList();
 
   list.addEventListener('click', (e) => {
     const chapterBtn = e.target.closest('[data-chapter]');
@@ -7477,6 +7549,7 @@ function renderCharactersTab(host, n) {
   });
 
   $('#addChar', host).onclick = () => {
+    S.bibleSearch.characters = '';
     n.bible.characters.push({ id: uid('ch'), name: '新人物', role: '配角', keywords: [], relations: [] });
     renderBible();
     saveNovelPart({ bible: n.bible });
@@ -7489,6 +7562,7 @@ function renderCharactersTab(host, n) {
     });
     const arr = parseJsonLoose(text);
     if (!Array.isArray(arr)) return toast('解析失败，可到输出区复制后手动填写', 'err');
+    S.bibleSearch.characters = '';
     arr.forEach((x) => n.bible.characters.push({ id: uid('ch'), relations: [], ...x, keywords: x.keywords || [] }));
     renderBible();
     saveNovelPart({ bible: n.bible }, `已加入 ${arr.length} 位人物`);
@@ -7579,17 +7653,27 @@ function renderWorldTab(host, n) {
         <button class="btn btn-sm" id="addWorld">${ico('plus')}新增条目</button>
       </h2>
       <p class="dim small">地理、势力、力量体系、规则、物品、风俗都放这里。条目名与关键词参与相关度匹配；章节记忆里的状态变化会自动归到对应条目下。</p>
+      ${bibleSearchBar('world', '搜索世界观：名称 / 分类 / 说明 / 关键词')}
       <div class="entry-list" id="worldList"></div>
     </div>`;
   const list = $('#worldList', host);
-  if (!n.bible.world.length) {
-    list.innerHTML = '<p class="dim">还没有世界观条目。</p>';
-    return;
-  }
   const mentionIndex = buildMentionIndex(n);
   const mentionCache = new Map();
   const stateCache = new Map();
-  initBibleVirtualList(list, n.bible.world, (w, i) => renderWorldEntry(w, i, n, mentionIndex, mentionCache, stateCache), 'world');
+
+  const renderList = () => {
+    const rows = filterEntriesBySearch(n.bible.world, bibleSearchValue('world'), worldSearchText);
+    setBibleSearchCount(host, 'world', rows.length, n.bible.world.length);
+    list.scrollTop = 0;
+    initBibleVirtualList(list, rows, ({ item, index }) => renderWorldEntry(item, index, n, mentionIndex, mentionCache, stateCache), 'world');
+    if (!rows.length) {
+      list.innerHTML = n.bible.world.length
+        ? `<p class="dim">没有匹配「${esc(bibleSearchValue('world').trim())}」的世界观条目。</p>`
+        : '<p class="dim">还没有世界观条目。</p>';
+    }
+  };
+  bindBibleSearch(host, 'world', renderList);
+  renderList();
 
   list.addEventListener('click', (e) => {
     const chapterBtn = e.target.closest('[data-chapter]');
@@ -7608,6 +7692,7 @@ function renderWorldTab(host, n) {
   });
 
   $('#addWorld', host).onclick = () => {
+    S.bibleSearch.world = '';
     n.bible.world.push({ id: uid('w'), name: '新设定', category: '地理', desc: '', keywords: [] });
     renderBible();
     saveNovelPart({ bible: n.bible });
@@ -7620,6 +7705,7 @@ function renderWorldTab(host, n) {
     });
     const arr = parseJsonLoose(text);
     if (!Array.isArray(arr)) return toast('解析失败，可到输出区复制后手动填写', 'err');
+    S.bibleSearch.world = '';
     arr.forEach((x) => n.bible.world.push({ id: uid('w'), keywords: [], ...x, keywords: x.keywords || [] }));
     renderBible();
     saveNovelPart({ bible: n.bible }, `已加入 ${arr.length} 条世界观`);
@@ -8139,16 +8225,27 @@ function renderTimelineTab(host, n) {
         <button class="btn btn-sm" id="addTl">${ico('plus')}新增节点</button>
       </h2>
       <p class="dim small">故事世界的关键时间点。写到相关情节时会自动带上，防止前后时间对不上。</p>
+      ${bibleSearchBar('timeline', '搜索时间线：时间 / 标题 / 说明')}
       <div class="entry-list" id="tlList"></div>
     </div>`;
   const list = $('#tlList', host);
-  if (!n.bible.timeline.length) {
-    list.innerHTML = '<p class="dim">还没有时间节点。</p>';
-    return;
-  }
-  initBibleVirtualList(list, n.bible.timeline, (t, i) => renderTimelineEntry(t, i, n), 'timeline');
+
+  const renderList = () => {
+    const rows = filterEntriesBySearch(n.bible.timeline, bibleSearchValue('timeline'), timelineSearchText);
+    setBibleSearchCount(host, 'timeline', rows.length, n.bible.timeline.length);
+    list.scrollTop = 0;
+    initBibleVirtualList(list, rows, ({ item, index }) => renderTimelineEntry(item, index, n), 'timeline');
+    if (!rows.length) {
+      list.innerHTML = n.bible.timeline.length
+        ? `<p class="dim">没有匹配「${esc(bibleSearchValue('timeline').trim())}」的时间节点。</p>`
+        : '<p class="dim">还没有时间节点。</p>';
+    }
+  };
+  bindBibleSearch(host, 'timeline', renderList);
+  renderList();
 
   $('#addTl', host).onclick = () => {
+    S.bibleSearch.timeline = '';
     n.bible.timeline.push({ id: uid('t'), time: '', title: '', desc: '' });
     renderBible();
     saveNovelPart({ bible: n.bible });
