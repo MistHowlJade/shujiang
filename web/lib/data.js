@@ -42,10 +42,14 @@ export const THREAD_KINDS = {
 
 
 export function appearancesForCharacter(character, index) {
-  const keys = [character?.name, ...(character?.keywords || [])]
-    .map(normalizeCharacterName)
-    .filter(Boolean);
-  if (!keys.length) return [];
+  const rawKeywords = Array.isArray(character?.keywords)
+    ? character.keywords
+    : (typeof character?.keywords === 'string' ? character.keywords.split(/[,，、\s]+/) : []);
+  const keys = new Set();
+  for (const value of [character?.name, ...rawKeywords]) {
+    for (const alias of characterNameAliases(value)) keys.add(alias);
+  }
+  if (!keys.size) return [];
   const byId = new Map();
   for (const key of keys) {
     for (const ch of index.get(key)?.values() || []) byId.set(ch.id, ch);
@@ -59,24 +63,40 @@ export function buildCharacterAppearances(novel) {
   for (const ch of novel?.chapters || []) {
     const seen = new Set();
     for (const raw of splitMemoryCharacters(ch.memory?.characters)) {
-      const key = normalizeCharacterName(raw);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      let chapters = index.get(key);
-      if (!chapters) { chapters = new Map(); index.set(key, chapters); }
-      chapters.set(ch.id, ch);
+      for (const key of characterNameAliases(raw)) {
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        let chapters = index.get(key);
+        if (!chapters) { chapters = new Map(); index.set(key, chapters); }
+        chapters.set(ch.id, ch);
+      }
     }
   }
   return index;
 }
 
-/** 人物卡按「姓名 + 检索关键词」找记忆里的名字，别名也能命中 */
+/** 人物卡按「姓名 + 检索关键词」找记忆里的名字；全名会拆段，别名也能命中 */
 
 export function normalizeCharacterName(value) {
   return String(value || '')
     .replace(/[（(【\[][^）)】\]]*[）)】\]]/g, '')
     .replace(/[\s·•.。]+/g, '')
     .toLowerCase();
+}
+
+/** 人物名拆成可检索的别名：全名 + 中间点 / 空格分开的片段。
+ *  「艾伦·史密斯」会同时登记「艾伦史密斯」「艾伦」「史密斯」，
+ *  这样卡片名「艾伦」、关键词「史密斯」都能找到同一段出场记录。 */
+function characterNameAliases(value) {
+  const raw = String(value || '');
+  const aliases = new Set();
+  const full = normalizeCharacterName(raw);
+  if (full) aliases.add(full);
+  for (const part of raw.split(/[·•.。\s]+/)) {
+    const key = normalizeCharacterName(part);
+    if (key.length >= 2) aliases.add(key);
+  }
+  return [...aliases];
 }
 
 /** 一次扫完全书记忆：归一化人名 → 出场章节。相同人名的重复记录只算一次 */

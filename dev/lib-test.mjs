@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1050,6 +1050,30 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   };
   const dupReport = scanConsistency(dupNovel, 'book');
   check('一致性检查：设定库近似重名被提示', dupReport.issues.some((i) => i.type === 'name_duplicate'), JSON.stringify(dupReport.issues.map((i) => i.message)));
+}
+
+// ---------------------------------------------------------------
+// 人物出场索引：全名、别名与关键词
+{
+  const novel = {
+    chapters: [
+      { id: 'p1', no: 1, memory: { characters: ['艾伦·史密斯', '林昭（少年）', '青锋剑'] } },
+      { id: 'p2', no: 2, memory: { characters: ['艾伦', '林昭', '剑'] } },
+      { id: 'p3', no: 3, memory: { characters: '沈青梧、艾伦·史密斯' } },
+    ],
+  };
+  const index = buildCharacterAppearances(novel);
+  const nos = (character) => appearancesForCharacter(character, index).map((ch) => ch.no);
+  const show = (character) => JSON.stringify(nos(character));
+
+  check('人物出场：全名分段命中卡片姓名', show({ name: '艾伦' }) === '[1,2,3]', show({ name: '艾伦' }));
+  check('人物出场：关键词命中全名', show({ name: '不存在', keywords: ['史密斯'] }) === '[1,3]', show({ name: '不存在', keywords: ['史密斯'] }));
+  check('人物出场：卡片全名命中简称', show({ name: '艾伦·史密斯' }) === '[1,2,3]', show({ name: '艾伦·史密斯' }));
+  check('人物出场：括号备注不挡匹配', show({ name: '林昭' }) === '[1,2]', show({ name: '林昭' }));
+  check('人物出场：单字名只做精确匹配', show({ name: '剑' }) === '[2]', show({ name: '剑' }));
+  check('人物出场：关键词支持字符串写法', show({ name: '艾伦', keywords: '史密斯，艾伦' }) === '[1,2,3]', show({ name: '艾伦', keywords: '史密斯，艾伦' }));
+  check('人物出场：未出场返回空', nos({ name: '青云宗' }).length === 0);
+  check('人物出场：空人物返回空', nos({ name: '' }).length === 0);
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);

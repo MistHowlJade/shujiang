@@ -7446,7 +7446,7 @@ function renderCharactersTab(host, n) {
         <button class="btn btn-sm" id="aiChar">AI 生成人物</button>
         <button class="btn btn-sm" id="addChar">${ico('plus')}新增人物</button>
       </h2>
-      <p class="dim small">人物卡会自动进入生成上下文。系统用名字与身份做相关度匹配，本章提到谁，就重点带上谁；存过章节记忆后，会按姓名与关键词汇总出场章节，点章节号即可跳转。章节记忆里的状态变化（如「林昭手臂受伤」）也会归到人物卡下，显示成「状态 N」chip。</p>
+      <p class="dim small">人物卡会自动进入生成上下文。系统用名字与身份做相关度匹配，本章提到谁，就重点带上谁；存过章节记忆后，会按姓名与关键词汇总出场章节（「艾伦·史密斯」这类全名会拆成「艾伦」「史密斯」分别匹配），点章节号即可跳转。章节记忆里的状态变化（如「林昭手臂受伤」）也会归到人物卡下，显示成「状态 N」chip。</p>
       <div class="entry-list" id="charList"></div>
     </div>`;
   const list = $('#charList', host);
