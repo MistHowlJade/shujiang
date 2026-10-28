@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys, worldStateChanges } from './lib/data.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown, CONSISTENCY_KINDS } from './lib/consistency.js';
@@ -7151,6 +7151,29 @@ function openWorldMentionsModal(entry, chapters) {
   );
 }
 
+function openWorldStatesModal(entry, states) {
+  const name = entry?.name || '未命名';
+  showModal(`<h3>「${esc(name)}」状态变化</h3>
+    <p class="modal-sub">章节记忆里记录的状态变化，共 ${states.length} 条。点击可直接打开对应章节。</p>
+    <div class="state-list">
+      ${states.map((s) => `<button type="button" class="state-row" data-chapter="${esc(s.id)}">
+        <span class="sr-no">第 ${s.no} 章</span>
+        <span class="sr-main">
+          <span class="sr-title">${esc(s.title || '未命名')}</span>
+          <span class="sr-text">${esc(s.text)}</span>
+        </span>
+        <span class="ar-meta">${STAGE_LABEL[s.stage] || '草稿'}</span>
+      </button>`).join('')}
+    </div>
+    <div class="modal-foot"><button class="btn btn-text" id="stateClose">关闭</button></div>`,
+    (box) => {
+      box.querySelector('#stateClose').onclick = closeModal;
+      box.querySelectorAll('[data-chapter]').forEach((el) => {
+        el.onclick = () => { closeModal(); openChapterFromIndex(el.dataset.chapter); };
+      });
+    });
+}
+
 /* ---- 人物条目渲染（供虚拟列表复用） ---- */
 function renderCharacterEntry(c, i, charIndex, n) {
   const div = document.createElement('div');
@@ -7256,8 +7279,9 @@ function renderCharactersTab(host, n) {
 }
 
 /* ---- 世界观条目渲染（供虚拟列表复用） ---- */
-/** 条目在正文 / 章节记忆里的提及索引。名字与关键词都参与匹配。 */
-function worldMentionsHtml(w, mentionIndex, entryIndex, cache) {
+/** 条目在正文 / 章节记忆里的提及索引，以及章节记忆里的状态变化条数。
+ *  名字与关键词都参与匹配；状态详情点「状态 N」查看。 */
+function worldMentionsHtml(w, mentionIndex, entryIndex, mentionCache, stateCache) {
   const keys = worldMentionKeys(w);
   if (!keys.length) {
     return `<div class="entry-appear">
@@ -7266,10 +7290,15 @@ function worldMentionsHtml(w, mentionIndex, entryIndex, cache) {
     </div>`;
   }
   const cacheKey = keys.join('\u0000');
-  let chapters = cache?.get(cacheKey);
+  let chapters = mentionCache?.get(cacheKey);
   if (!chapters) {
     chapters = worldMentionChapters(w, mentionIndex);
-    cache?.set(cacheKey, chapters);
+    mentionCache?.set(cacheKey, chapters);
+  }
+  let states = stateCache?.get(cacheKey);
+  if (!states) {
+    states = worldStateChanges(w, mentionIndex);
+    stateCache?.set(cacheKey, states);
   }
   if (!chapters.length) {
     return `<div class="entry-appear">
@@ -7278,17 +7307,19 @@ function worldMentionsHtml(w, mentionIndex, entryIndex, cache) {
     </div>`;
   }
   const shown = chapters.slice(0, 8);
+  const latestState = states[states.length - 1];
   return `<div class="entry-appear">
     <span class="ca-label">提及</span>
     <div class="ca-chips">
       ${shown.map((ch) => `<button type="button" class="ca-chip" data-chapter="${esc(ch.id)}" title="第 ${ch.no} 章 · ${esc(ch.title || '未命名')}">第 ${ch.no} 章</button>`).join('')}
       ${chapters.length > shown.length ? `<button type="button" class="ca-chip ca-more" data-mention-more="${entryIndex}" title="查看全部 ${chapters.length} 章">+${chapters.length - shown.length}</button>` : ''}
+      ${states.length ? `<button type="button" class="ca-chip ca-state" data-state-more="${entryIndex}" title="最近：第 ${latestState.no} 章 · ${esc(latestState.text)}">状态 ${states.length}</button>` : ''}
     </div>
     <span class="ca-count">${chapters.length} 章</span>
   </div>`;
 }
 
-function renderWorldEntry(w, i, n, mentionIndex, mentionCache) {
+function renderWorldEntry(w, i, n, mentionIndex, mentionCache, stateCache) {
   const div = document.createElement('div');
   div.className = 'entry';
   div.innerHTML = `
@@ -7300,17 +7331,17 @@ function renderWorldEntry(w, i, n, mentionIndex, mentionCache) {
     </div>
     ${field('说明（写具体细节，模型才能用上）', 'desc', w, { area: true, rows: 3 })}
     ${field('检索关键词（逗号分隔）', 'kwText', { kwText: (w.keywords || []).join('，') })}
-    <div class="world-mention-slot">${worldMentionsHtml(w, mentionIndex, i, mentionCache)}</div>`;
+    <div class="world-index-slot">${worldMentionsHtml(w, mentionIndex, i, mentionCache, stateCache)}</div>`;
   bindFields(div, w, () => saveNovelPart({ bible: n.bible }));
   const kw = div.querySelector('[data-key="kwText"]');
   kw.addEventListener('input', () => {
     w.keywords = kw.value.split(/[,，、\s]+/).filter(Boolean);
     saveNovelPart({ bible: n.bible });
   });
-  // 改名字或关键词后，只重画这一张卡的提及索引，不整页重排
+  // 改名字或关键词后，只重画这一张卡的提及 / 状态索引，不整页重排
   const paintMention = () => {
-    const slot = div.querySelector('.world-mention-slot');
-    if (slot) slot.innerHTML = worldMentionsHtml(w, mentionIndex, i, mentionCache);
+    const slot = div.querySelector('.world-index-slot');
+    if (slot) slot.innerHTML = worldMentionsHtml(w, mentionIndex, i, mentionCache, stateCache);
   };
   div.querySelector('[data-key="name"]').addEventListener('change', paintMention);
   kw.addEventListener('change', paintMention);
@@ -7330,7 +7361,7 @@ function renderWorldTab(host, n) {
         <button class="btn btn-sm" id="aiWorld">AI 补全世界观</button>
         <button class="btn btn-sm" id="addWorld">${ico('plus')}新增条目</button>
       </h2>
-      <p class="dim small">地理、势力、力量体系、规则、物品、风俗都放这里。条目名与关键词参与相关度匹配。</p>
+      <p class="dim small">地理、势力、力量体系、规则、物品、风俗都放这里。条目名与关键词参与相关度匹配；章节记忆里的状态变化会自动归到对应条目下。</p>
       <div class="entry-list" id="worldList"></div>
     </div>`;
   const list = $('#worldList', host);
@@ -7340,11 +7371,18 @@ function renderWorldTab(host, n) {
   }
   const mentionIndex = buildMentionIndex(n);
   const mentionCache = new Map();
-  initBibleVirtualList(list, n.bible.world, (w, i) => renderWorldEntry(w, i, n, mentionIndex, mentionCache), 'world');
+  const stateCache = new Map();
+  initBibleVirtualList(list, n.bible.world, (w, i) => renderWorldEntry(w, i, n, mentionIndex, mentionCache, stateCache), 'world');
 
   list.addEventListener('click', (e) => {
     const chapterBtn = e.target.closest('[data-chapter]');
     if (chapterBtn) return openChapterFromIndex(chapterBtn.dataset.chapter);
+    const stateBtn = e.target.closest('[data-state-more]');
+    if (stateBtn) {
+      const w = n.bible.world[Number(stateBtn.dataset.stateMore)];
+      if (w) openWorldStatesModal(w, worldStateChanges(w, mentionIndex));
+      return;
+    }
     const moreBtn = e.target.closest('[data-mention-more]');
     if (!moreBtn) return;
     const w = n.bible.world[Number(moreBtn.dataset.mentionMore)];

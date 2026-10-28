@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, worldStateChanges } from '../web/lib/data.js';
 
 let pass = 0;
 let fail = 0;
@@ -866,14 +866,15 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
 {
   const novel = {
     chapters: [
-      { id: 'c1', no: 1, title: '青锋', content: '林昭握住青锋剑，剑身微颤。', memory: { summary: '林昭得到青锋剑', foreshadowing: ['神剑出世'] } },
-      { id: 'c2', no: 2, title: '试炼', content: '他空手走进试炼塔。', memory: { stateChanges: ['青锋剑断裂'] } },
-      { id: 'c3', no: 3, title: '访客', content: '艾伦·史密斯来到青云宗。', memory: { events: ['沈青梧提到青云宗'] } },
+      { id: 'c1', no: 1, title: '青锋', content: '林昭握住青锋剑，剑身微颤。', memory: { summary: '林昭得到青锋剑', foreshadowing: ['神剑出世'], stateChanges: ['林昭得到青锋剑'] } },
+      { id: 'c2', no: 2, title: '试炼', content: '他空手走进试炼塔。', memory: { stateChanges: ['青锋剑断裂', '青锋剑断裂', '无关状态'] } },
+      { id: 'c3', no: 3, title: '访客', content: '艾伦·史密斯来到青云宗。', memory: { events: ['沈青梧提到青云宗'], stateChanges: ['青云宗收留林昭'] } },
       { id: 'c4', no: 4, title: '空白', content: '' },
     ],
   };
   const index = buildMentionIndex(novel);
   const rows = (entry) => worldMentionChapters(entry, index).map((x) => x.no);
+  const states = (entry) => worldStateChanges(entry, index);
 
   check('提及索引：归一化去掉空白与间隔符', normalizeMentionText('艾伦·史密斯 A') === '艾伦史密斯a');
   check('提及索引：正文命中', JSON.stringify(rows({ name: '青锋剑' })) === '[1,2]', JSON.stringify(rows({ name: '青锋剑' })));
@@ -887,6 +888,20 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('提及索引：结果带章节标题与阶段', (() => {
     const r = worldMentionChapters({ name: '青云宗' }, index)[0];
     return r.id === 'c3' && r.title === '访客' && 'stage' in r;
+  })());
+
+  check('状态变化：按章节顺序汇总', JSON.stringify(states({ name: '青锋剑' }).map((s) => s.no)) === '[1,2]', JSON.stringify(states({ name: '青锋剑' }).map((s) => s.no)));
+  check('状态变化：关键词也能归到条目', JSON.stringify(states({ name: '不存在的名字', keywords: ['青锋剑'] }).map((s) => s.no)) === '[1,2]');
+  check('状态变化：同一章重复只保留一条', states({ name: '青锋剑' }).filter((s) => s.no === 2).length === 1);
+  check('状态变化：不把别的条目状态算进来', JSON.stringify(states({ name: '青云宗' }).map((s) => s.text)) === '["青云宗收留林昭"]', JSON.stringify(states({ name: '青云宗' }).map((s) => s.text)));
+  check('状态变化：单字不做检索', states({ name: '剑' }).length === 0);
+  check('状态变化：结果带章节标题与原文', (() => {
+    const r = states({ name: '青锋剑' })[0];
+    return r.id === 'c1' && r.no === 1 && r.title === '青锋' && r.text === '林昭得到青锋剑' && 'stage' in r;
+  })());
+  check('状态变化：间隔符归一化后命中', (() => {
+    const idx = buildMentionIndex({ chapters: [{ id: 'n1', no: 1, title: '', content: '', memory: { stateChanges: ['青锋·剑断裂'] } }] });
+    return worldStateChanges({ name: '青锋剑' }, idx).length === 1;
   })());
 }
 

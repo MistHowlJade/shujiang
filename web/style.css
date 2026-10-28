@@ -1417,7 +1417,29 @@ kbd {
 .ca-chip:hover { border-color: var(--border-2); background: var(--surface-4); color: var(--text-1); }
 .ca-more { border-color: transparent; background: transparent; color: var(--accent); padding-inline: 4px; }
 .ca-more:hover { border-color: transparent; background: var(--accent-bg); color: var(--accent-hover); }
+.ca-state { border-color: transparent; background: var(--accent-bg); color: var(--accent-hover); }
+.ca-state:hover { border-color: var(--border-2); background: var(--accent-bg); color: var(--accent-hover); }
 .ca-count { flex: none; padding-top: 2px; color: var(--text-4); font-variant-numeric: tabular-nums; }
+
+/* 设定条目状态变化 */
+.state-list {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 52vh; overflow: auto; margin: 0 -4px; padding: 2px 4px;
+}
+.state-row {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%;
+  padding: 9px 11px; text-align: left; font: inherit;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
+  color: var(--text-1); cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.state-row:hover { border-color: var(--border-2); background: var(--surface-3); }
+.state-row:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.state-row .ar-meta { padding-top: 1px; }
+.sr-no { flex: none; padding-top: 1px; color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sr-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.sr-title { color: var(--text-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-text { color: var(--text-1); font-size: 12.5px; line-height: 1.65; overflow-wrap: anywhere; }
 
 .appear-list {
   display: flex; flex-direction: column; gap: 6px;

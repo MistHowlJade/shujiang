@@ -160,12 +160,16 @@ export function chapterMentionText(ch) {
   ].join('\n'));
 }
 
-/** 预先把每章压成可检索文本，供多个设定条目反复查询 */
+/** 预先把每章压成可检索文本与状态变化，供多个设定条目反复查询 */
 export function buildMentionIndex(novel) {
   return (novel?.chapters || []).map((ch, i) => ({
     ch,
     no: ch?.no || i + 1,
     text: chapterMentionText(ch),
+    states: memoryItems(ch?.memory, 'stateChanges').map((text) => ({
+      text,
+      norm: normalizeMentionText(text),
+    })),
   }));
 }
 
@@ -181,5 +185,31 @@ export function worldMentionChapters(entry, index) {
   return out
     .sort((a, b) => (a.no || 0) - (b.no || 0))
     .map((row) => ({ id: row.ch?.id, no: row.no, title: row.ch?.title || '', stage: row.ch?.stage }));
+}
+
+/** 世界观条目在章节记忆里的状态变化，按章节顺序返回。
+ *  例如「青锋剑断裂」「青云宗被灭」都会归到对应条目下。 */
+export function worldStateChanges(entry, index) {
+  const keys = worldMentionKeys(entry);
+  if (!keys.length) return [];
+  const seen = new Set();
+  const out = [];
+  for (const row of Array.isArray(index) ? index : []) {
+    for (const state of row?.states || []) {
+      if (!state?.text || !state.norm) continue;
+      if (!keys.some((key) => state.norm.includes(key))) continue;
+      const dedupe = `${row.no}\u0000${state.text}`;
+      if (seen.has(dedupe)) continue;
+      seen.add(dedupe);
+      out.push({
+        id: row.ch?.id,
+        no: row.no,
+        title: row.ch?.title || '',
+        stage: row.ch?.stage,
+        text: state.text,
+      });
+    }
+  }
+  return out.sort((a, b) => (a.no || 0) - (b.no || 0));
 }
 
