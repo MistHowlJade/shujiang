@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, worldStateChanges } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -875,7 +875,7 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   };
   const index = buildMentionIndex(novel);
   const rows = (entry) => worldMentionChapters(entry, index).map((x) => x.no);
-  const states = (entry) => worldStateChanges(entry, index);
+  const states = (entry) => entryStateChanges(entry, index);
 
   check('提及索引：归一化去掉空白与间隔符', normalizeMentionText('艾伦·史密斯 A') === '艾伦史密斯a');
   check('提及索引：正文命中', JSON.stringify(rows({ name: '青锋剑' })) === '[1,2]', JSON.stringify(rows({ name: '青锋剑' })));
@@ -902,7 +902,16 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   })());
   check('状态变化：间隔符归一化后命中', (() => {
     const idx = buildMentionIndex({ chapters: [{ id: 'n1', no: 1, title: '', content: '', memory: { stateChanges: ['青锋·剑断裂'] } }] });
-    return worldStateChanges({ name: '青锋剑' }, idx).length === 1;
+    return entryStateChanges({ name: '青锋剑' }, idx).length === 1;
+  })());
+  check('状态变化：人物名也能归并', JSON.stringify(states({ name: '林昭' }).map((s) => s.no)) === '[1,3]', JSON.stringify(states({ name: '林昭' }).map((s) => s.no)));
+  check('状态变化：人物状态带章节原文', (() => {
+    const r = states({ name: '林昭' })[1];
+    return r.no === 3 && r.text === '青云宗收留林昭';
+  })());
+  check('状态变化：人物别名与间隔符归一化', (() => {
+    const idx = buildMentionIndex({ chapters: [{ id: 'a1', no: 1, title: '北境', content: '', memory: { stateChanges: ['艾伦·史密斯离开北境'] } }] });
+    return entryStateChanges({ name: '艾伦', keywords: ['史密斯'] }, idx).length === 1;
   })());
 }
 

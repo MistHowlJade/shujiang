@@ -187,9 +187,9 @@ export function worldMentionChapters(entry, index) {
     .map((row) => ({ id: row.ch?.id, no: row.no, title: row.ch?.title || '', stage: row.ch?.stage }));
 }
 
-/** 世界观条目在章节记忆里的状态变化，按章节顺序返回。
- *  例如「青锋剑断裂」「青云宗被灭」都会归到对应条目下。 */
-export function worldStateChanges(entry, index) {
+/** 设定条目（人物 / 世界观）在章节记忆里的状态变化，按章节顺序返回。
+ *  例如「青锋剑断裂」「青云宗被灭」「林昭手臂受伤」都会归到对应条目下。 */
+export function entryStateChanges(entry, index) {
   const keys = worldMentionKeys(entry);
   if (!keys.length) return [];
   const seen = new Set();

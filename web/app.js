@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys, worldStateChanges } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -7276,18 +7276,40 @@ function parseOutlineMarkdown(text) {
   return vols.filter((x) => x.chapters.length || x.name);
 }
 
-/* ---- 人物出场索引 ---- */
-/** 章节记忆里的 characters 可能是数组、字符串，也可能被模型写成「张三、李四」 */
-function characterAppearancesHtml(chapters, charIndex) {
-  if (!chapters.length) return '';
-  const shown = chapters.slice(0, 8);
+/* ---- 人物出场 / 状态索引 ---- */
+/** 章节记忆里的 characters 可能是数组、字符串，也可能被模型写成「张三、李四」。
+ *  状态变化按人物姓名与关键词归并，和世界观条目共用同一套匹配。 */
+function characterIndexHtml(c, i, charIndex, mentionIndex, stateCache) {
+  const appearances = appearancesForCharacter(c, charIndex);
+  const keys = worldMentionKeys(c);
+  const cacheKey = keys.join('\u0000');
+  let states = cacheKey ? stateCache?.get(cacheKey) : [];
+  if (cacheKey && !states) {
+    states = entryStateChanges(c, mentionIndex);
+    stateCache?.set(cacheKey, states);
+  }
+  states = states || [];
+  const latest = states[states.length - 1];
+  const stateChip = states.length
+    ? `<button type="button" class="ca-chip ca-state" data-state-more="${i}" title="最近：第 ${latest.no} 章 · ${esc(latest.text)}">状态 ${states.length}</button>`
+    : '';
+  if (!appearances.length) {
+    if (!states.length) return '';
+    return `<div class="char-appear">
+      <span class="ca-label">状态</span>
+      <div class="ca-chips">${stateChip}</div>
+      <span class="ca-count">最近：第 ${latest.no} 章</span>
+    </div>`;
+  }
+  const shown = appearances.slice(0, 8);
   return `<div class="char-appear">
     <span class="ca-label">出场</span>
     <div class="ca-chips">
       ${shown.map((ch) => `<button type="button" class="ca-chip" data-chapter="${esc(ch.id)}" title="第 ${ch.no} 章 · ${esc(ch.title || '未命名')}">第 ${ch.no} 章</button>`).join('')}
-      ${chapters.length > shown.length ? `<button type="button" class="ca-chip ca-more" data-appear-more="${charIndex}" title="查看全部 ${chapters.length} 章">+${chapters.length - shown.length}</button>` : ''}
+      ${appearances.length > shown.length ? `<button type="button" class="ca-chip ca-more" data-appear-more="${i}" title="查看全部 ${appearances.length} 章">+${appearances.length - shown.length}</button>` : ''}
+      ${stateChip}
     </div>
-    <span class="ca-count">${chapters.length} 章</span>
+    <span class="ca-count">${appearances.length} 章</span>
   </div>`;
 }
 
@@ -7339,7 +7361,7 @@ function openWorldMentionsModal(entry, chapters) {
   );
 }
 
-function openWorldStatesModal(entry, states) {
+function openEntryStatesModal(entry, states) {
   const name = entry?.name || '未命名';
   showModal(`<h3>「${esc(name)}」状态变化</h3>
     <p class="modal-sub">章节记忆里记录的状态变化，共 ${states.length} 条。点击可直接打开对应章节。</p>
@@ -7363,9 +7385,8 @@ function openWorldStatesModal(entry, states) {
 }
 
 /* ---- 人物条目渲染（供虚拟列表复用） ---- */
-function renderCharacterEntry(c, i, charIndex, n) {
+function renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache) {
   const div = document.createElement('div');
-  const appearances = appearancesForCharacter(c, charIndex);
   div.className = 'entry';
   div.innerHTML = `
     <div class="entry-head">
@@ -7387,7 +7408,7 @@ function renderCharacterEntry(c, i, charIndex, n) {
       ${field('检索关键词（逗号分隔）', 'kwText', { kwText: (c.keywords || []).join('，') })}
     </div>
     ${field('关系（每行一条：对象|关系|备注）', 'relText', { relText: (c.relations || []).map((r) => `${r.to}|${r.type || ''}|${r.note || ''}`).join('\n') }, { area: true, rows: 2 })}
-    <div class="char-appear-slot">${characterAppearancesHtml(appearances, i)}</div>`;
+    <div class="char-appear-slot">${characterIndexHtml(c, i, charIndex, mentionIndex, stateCache)}</div>`;
   bindFields(div, c, () => saveNovelPart({ bible: n.bible }));
   const kw = div.querySelector('[data-key="kwText"]');
   kw.addEventListener('input', () => {
@@ -7402,13 +7423,13 @@ function renderCharacterEntry(c, i, charIndex, n) {
     }).filter((r) => r.to);
     saveNovelPart({ bible: n.bible });
   });
-  // 改姓名或别名（关键词）后，失焦时只重画这一张卡的出场索引，不整页重排
-  const paintAppear = () => {
+  // 改姓名或别名（关键词）后，失焦时只重画这一张卡的出场 / 状态索引，不整页重排
+  const paintIndex = () => {
     const slot = div.querySelector('.char-appear-slot');
-    if (slot) slot.innerHTML = characterAppearancesHtml(appearancesForCharacter(c, charIndex), i);
+    if (slot) slot.innerHTML = characterIndexHtml(c, i, charIndex, mentionIndex, stateCache);
   };
-  div.querySelector('[data-key="name"]').addEventListener('change', paintAppear);
-  kw.addEventListener('change', paintAppear);
+  div.querySelector('[data-key="name"]').addEventListener('change', paintIndex);
+  kw.addEventListener('change', paintIndex);
   div.querySelector('.del').onclick = () => {
     if (!confirm(`删除人物「${c.name || i + 1}」？`)) return;
     removeBibleEntry('characters', i, '人物');
@@ -7425,22 +7446,30 @@ function renderCharactersTab(host, n) {
         <button class="btn btn-sm" id="aiChar">AI 生成人物</button>
         <button class="btn btn-sm" id="addChar">${ico('plus')}新增人物</button>
       </h2>
-      <p class="dim small">人物卡会自动进入生成上下文。系统用名字与身份做相关度匹配，本章提到谁，就重点带上谁；存过章节记忆后，会按姓名与关键词汇总出场章节，点章节号即可跳转。</p>
+      <p class="dim small">人物卡会自动进入生成上下文。系统用名字与身份做相关度匹配，本章提到谁，就重点带上谁；存过章节记忆后，会按姓名与关键词汇总出场章节，点章节号即可跳转。章节记忆里的状态变化（如「林昭手臂受伤」）也会归到人物卡下，显示成「状态 N」chip。</p>
       <div class="entry-list" id="charList"></div>
     </div>`;
   const list = $('#charList', host);
   const charIndex = buildCharacterAppearances(n);
+  const mentionIndex = buildMentionIndex(n);
+  const stateCache = new Map();
   if (!n.bible.characters.length) {
     list.innerHTML = '<p class="dim">还没有人物卡。</p>';
     return;
   }
 
   // 虚拟列表：100 条以上启用
-  initBibleVirtualList(list, n.bible.characters, (c, i) => renderCharacterEntry(c, i, charIndex, n), 'characters');
+  initBibleVirtualList(list, n.bible.characters, (c, i) => renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache), 'characters');
 
   list.addEventListener('click', (e) => {
     const chapterBtn = e.target.closest('[data-chapter]');
     if (chapterBtn) return openChapterFromIndex(chapterBtn.dataset.chapter);
+    const stateBtn = e.target.closest('[data-state-more]');
+    if (stateBtn) {
+      const c = n.bible.characters[Number(stateBtn.dataset.stateMore)];
+      if (c) openEntryStatesModal(c, entryStateChanges(c, mentionIndex));
+      return;
+    }
     const moreBtn = e.target.closest('[data-appear-more]');
     if (!moreBtn) return;
     const c = n.bible.characters[Number(moreBtn.dataset.appearMore)];
@@ -7485,7 +7514,7 @@ function worldMentionsHtml(w, mentionIndex, entryIndex, mentionCache, stateCache
   }
   let states = stateCache?.get(cacheKey);
   if (!states) {
-    states = worldStateChanges(w, mentionIndex);
+    states = entryStateChanges(w, mentionIndex);
     stateCache?.set(cacheKey, states);
   }
   if (!chapters.length) {
@@ -7568,7 +7597,7 @@ function renderWorldTab(host, n) {
     const stateBtn = e.target.closest('[data-state-more]');
     if (stateBtn) {
       const w = n.bible.world[Number(stateBtn.dataset.stateMore)];
-      if (w) openWorldStatesModal(w, worldStateChanges(w, mentionIndex));
+      if (w) openEntryStatesModal(w, entryStateChanges(w, mentionIndex));
       return;
     }
     const moreBtn = e.target.closest('[data-mention-more]');
