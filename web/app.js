@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -8264,14 +8264,36 @@ function renderBeatsTab(host, n) {
 function renderTimelineEntry(t, i, n) {
   const div = document.createElement('div');
   div.className = 'entry';
+  if (t.id) div.dataset.entryId = t.id;
+  const chapters = Array.isArray(n.chapters) ? n.chapters : [];
+  const linked = t.chapterId ? chapters.find((c) => c.id === t.chapterId) : null;
   div.innerHTML = `
     <div class="entry-head">
       <input class="input" data-key="time" value="${esc(t.time || '')}" placeholder="时间：开元三年春 / 主角 12 岁" style="max-width:280px;font-weight:600" />
       <input class="input" data-key="title" value="${esc(t.title || '')}" placeholder="事件标题" />
       <button class="del" title="删除">${ico('trash')}</button>
     </div>
-    ${field('说明', 'desc', t, { area: true, rows: 2 })}`;
+    ${field('说明', 'desc', t, { area: true, rows: 2 })}
+    <div class="tl-link">
+      <select class="input tl-chapter" data-key="chapterId" aria-label="关联章节">
+        <option value="">关联章节……</option>
+        ${chapters.map((c) => `<option value="${esc(c.id)}" ${t.chapterId === c.id ? 'selected' : ''}>${esc(dayChapterLabel(c))}</option>`).join('')}
+      </select>
+      <button type="button" class="btn btn-sm btn-text tl-goto" data-ch="${esc(linked?.id || '')}" ${linked ? '' : 'hidden'}>${ico('arrow-right')}跳转</button>
+      ${t.chapterId && !linked ? '<span class="dim small">关联的章节已不存在，可以重新选择</span>' : ''}
+    </div>`;
   bindFields(div, t, () => saveNovelPart({ bible: n.bible }));
+  const select = div.querySelector('.tl-chapter');
+  const goto = div.querySelector('.tl-goto');
+  const syncGoto = () => {
+    const ch = chapters.find((c) => c.id === select.value);
+    goto.hidden = !ch;
+    goto.dataset.ch = ch?.id || '';
+  };
+  select.addEventListener('change', syncGoto);
+  goto.onclick = () => {
+    if (goto.dataset.ch) openChapterFromIndex(goto.dataset.ch);
+  };
   div.querySelector('.del').onclick = () => {
     removeBibleEntry('timeline', i, '时间节点');
   };
@@ -8314,46 +8336,47 @@ function renderTimelineTab(host, n) {
   };
 }
 
+/** 切到时间线页签，清掉搜索，把目标条目滚进视口并聚焦时间输入框。 */
+function focusTimelineEntry(entryId, attempt = 0) {
+  const n = S.novel;
+  const list = $('#tlList');
+  if (!n || !list) return false;
+  const idx = (n.bible.timeline || []).findIndex((t) => t.id === entryId);
+  if (idx < 0) return false;
+  const vl = S.bibleVl.lists.timeline;
+  const virtual = vl?.enabled && vl.listEl === list;
+  if (virtual) {
+    const itemH = vl.itemHeight || 280;
+    const viewH = list.clientHeight || itemH;
+    list.scrollTop = Math.max(0, idx * itemH - Math.max(0, (viewH - itemH) / 2));
+    renderBibleVirtualList(list, list.scrollTop, 'timeline');
+  }
+  const entry = [...list.querySelectorAll('[data-entry-id]')].find((el) => el.dataset.entryId === entryId);
+  if (!entry) {
+    if (attempt < 3) requestAnimationFrame(() => focusTimelineEntry(entryId, attempt + 1));
+    return false;
+  }
+  if (!virtual) entry.scrollIntoView({ block: 'center' });
+  entry.classList.add('flash');
+  setTimeout(() => entry.classList.remove('flash'), 1400);
+  entry.querySelector('input[data-key="time"]')?.focus();
+  return true;
+}
+
+/** 从时间轴节点跳回时间线条目，搜索过滤状态会被清掉。 */
+function openTimelineEntry(entryId) {
+  if (!S.novel) return false;
+  if (!(S.novel.bible.timeline || []).some((t) => t.id === entryId)) return false;
+  bibleTab = 'timeline';
+  $$('#bibleTabs button').forEach((x) => x.classList.toggle('on', x.dataset.bible === 'timeline'));
+  S.bibleSearch.timeline = '';
+  setView('bible');
+  return focusTimelineEntry(entryId);
+}
+
 /** 时间轴可视化：将时间线节点按时间顺序渲染为可交互的时间轴 */
 function renderTimelineVizTab(host, n) {
-  // 中文数字转阿拉伯数字
-  const chineseToNumber = (str) => {
-    const chineseNum = { '零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10, '百': 100, '千': 1000, '万': 10000 };
-    let result = 0, temp = 0;
-    for (const ch of str) {
-      if (chineseNum[ch] !== undefined) {
-        const val = chineseNum[ch];
-        if (val >= 10) {
-          if (temp === 0) temp = 1;
-          result += temp * val;
-          temp = 0;
-        } else {
-          temp = temp * 10 + val;
-        }
-      } else if (!isNaN(parseInt(ch))) {
-        temp = temp * 10 + parseInt(ch);
-      }
-    }
-    return result + temp;
-  };
-
-  const parseTime = (s) => {
-    const str = String(s || '');
-    const m = str.match(/(\d+)/);
-    if (m) return parseInt(m[1]);
-    const cm = str.match(/[一二三四五六七八九十百千万零两]+/);
-    if (cm) {
-      const v = chineseToNumber(cm[0]);
-      return v || null;
-    }
-    return null;
-  };
-
-  const timeline = (n.bible?.timeline || []).slice().sort((a, b) => {
-    const va = parseTime(a.time);
-    const vb = parseTime(b.time);
-    return (va ?? 999999) - (vb ?? 999999);
-  });
+  const timeline = buildTimelineEvents(n);
 
   if (!timeline.length) {
     host.innerHTML = `
@@ -8370,7 +8393,7 @@ function renderTimelineVizTab(host, n) {
     return;
   }
 
-  const knownTimes = timeline.map((t) => parseTime(t.time)).filter((v) => v != null);
+  const knownTimes = timeline.map((e) => e.timeVal).filter((v) => v != null);
   const minTime = knownTimes.length ? Math.min(...knownTimes) : 0;
   const maxTime = knownTimes.length ? Math.max(...knownTimes) : Math.max(1, timeline.length - 1);
   const span = maxTime - minTime || 1;
@@ -8384,7 +8407,7 @@ function renderTimelineVizTab(host, n) {
         <span style="flex:1"></span>
         <button class="btn btn-sm" id="addTlViz">${ico('plus')}新增节点</button>
       </h2>
-      <p class="dim small">故事世界的关键时间点可视化。双击节点编辑详情；点节点跳转关联章节。</p>
+      <p class="dim small">故事世界的关键时间点可视化。有关联章节的节点单击直接跳转；双击节点回到时间线编辑。中文数字与阿拉伯数字都会参与排序。</p>
       <div class="timeline-viz-wrap" style="position:relative;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;">
         <svg id="timelineSvg" viewBox="0 0 900 400" width="100%" style="display:block;height:auto;"></svg>
       </div>
@@ -8396,29 +8419,28 @@ function renderTimelineVizTab(host, n) {
     </div>`;
 
   const svg = $('#timelineSvg', host);
+  let clickTimer = null;
 
   function renderViz() {
-    const parsed = timeline.map((t, i) => ({ ...t, index: i, timeVal: parseTime(t.time) }));
     const groups = new Map();
-    parsed.forEach((e) => {
+    timeline.forEach((e) => {
       const key = e.timeVal == null ? `none-${e.index}` : `t-${e.timeVal}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(e);
     });
-    parsed.forEach((e) => {
+    timeline.forEach((e, i) => {
       const key = e.timeVal == null ? `none-${e.index}` : `t-${e.timeVal}`;
       const group = groups.get(key);
       const pos = group.indexOf(e);
       // 同一时间点有多个事件时，围绕刻度左右展开，避免叠成一个点
       const spread = group.length > 1 ? (pos - (group.length - 1) / 2) * 26 : 0;
       const base = e.timeVal == null
-        ? 60 + (parsed.length > 1 ? (e.index / (parsed.length - 1)) * (svgWidth - 120) : (svgWidth - 120) / 2)
+        ? 60 + (timeline.length > 1 ? (i / (timeline.length - 1)) * (svgWidth - 120) : (svgWidth - 120) / 2)
         : (sameTime ? svgWidth / 2 : 60 + ((e.timeVal - minTime) / span) * (svgWidth - 120));
       e.x = Math.max(40, Math.min(svgWidth - 40, base + spread));
-      e.odd = e.index % 2 === 0;
+      e.odd = i % 2 === 0;
       e.y = e.odd ? 120 : 280;
     });
-    const events = parsed;
 
     svg.innerHTML = `
       <defs>
@@ -8429,7 +8451,8 @@ function renderTimelineVizTab(host, n) {
       <line x1="60" y1="200" x2="840" y2="200" stroke="var(--border-2)" stroke-width="2" marker-end="url(#tlArrow)" />
     `;
 
-    events.forEach((e) => {
+    timeline.forEach((e) => {
+      const entry = e.entry;
       const x = e.x;
       const y = e.y;
       const isOdd = e.odd;
@@ -8453,26 +8476,36 @@ function renderTimelineVizTab(host, n) {
       circle.setAttribute('stroke-width', '3');
       circle.setAttribute('cursor', 'pointer');
       circle.setAttribute('data-idx', e.index);
+      circle.setAttribute('data-entry-id', entry.id || '');
+      circle.setAttribute('data-chapter-id', e.chapterId || '');
       circle.style.transition = 'r 0.15s, filter 0.15s';
       circle.addEventListener('mouseenter', () => { circle.setAttribute('r', '14'); circle.style.filter = 'brightness(1.2)'; });
       circle.addEventListener('mouseleave', () => { circle.setAttribute('r', '10'); circle.style.filter = 'none'; });
       const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-      tip.textContent = [e.time, e.title, e.desc].filter(Boolean).join('\n');
+      tip.textContent = [
+        entry.time,
+        entry.title,
+        entry.desc,
+        e.chapter ? `关联：${dayChapterLabel(e.chapter)}` : '',
+        e.chapterMissing ? '关联的章节已不存在' : '',
+      ].filter(Boolean).join('\n');
       circle.appendChild(tip);
+      // 单击跳章节，双击回时间线编辑。单击要延迟，否则双击会先触发跳转。
       circle.addEventListener('click', () => {
-        if (e.chapterId) openChapterFromIndex(e.chapterId);
+        clearTimeout(clickTimer);
+        clickTimer = setTimeout(() => {
+          if (e.chapterId) openChapterFromIndex(e.chapterId);
+          else toast('这个时间节点还没有关联章节，双击可以编辑并关联', '');
+        }, 220);
       });
       circle.addEventListener('dblclick', () => {
-        $('#bibleTabs button[data-bible="timeline"]')?.click();
-        setTimeout(() => {
-          const idx = (n.bible.timeline || []).findIndex((x) => x.id === e.id);
-          const entries = $$('#tlList .entry');
-          if (idx >= 0 && entries[idx]) entries[idx].querySelector('input[data-key="time"]')?.focus();
-        }, 100);
+        clearTimeout(clickTimer);
+        if (entry.id) openTimelineEntry(entry.id);
+        else $('#bibleTabs button[data-bible="timeline"]')?.click();
       });
       svg.appendChild(circle);
 
-      if (e.title) {
+      if (entry.title) {
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         text.setAttribute('x', x);
         text.setAttribute('y', isOdd ? y - 18 : y + 28);
@@ -8480,11 +8513,11 @@ function renderTimelineVizTab(host, n) {
         text.setAttribute('font-size', '11');
         text.setAttribute('fill', 'var(--text-1)');
         text.setAttribute('style', 'pointer-events:none; white-space: nowrap;');
-        text.textContent = e.title.length > 12 ? e.title.slice(0, 12) + '…' : e.title;
+        text.textContent = entry.title.length > 12 ? entry.title.slice(0, 12) + '…' : entry.title;
         svg.appendChild(text);
       }
 
-      if (e.time) {
+      if (entry.time) {
         const timeText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         timeText.setAttribute('x', x);
         timeText.setAttribute('y', isOdd ? y - 32 : y + 42);
@@ -8492,7 +8525,7 @@ function renderTimelineVizTab(host, n) {
         timeText.setAttribute('font-size', '9');
         timeText.setAttribute('fill', 'var(--text-3)');
         timeText.setAttribute('style', 'pointer-events:none;');
-        timeText.textContent = e.time;
+        timeText.textContent = entry.time;
         svg.appendChild(timeText);
       }
     });

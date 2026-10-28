@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, parseTimelineTime, buildTimelineEvents } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1118,6 +1118,43 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('人物归并：别名不会重复生成记忆节点', characters.length === 5, `${characters.length} ${characters.map((c) => c.name).join('|')}`);
   check('人物归并：记忆人物同名只留一个', memoryNames.length === 1 && memoryNames[0] === '陌生人', JSON.stringify(memoryNames));
   check('人物归并：对象写法也能归并', mentionToId.get('小昭') === 'c4', JSON.stringify([...mentionToId]));
+}
+
+// ---------------------------------------------------------------
+// 时间轴：时间解析、排序与章节关联
+{
+  check('时间轴：阿拉伯数字优先', parseTimelineTime('开元 12 年') === 12, String(parseTimelineTime('开元 12 年')));
+  check('时间轴：中文个位', parseTimelineTime('开元三年春') === 3, String(parseTimelineTime('开元三年春')));
+  check('时间轴：元年按一年算', parseTimelineTime('开元元年') === 1, String(parseTimelineTime('开元元年')));
+  check('时间轴：中文十位', parseTimelineTime('第十二章') === 12, String(parseTimelineTime('第十二章')));
+  check('时间轴：中文百位', parseTimelineTime('一百零八天') === 108, String(parseTimelineTime('一百零八天')));
+  check('时间轴：中文千位与零', parseTimelineTime('两千零一年') === 2001, String(parseTimelineTime('两千零一年')));
+  check('时间轴：中文万位', parseTimelineTime('一万二千年') === 12000, String(parseTimelineTime('一万二千年')));
+  check('时间轴：无数字返回空', parseTimelineTime('很久以前') === null, String(parseTimelineTime('很久以前')));
+  check('时间轴：空值返回空', parseTimelineTime('') === null && parseTimelineTime(null) === null);
+  check('时间轴：零也是有效时间', parseTimelineTime('第零年') === 0, String(parseTimelineTime('第零年')));
+
+  const novel = {
+    chapters: [
+      { id: 'c1', no: 1, title: '入宗' },
+      { id: 'c2', no: 5, title: '试炼' },
+      { id: 'c3', title: '无编号' },
+    ],
+    bible: {
+      timeline: [
+        { id: 't1', time: '开元三年', title: '甲', chapterId: 'c2' },
+        { id: 't2', time: '开元元年', title: '乙', chapterId: 'c1' },
+        { id: 't3', time: '很久以前', title: '丙', chapterId: 'missing' },
+        { id: 't4', time: '开元三年', title: '丁', chapterId: 'c3' },
+      ],
+    },
+  };
+  const events = buildTimelineEvents(novel);
+  check('时间轴：按时间排序，同时间保持录入顺序', events.map((e) => e.entry.id).join(',') === 't2,t1,t4,t3', events.map((e) => e.entry.id).join(','));
+  check('时间轴：关联章节带出章号与标题', events[1].chapterId === 'c2' && events[1].chapterNo === 5 && events[1].chapterTitle === '试炼', JSON.stringify({ id: events[1].chapterId, no: events[1].chapterNo, title: events[1].chapterTitle }));
+  check('时间轴：章节缺 no 时按原顺序补章号', events[2].chapterNo === 3, String(events[2].chapterNo));
+  check('时间轴：关联章节不存在时标记', events[3].chapterMissing === true && events[3].chapterNo === null, JSON.stringify({ missing: events[3].chapterMissing, no: events[3].chapterNo }));
+  check('时间轴：空作品返回空', buildTimelineEvents(null).length === 0 && buildTimelineEvents({}).length === 0);
 }
 
 // ---------------------------------------------------------------

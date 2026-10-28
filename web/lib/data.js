@@ -235,6 +235,91 @@ export function filterEntriesBySearch(items, query, textOf) {
     });
 }
 
+/* ============================================================
+ * 时间轴：把时间线节点按解析出的时间排序，并带上关联章节
+ * ============================================================ */
+
+const CN_DIGITS = {
+  零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4,
+  五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
+};
+const CN_UNITS = { 十: 10, 百: 100, 千: 1000 };
+
+function chineseNumberToInt(text) {
+  let total = 0;
+  let section = 0;
+  let number = 0;
+  let seen = false;
+  for (const ch of String(text || '')) {
+    if (CN_DIGITS[ch] !== undefined) {
+      number = CN_DIGITS[ch];
+      seen = true;
+      continue;
+    }
+    const unit = CN_UNITS[ch];
+    if (unit) {
+      section += (number || 1) * unit;
+      number = 0;
+      seen = true;
+      continue;
+    }
+    if (ch === '万' || ch === '亿') {
+      section += number;
+      number = 0;
+      if (ch === '万') total += section * 10000;
+      else total = (total + section) * 100000000;
+      section = 0;
+      seen = true;
+    }
+  }
+  return seen ? total + section + number : null;
+}
+
+/** 从「开元三年春」「第 12 章」「主角 12 岁」里取出用于排序的时间数字。
+ *  阿拉伯数字优先；没有阿拉伯数字时按中文数字解析；都没有返回 null。 */
+export function parseTimelineTime(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  const arabic = text.match(/\d+/);
+  if (arabic) return Number(arabic[0]);
+  // 「元年」是常见写法，按「一年」处理；不能把「元」当普通数字，否则「开元三年」会被读成 13
+  const normalized = text.replace(/元年/g, '一年');
+  const cn = normalized.match(/[零〇一二三四五六七八九十百千万亿两]+/);
+  if (!cn) return null;
+  return chineseNumberToInt(cn[0]);
+}
+
+/** 时间轴事件：按时间排序，同一时间保持录入顺序，解析不出时间的排在最后。
+ *  同时把 chapterId 解析成章节对象与章号，供点击跳转、提示与双击定位使用。 */
+export function buildTimelineEvents(novel) {
+  const chapters = Array.isArray(novel?.chapters) ? novel.chapters : [];
+  const byId = new Map();
+  chapters.forEach((ch, index) => {
+    if (ch?.id) byId.set(ch.id, { ch, index });
+  });
+  const timeline = Array.isArray(novel?.bible?.timeline) ? novel.bible.timeline : [];
+  return timeline.map((raw, index) => {
+    const entry = raw && typeof raw === 'object' ? raw : {};
+    const linked = entry.chapterId ? byId.get(entry.chapterId) : null;
+    const ch = linked?.ch || null;
+    return {
+      entry,
+      index,
+      timeVal: parseTimelineTime(entry.time),
+      chapter: ch,
+      chapterId: ch?.id || '',
+      chapterNo: ch ? (ch.no || linked.index + 1) : null,
+      chapterTitle: ch?.title || '',
+      chapterMissing: Boolean(entry.chapterId && !ch),
+    };
+  }).sort((a, b) => {
+    if (a.timeVal == null && b.timeVal == null) return a.index - b.index;
+    if (a.timeVal == null) return 1;
+    if (b.timeVal == null) return -1;
+    return a.timeVal - b.timeVal || a.index - b.index;
+  });
+}
+
 /** 一个条目可以用来检索的名字与关键词。单字太容易误命中，直接跳过 */
 export function worldMentionKeys(entry) {
   const rawKeywords = Array.isArray(entry?.keywords)
