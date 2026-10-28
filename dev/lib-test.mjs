@@ -24,6 +24,7 @@ import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
 import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, worldStateChanges } from '../web/lib/data.js';
+import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
 let fail = 0;
@@ -903,6 +904,37 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
     const idx = buildMentionIndex({ chapters: [{ id: 'n1', no: 1, title: '', content: '', memory: { stateChanges: ['青锋·剑断裂'] } }] });
     return worldStateChanges({ name: '青锋剑' }, idx).length === 1;
   })());
+}
+
+// ---------------------------------------------------------------
+// 设定库最近删除
+{
+  const records = [
+    { id: 'r1', name: '林昭', novelTitle: '青锋录', label: '人物', section: 'characters', item: { id: 'c1' } },
+    { id: 'r2', name: '青云宗', novelTitle: '剑影', label: '世界观', section: 'world', item: { id: 'w1' } },
+    { id: 'r3', name: '开元三年', novelTitle: '青锋录', label: '时间线', section: 'timeline', item: { id: 't1' } },
+  ];
+  check('最近删除：空搜索返回全部', filterBibleTrash(records, '').length === 3);
+  check('最近删除：按条目名搜索', filterBibleTrash(records, '林昭').map((x) => x.id).join(',') === 'r1');
+  check('最近删除：按作品名搜索', filterBibleTrash(records, '青锋录').map((x) => x.id).join(',') === 'r1,r3');
+  check('最近删除：按板块搜索', filterBibleTrash(records, '世界观').map((x) => x.id).join(',') === 'r2');
+  check('最近删除：搜索忽略大小写', filterBibleTrash([{ id: 'x', name: 'Alice' }], 'alice').length === 1);
+  check('最近删除：无匹配返回空', filterBibleTrash(records, '不存在').length === 0);
+
+  check('最近删除：新记录排最前', addBibleTrashRecord([{ id: 'old' }], { id: 'new' }, 2).map((x) => x.id).join(',') === 'new,old');
+  check('最近删除：超过上限丢最旧', addBibleTrashRecord([{ id: 'a' }, { id: 'b' }], { id: 'c' }, 2).map((x) => x.id).join(',') === 'c,a');
+  check('最近删除：默认上限是 50', BIBLE_TRASH_LIMIT === 50);
+
+  const arr = [{ id: 'a' }, { id: 'c' }];
+  insertBibleTrashItem(arr, { id: 'b' }, 'c', 0);
+  check('最近删除：恢复时插回原位置', arr.map((x) => x.id).join(',') === 'a,b,c');
+  const fallback = [{ id: 'a' }, { id: 'b' }];
+  insertBibleTrashItem(fallback, { id: 'x' }, 'missing', 1);
+  check('最近删除：后一条找不到时按原下标', fallback.map((x) => x.id).join(',') === 'a,x,b');
+  const clamped = [{ id: 'a' }];
+  insertBibleTrashItem(clamped, { id: 'x' }, '', 99);
+  check('最近删除：下标越界时夹到末尾', clamped.map((x) => x.id).join(',') === 'a,x');
+  check('最近删除：重复 id 能识别', hasBibleTrashItem([{ id: 'a' }], { id: 'a' }) === true && hasBibleTrashItem([{ id: 'a' }], { id: 'b' }) === false);
 }
 
 // ---------------------------------------------------------------

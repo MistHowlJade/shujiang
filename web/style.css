@@ -689,6 +689,12 @@ kbd {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text-1); font-family: var(--font-write); font-size: 13px; font-weight: 600;
 }
+.bt-kind {
+  display: inline-block; margin-right: 7px; padding: 0 6px; vertical-align: 1px;
+  border: 1px solid var(--border); border-radius: var(--r-full);
+  background: var(--surface-3); color: var(--text-3);
+  font-family: var(--font-ui); font-size: 10px; font-weight: 500; line-height: 1.65;
+}
 .trash-meta {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text-3); font-size: 11px; line-height: 1.45;

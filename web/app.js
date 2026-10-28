@@ -2,6 +2,7 @@
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
 import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys, worldStateChanges } from './lib/data.js';
+import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown, CONSISTENCY_KINDS } from './lib/consistency.js';
@@ -6446,6 +6447,8 @@ $('#bibleImportBtn')?.addEventListener('click', () => {
   });
 });
 
+$('#bibleTrashBtn')?.addEventListener('click', openBibleTrash);
+
 // ============================================================
 // 片段导出/导入（大纲、场景、记忆、人物、世界观等单独导出）
 // ============================================================
@@ -6746,6 +6749,172 @@ saveNovelPart.cancel = () => {
   pendingNovelSave = null;
 };
 
+/* ---- 设定库最近删除（本机浏览器，最多 50 条） ---- */
+const BIBLE_TRASH_KEY = 'shu.bibleTrash.v1';
+const BIBLE_TRASH_KINDS = {
+  characters: { label: '人物', icon: 'pen' },
+  world: { label: '世界观', icon: 'layers' },
+  timeline: { label: '时间线', icon: 'clock' },
+};
+
+function readBibleTrash() {
+  try {
+    const raw = localStorage.getItem(BIBLE_TRASH_KEY);
+    if (!raw) return [];
+    const list = JSON.parse(raw);
+    return Array.isArray(list)
+      ? list.filter((x) => x && x.id && x.novelId && x.section && x.item).slice(0, BIBLE_TRASH_LIMIT)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeBibleTrash(list) {
+  try {
+    if (!Array.isArray(list) || !list.length) localStorage.removeItem(BIBLE_TRASH_KEY);
+    else localStorage.setItem(BIBLE_TRASH_KEY, JSON.stringify(list.slice(0, BIBLE_TRASH_LIMIT)));
+  } catch {
+    // 浏览器禁用存储时，8 秒撤销仍然可用；历史记录静默降级
+  }
+}
+
+function addBibleTrash(record) {
+  writeBibleTrash(addBibleTrashRecord(readBibleTrash(), record));
+}
+
+function dropBibleTrash(id) {
+  if (!id) return;
+  writeBibleTrash(readBibleTrash().filter((x) => x.id !== id));
+}
+
+function bibleTrashPreview(rec) {
+  const item = rec?.item || {};
+  const bits = [];
+  if (rec?.section === 'characters') {
+    if (item.role) bits.push(item.role);
+    if (item.identity) bits.push(item.identity);
+    if (item.desc) bits.push(item.desc);
+  } else if (rec?.section === 'world') {
+    if (item.category) bits.push(item.category);
+    if (item.desc) bits.push(item.desc);
+  } else {
+    if (item.time) bits.push(item.time);
+    if (item.desc) bits.push(item.desc);
+  }
+  return bits.filter(Boolean).join(' · ').slice(0, 90);
+}
+
+function openBibleTrash() {
+  showModal(`<h3>最近删除</h3>
+    <p class="modal-sub">设定库里删除的人物、世界观和时间线条目会留在这里，最多 ${BIBLE_TRASH_LIMIT} 条。记录只保存在本机浏览器；恢复时会打开原作品并放回原来的位置。</p>
+    <input class="input" id="bibleTrashSearch" placeholder="搜索条目名、作品名或板块" style="margin-bottom:12px" />
+    <div class="trash-list" id="bibleTrashList"></div>
+    <div class="modal-foot">
+      <button class="btn btn-text trash-clear" id="bibleTrashClear" disabled>清空记录</button>
+      <button class="btn btn-text" id="bibleTrashClose">关闭</button>
+    </div>`,
+  (box) => {
+    const listEl = box.querySelector('#bibleTrashList');
+    const search = box.querySelector('#bibleTrashSearch');
+    const clearBtn = box.querySelector('#bibleTrashClear');
+
+    const render = () => {
+      const all = readBibleTrash();
+      clearBtn.disabled = !all.length;
+      const rows = filterBibleTrash(all, search.value);
+      if (!all.length) {
+        listEl.innerHTML = `<div class="trash-empty">${ico('undo')}<b>还没有删除记录</b>删除人物、世界观或时间线条目后会留在这里，最多保留 ${BIBLE_TRASH_LIMIT} 条。</div>`;
+        return;
+      }
+      if (!rows.length) {
+        listEl.innerHTML = '<div class="find-empty">没有匹配的删除记录</div>';
+        return;
+      }
+      listEl.innerHTML = rows.map((r) => {
+        const kind = BIBLE_TRASH_KINDS[r.section] || { label: r.label || '设定', icon: 'layers' };
+        const current = S.novel?.id === r.novelId;
+        const preview = bibleTrashPreview(r);
+        return `<div class="trash-item">
+          <div class="trash-cover" style="--cover:${coverOf(r.name)}">${ico(kind.icon)}</div>
+          <div class="trash-main">
+            <b class="trash-title"><span class="bt-kind">${esc(kind.label)}</span>${esc(r.name || '未命名')}</b>
+            <span class="trash-meta">《${esc(r.novelTitle || '未命名')}》${current ? ' · 当前作品' : ''} · 删除于 ${esc(fmtDate(r.deletedAt))}</span>
+            ${preview ? `<span class="trash-meta">${esc(preview)}</span>` : ''}
+          </div>
+          <div class="trash-actions">
+            <button class="btn btn-sm" data-restore="${esc(r.id)}">${ico('undo')}${current ? '恢复' : '打开并恢复'}</button>
+            <button class="btn btn-sm btn-text" data-forget="${esc(r.id)}">移除记录</button>
+          </div>
+        </div>`;
+      }).join('');
+    };
+
+    box.querySelector('#bibleTrashClose').onclick = closeModal;
+    search.addEventListener('input', render);
+    clearBtn.onclick = () => {
+      if (!readBibleTrash().length) return;
+      if (!confirm('清空最近删除记录？清空后无法再从历史恢复。')) return;
+      writeBibleTrash([]);
+      render();
+      toast('已清空最近删除记录');
+    };
+    listEl.addEventListener('click', async (e) => {
+      const restoreBtn = e.target.closest('[data-restore]');
+      if (restoreBtn) {
+        const rec = readBibleTrash().find((x) => x.id === restoreBtn.dataset.restore);
+        if (!rec) return render();
+        restoreBtn.disabled = true;
+        const ok = await restoreBibleTrash(rec);
+        if (ok) closeModal();
+        else restoreBtn.disabled = false;
+        return;
+      }
+      const forgetBtn = e.target.closest('[data-forget]');
+      if (forgetBtn) {
+        dropBibleTrash(forgetBtn.dataset.forget);
+        render();
+        toast('已从最近删除中移除');
+      }
+    });
+    render();
+    search.focus();
+  });
+}
+
+async function restoreBibleTrash(rec) {
+  try {
+    if (!rec?.novelId || !rec?.item || !rec?.section) return false;
+    if (S.novel?.id !== rec.novelId) {
+      await openNovel(rec.novelId);
+      if (S.novel?.id !== rec.novelId) return false;
+    }
+    const n = S.novel;
+    const arr = n?.bible?.[rec.section];
+    if (!Array.isArray(arr)) {
+      toast('这个设定板块已经不存在了', 'err');
+      return false;
+    }
+    const item = JSON.parse(JSON.stringify(rec.item));
+    if (hasBibleTrashItem(arr, item)) {
+      dropBibleTrash(rec.id);
+      toast('条目已经存在，已从最近删除中移除');
+      return true;
+    }
+    insertBibleTrashItem(arr, item, rec.nextId, rec.index);
+    dropBibleTrash(rec.id);
+    bibleTab = BIBLE_TRASH_KINDS[rec.section] ? rec.section : 'outline';
+    $$('#bibleTabs button').forEach((x) => x.classList.toggle('on', x.dataset.bible === bibleTab));
+    setView('bible');
+    saveNovelPart({ bible: n.bible });
+    toast(`已恢复${BIBLE_TRASH_KINDS[rec.section]?.label || '条目'}「${rec.name || '未命名'}」`, 'ok');
+    return true;
+  } catch (err) {
+    toast(`恢复失败：${err.message || '未知错误'}`, 'err');
+    return false;
+  }
+}
+
 /* ---- 设定库删除撤销 ---- */
 /** 删除人物 / 世界观 / 时间线条目，并在提示条里留一个 8 秒的撤销入口。
  *  撤销时优先按「原来排在它后面的条目」定位，连续删除多条也不会乱序。 */
@@ -6757,6 +6926,20 @@ function removeBibleEntry(section, index, label) {
   const nextId = arr[index + 1]?.id || null;
   const novelId = n.id;
   const name = item.name || item.title || '未命名';
+  const kind = BIBLE_TRASH_KINDS[section] || { label };
+  const trashId = uid('bd');
+  addBibleTrash({
+    id: trashId,
+    novelId,
+    novelTitle: n.title || '未命名',
+    section,
+    label: kind.label,
+    name,
+    item: JSON.parse(JSON.stringify(item)),
+    index,
+    nextId,
+    deletedAt: Date.now(),
+  });
   arr.splice(index, 1);
   renderBible();
   saveNovelPart({ bible: n.bible });
@@ -6766,9 +6949,14 @@ function removeBibleEntry(section, index, label) {
       if (S.novel?.id !== novelId) return toast('已切换作品，无法撤销这次删除', 'err');
       const cur = S.novel?.bible?.[section];
       if (!Array.isArray(cur)) return;
+      if (hasBibleTrashItem(cur, item)) {
+        dropBibleTrash(trashId);
+        return toast('条目已经恢复过了');
+      }
       let at = nextId ? cur.findIndex((x) => x.id === nextId) : -1;
       if (at < 0) at = Math.min(index, cur.length);
       cur.splice(at, 0, item);
+      dropBibleTrash(trashId);
       renderBible();
       saveNovelPart({ bible: S.novel.bible });
       toast(`已恢复${label}「${name}」`, 'ok');
