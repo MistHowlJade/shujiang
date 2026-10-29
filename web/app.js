@@ -2965,7 +2965,7 @@ function syncChapterSelection() {
  * ============================================================ */
 
 /** 初始化设定库虚拟列表容器（多列表支持） */
-function initBibleVirtualList(listEl, items, renderItem, listKey) {
+function initBibleVirtualList(listEl, items, renderItem, listKey, options = {}) {
   const vl = S.bibleVl;
   vl.currentKey = listKey;
   if (!vl.lists[listKey]) {
@@ -2981,6 +2981,10 @@ function initBibleVirtualList(listEl, items, renderItem, listKey) {
       listEl: null,         // 当前的 entry-list 元素
       scrollHandler: null,
       measureDone: false,
+      measureAll: false,    // 条目高度差异大时，先整体量一遍再虚拟滚动
+      heights: [],          // 每条的实际高度（含下间距）
+      offsets: [0],         // 每条顶部位置的前缀和
+      totalHeight: 0,       // 所有条目的总高度
     };
   }
   const l = vl.lists[listKey];
@@ -2993,6 +2997,7 @@ function initBibleVirtualList(listEl, items, renderItem, listKey) {
   l.firstIdx = 0;
   l.lastIdx = -1;
   l.measureDone = false;
+  l.measureAll = Boolean(options.measureAll);
   l.itemHeight = 280;
 
   if (!l.enabled) {
@@ -3012,6 +3017,16 @@ function initBibleVirtualList(listEl, items, renderItem, listKey) {
   l.firstIdx = 0;
   l.lastIdx = -1;
   l.measureDone = false;
+  l.heights = new Array(l.total).fill(l.itemHeight);
+  if (l.measureAll) {
+    // 弧光卡的高度随章数与未决条数变化，先整体量一遍，滚动位置才不会被估高 / 估矮
+    const measured = measureBibleItemHeights(listEl, items, renderItem);
+    if (measured && measured.length === items.length) {
+      l.heights = measured;
+      l.measureDone = true;
+    }
+  }
+  computeBibleOffsets(l);
   renderBibleVirtualList(listEl, 0, listKey);
 
   // 切标签页会重建列表元素：旧元素上的监听要解绑，否则新列表滚不动
@@ -3026,18 +3041,82 @@ function initBibleVirtualList(listEl, items, renderItem, listKey) {
   }
 }
 
-/** 设定库虚拟滚动渲染（多列表支持） */
+/** 计算设定库虚拟列表每条顶部位置的前缀和 */
+function computeBibleOffsets(l) {
+  const offsets = [0];
+  let acc = 0;
+  for (let i = 0; i < l.total; i++) {
+    acc += l.heights[i] || l.itemHeight;
+    offsets.push(acc);
+  }
+  l.offsets = offsets;
+  l.totalHeight = acc;
+}
+
+/** 把全部条目临时铺开量一次高度（含下间距）。只给高度差异大的列表用，量完立即清空。 */
+function measureBibleItemHeights(listEl, items, renderItem) {
+  if (!items.length || listEl.clientHeight === 0) return null;
+  let spacer = listEl.querySelector('.vl-spacer');
+  let viewport = listEl.querySelector('.vl-viewport');
+  if (!spacer || !viewport) {
+    listEl.innerHTML = '<div class="vl-spacer"></div><div class="vl-viewport"></div>';
+    spacer = listEl.querySelector('.vl-spacer');
+    viewport = listEl.querySelector('.vl-viewport');
+  }
+  const prevScrollTop = listEl.scrollTop;
+  const prevTransform = viewport.style.transform;
+  const prevVisibility = viewport.style.visibility;
+  // 先把占位撑高，让滚动条提前出现，量到的可用宽度才和最终一致
+  spacer.style.height = `${items.length * 280}px`;
+  viewport.style.transform = 'translateY(0)';
+  viewport.style.visibility = 'hidden';
+  viewport.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  const nodes = items.map((item, index) => {
+    const el = renderItem(item, index);
+    frag.appendChild(el);
+    return el;
+  });
+  viewport.appendChild(frag);
+  const heights = nodes.map((el) => {
+    const margin = parseFloat(getComputedStyle(el).marginBottom) || 0;
+    return Math.max(1, el.getBoundingClientRect().height + margin);
+  });
+  viewport.innerHTML = '';
+  viewport.style.visibility = prevVisibility;
+  viewport.style.transform = prevTransform;
+  listEl.scrollTop = prevScrollTop;
+  return heights;
+}
+
+/** 设定库虚拟滚动渲染（多列表支持，条目高度可以不同） */
 function renderBibleVirtualList(listEl, scrollTop, listKey) {
   const vl = S.bibleVl;
   const l = vl.lists[listKey];
-  if (!l) return;
-  const { itemHeight, buffer, total, items, renderItem } = l;
+  if (!l || !l.total) return;
+  const { buffer, total, items, renderItem, offsets, totalHeight } = l;
   const clientH = listEl.clientHeight;
   if (clientH === 0) return;  // 容器未显示
 
-  const first = Math.max(0, Math.floor(scrollTop / itemHeight) - buffer);
-  const visibleCount = Math.ceil(clientH / itemHeight);
-  const last = Math.min(total - 1, first + visibleCount + buffer * 2 - 1);
+  // 用前缀和二分查找可视区首尾：不同高度的卡片不会把最后几条顶出列表
+  const avgH = totalHeight / total || l.itemHeight;
+  const searchTop = Math.max(0, scrollTop - buffer * avgH);
+  let lo = 0, hi = total;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (offsets[mid] <= searchTop) lo = mid + 1;
+    else hi = mid;
+  }
+  const first = Math.max(0, lo - 1);
+
+  const searchBottom = scrollTop + clientH + buffer * avgH;
+  lo = 0; hi = total;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (offsets[mid] < searchBottom) lo = mid + 1;
+    else hi = mid;
+  }
+  const last = Math.min(total - 1, lo);
 
   if (l.measureDone && first === l.firstIdx && last === l.lastIdx) return;
   l.firstIdx = first;
@@ -3046,15 +3125,15 @@ function renderBibleVirtualList(listEl, scrollTop, listKey) {
   let viewport = listEl.querySelector('.vl-viewport');
   if (!viewport) {
     listEl.innerHTML = `
-      <div class="vl-spacer" style="height: ${total * itemHeight}px"></div>
+      <div class="vl-spacer" style="height: ${totalHeight}px"></div>
       <div class="vl-viewport"></div>
     `;
     viewport = listEl.querySelector('.vl-viewport');
   } else {
-    listEl.querySelector('.vl-spacer').style.height = `${total * itemHeight}px`;
+    listEl.querySelector('.vl-spacer').style.height = `${totalHeight}px`;
   }
 
-  viewport.style.transform = `translateY(${first * itemHeight}px)`;
+  viewport.style.transform = `translateY(${offsets[first]}px)`;
   viewport.innerHTML = '';
   const frag = document.createDocumentFragment();
   for (let idx = first; idx <= last; idx++) {
@@ -3062,7 +3141,7 @@ function renderBibleVirtualList(listEl, scrollTop, listKey) {
   }
   viewport.appendChild(frag);
 
-  // 首帧后实测条目高度并修正（人物卡 / 线索 / 弧光卡的 DOM 类名各不相同，统一取第一个子项）
+  // 首帧后实测条目高度并修正（人物卡 / 线索卡的 DOM 类名各不相同，统一取第一个子项）
   if (!l.measureDone) {
     const firstEntry = viewport.firstElementChild;
     if (firstEntry) {
@@ -3072,8 +3151,10 @@ function renderBibleVirtualList(listEl, scrollTop, listKey) {
       // 线索行比人物卡矮得多，不能再用 100px 当门槛；只要不是 0 高就按实测值走
       if (h > 20 && h < 800) {
         l.itemHeight = h;
-        listEl.querySelector('.vl-spacer').style.height = `${total * h}px`;
-        viewport.style.transform = `translateY(${first * h}px)`;
+        l.heights = new Array(total).fill(h);
+        computeBibleOffsets(l);
+        listEl.querySelector('.vl-spacer').style.height = `${l.totalHeight}px`;
+        viewport.style.transform = `translateY(${l.offsets[first]}px)`;
         l.measureDone = true;
         // 预估高度往往比真实高度大：按新高度补渲染一屏，避免首屏下方留白
         renderBibleVirtualList(listEl, scrollTop, listKey);
@@ -8145,7 +8226,10 @@ function renderArcsTab(host, n) {
         ${points.map((p) => `
           <div class="arc-point" data-ch="${p.chapterId}">
             <span class="arc-ch">第 ${p.chapterNo} 章</span>
-            <span class="arc-title">${esc(p.title || '未命名')}</span>
+            <span class="arc-main">
+              <span class="arc-title">${esc(p.title || '未命名')}</span>
+              ${p.unresolved ? `<span class="arc-unresolved">未决：${esc(p.unresolved)}</span>` : ''}
+            </span>
             ${p.state ? `<span class="arc-state">${esc(p.state)}</span>` : ''}
             ${p.events ? `<span class="arc-events dim">${esc(p.events)}</span>` : ''}
           </div>
@@ -8169,7 +8253,7 @@ function renderArcsTab(host, n) {
   // 虚拟滚动：角色数量大时启用
   const list = $('#arcList', host);
   if (list) {
-    initBibleVirtualList(list, arcItems, renderArcEntry, 'arcs');
+    initBibleVirtualList(list, arcItems, renderArcEntry, 'arcs', { measureAll: true });
     // 点击跳转（事件委托）
     list.addEventListener('click', (e) => {
       const name = e.target.closest('.arc-name');
