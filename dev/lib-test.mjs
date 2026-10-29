@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, parseTimelineTime, buildTimelineEvents } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, parseTimelineTime, buildTimelineEvents } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1118,6 +1118,52 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('人物归并：别名不会重复生成记忆节点', characters.length === 5, `${characters.length} ${characters.map((c) => c.name).join('|')}`);
   check('人物归并：记忆人物同名只留一个', memoryNames.length === 1 && memoryNames[0] === '陌生人', JSON.stringify(memoryNames));
   check('人物归并：对象写法也能归并', mentionToId.get('小昭') === 'c4', JSON.stringify([...mentionToId]));
+}
+
+// ---------------------------------------------------------------
+// 人物弧光：真实章号、最近状态回退与记忆人物
+{
+  const novel = {
+    bible: {
+      characters: [
+        { id: 'a1', name: '艾伦', keywords: ['史密斯'] },
+        { id: 'a2', name: '林昭', keywords: [] },
+        { id: 'a3', name: '沈青梧', keywords: [] },
+      ],
+    },
+    chapters: [
+      {
+        id: 'z1', no: 1, title: '北境',
+        memory: {
+          characters: ['艾伦·史密斯', '林昭'],
+          stateChanges: ['林昭拜入山门'],
+          events: ['两人相遇'],
+        },
+      },
+      { id: 'z2', no: 2, title: '空白', memory: { characters: ['林昭', '陌生人'] } },
+      { id: 'z3', title: '无编号', memory: { characters: ['艾伦'], stateChanges: ['艾伦失去左手'] } },
+      {
+        id: 'z4', no: 4, title: '再会',
+        memory: { characters: ['艾伦·史密斯'], stateChanges: '艾伦找回断剑', unresolved: ['断剑下落'] },
+      },
+    ],
+  };
+  const arcs = buildCharacterArcs(novel);
+  const byId = (id) => arcs.find((arc) => arc.char.id === id);
+  const alan = byId('a1');
+  const lin = byId('a2');
+  const stranger = arcs.find((arc) => arc.char.fromMemory && arc.char.name === '陌生人');
+
+  check('人物弧光：只给有出场记录的人物建卡', arcs.length === 3 && !byId('a3'), `${arcs.length} ${arcs.map((a) => a.char.name).join('|')}`);
+  check('人物弧光：章号用真实 no，不用出场序号', alan?.points.map((p) => p.chapterNo).join(',') === '1,3,4', JSON.stringify(alan?.points.map((p) => p.chapterNo)));
+  check('人物弧光：缺章号按全书顺序补', alan?.points[1]?.chapterId === 'z3' && alan?.points[1]?.chapterNo === 3, JSON.stringify(alan?.points[1]));
+  check('人物弧光：别名合并到同一张卡', arcs.filter((arc) => arc.char.name.includes('艾伦')).length === 1, arcs.map((a) => a.char.name).join('|'));
+  check('人物弧光：最近状态取最后一次有记录的章', lin?.latestState === '林昭拜入山门' && lin?.latestStateNo === 1 && lin?.latestStateIsLatest === false, JSON.stringify({ state: lin?.latestState, no: lin?.latestStateNo, latest: lin?.latestStateIsLatest }));
+  check('人物弧光：最后一次出场有状态时标记最新', alan?.latestState === '艾伦找回断剑' && alan?.latestStateNo === 4 && alan?.latestStateIsLatest === true, JSON.stringify({ state: alan?.latestState, no: alan?.latestStateNo, latest: alan?.latestStateIsLatest }));
+  check('人物弧光：只出现在记忆里的人物也能建弧光', stranger?.char.fromMemory === true && stranger?.points.length === 1 && stranger?.points[0].chapterNo === 2, JSON.stringify(stranger && { name: stranger.char.name, points: stranger.points.length }));
+  check('人物弧光：没有状态记录时留空', stranger?.latestState === '' && stranger?.latestStateNo === null && stranger?.latestStateIsLatest === false, JSON.stringify(stranger && { state: stranger.latestState, no: stranger.latestStateNo, latest: stranger.latestStateIsLatest }));
+  check('人物弧光：事件与未决字段带出来', alan?.points[0]?.events === '两人相遇' && alan?.points[2]?.unresolved === '断剑下落', JSON.stringify(alan?.points));
+  check('人物弧光：空作品返回空', buildCharacterArcs(null).length === 0 && buildCharacterArcs({}).length === 0 && buildCharacterArcs({ chapters: [] }).length === 0);
 }
 
 // ---------------------------------------------------------------

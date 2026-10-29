@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, buildCharacterArcs } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -3062,11 +3062,13 @@ function renderBibleVirtualList(listEl, scrollTop, listKey) {
   }
   viewport.appendChild(frag);
 
-  // 首帧后实测条目高度并修正
+  // 首帧后实测条目高度并修正（人物卡 / 线索 / 弧光卡的 DOM 类名各不相同，统一取第一个子项）
   if (!l.measureDone) {
-    const firstEntry = viewport.querySelector('.entry');
+    const firstEntry = viewport.firstElementChild;
     if (firstEntry) {
-      const h = firstEntry.getBoundingClientRect().height;
+      // 条目之间有 margin，滚动步长要把这段间距算进去，否则最后几条会被裁掉
+      const margin = parseFloat(getComputedStyle(firstEntry).marginBottom) || 0;
+      const h = firstEntry.getBoundingClientRect().height + margin;
       if (h > 100 && h < 800) {
         l.itemHeight = h;
         listEl.querySelector('.vl-spacer').style.height = `${total * h}px`;
@@ -8082,8 +8084,8 @@ function renderThreadsTab(host, n) {
 
 /** 人物弧光追踪：基于章节记忆自动生成每个角色的情感/状态曲线 */
 function renderArcsTab(host, n) {
-  const index = buildCharacterAppearances(n);
-  if (index.size === 0) {
+  const arcs = buildCharacterArcs(n);
+  if (arcs.length === 0) {
     host.innerHTML = `
       <div class="bible-block">
         <h2>人物弧光</h2>
@@ -8092,57 +8094,31 @@ function renderArcsTab(host, n) {
     return;
   }
 
-  // 收集所有出场过的角色（设定库 + 记忆）；记忆名先按别名归到人物卡，避免别名重复成多张卡
-  const { characters } = collectCharacterNodes(n);
-
-  // 准备弧光数据项（每项是一个角色的完整弧光卡片）
-  const arcItems = characters.map((char) => {
-    const appearances = appearancesForCharacter(char, index);
-    if (!appearances.length) return null;
-
-    const points = appearances.map((ch, idx) => {
-      const mem = ch.memory || {};
-      const state = mem.stateChanges?.join('；') || '';
-      const events = mem.events?.join('；') || '';
-      const unresolved = mem.unresolved?.join('；') || '';
-      return {
-        chapter: idx + 1,
-        title: ch.title,
-        chapterId: ch.id,
-        state,
-        events,
-        unresolved,
-        words: wordsOf(ch),
-      };
-    });
-
-    const totalWords = points.reduce((s, p) => s + p.words, 0);
-    const latestState = points[points.length - 1]?.state || '无记录';
-
-    return {
-      char,
-      points,
-      totalWords,
-      latestState,
-    };
-  }).filter(Boolean);
+  // 弧光数据项（每项是一个角色的完整弧光卡片）；字数用页面级缓存统计
+  const arcItems = arcs.map((arc) => ({
+    ...arc,
+    totalWords: arc.points.reduce((sum, point) => sum + wordsOf(point.chapter), 0),
+  }));
 
   // 单个弧光卡片渲染函数（供虚拟列表复用）
   function renderArcEntry(item, idx) {
-    const { char, points, totalWords, latestState } = item;
+    const { char, points, totalWords, latestState, latestStateNo, latestStateIsLatest } = item;
+    const stateLabel = !latestState
+      ? '最新状态：'
+      : (latestStateIsLatest ? '最新状态：' : `最近状态（第 ${latestStateNo} 章）：`);
     const div = document.createElement('div');
     div.className = 'arc-card';
     div.dataset.charId = char.id;
     div.innerHTML = `
       <div class="arc-head">
-        <span class="arc-name">${esc(char.name)}</span>
+        <button type="button" class="arc-name" data-char-id="${esc(char.id)}">${esc(char.name)}</button>
         <span class="arc-count">${points.length} 章 · ${totalWords} 字</span>
         <button class="btn btn-sm btn-text arc-goto" data-ch="${points[points.length - 1].chapterId}">跳到最新</button>
       </div>
       <div class="arc-timeline">
         ${points.map((p) => `
           <div class="arc-point" data-ch="${p.chapterId}">
-            <span class="arc-ch">第 ${p.chapter} 章</span>
+            <span class="arc-ch">第 ${p.chapterNo} 章</span>
             <span class="arc-title">${esc(p.title || '未命名')}</span>
             ${p.state ? `<span class="arc-state">${esc(p.state)}</span>` : ''}
             ${p.events ? `<span class="arc-events dim">${esc(p.events)}</span>` : ''}
@@ -8150,8 +8126,8 @@ function renderArcsTab(host, n) {
         `).join('')}
       </div>
       <div class="arc-summary">
-        <span class="arc-label">最新状态：</span>
-        <span class="arc-state">${esc(latestState)}</span>
+        <span class="arc-label">${stateLabel}</span>
+        <span class="arc-state">${esc(latestState || '无记录')}</span>
       </div>
     `;
     return div;
@@ -8160,7 +8136,7 @@ function renderArcsTab(host, n) {
   host.innerHTML = `
     <div class="bible-block">
       <h2>人物弧光</h2>
-      <p class="dim small">基于章节记忆自动提取每个角色的出场轨迹、状态变化与未决线索。点章次号可跳转正文。</p>
+      <p class="dim small">基于章节记忆自动提取每个角色的出场轨迹、状态变化与未决线索。点人物名可打开人物卡，点章次号可跳转正文。</p>
       <div class="arcs-list" id="arcList"></div>
     </div>`;
 
@@ -8170,6 +8146,18 @@ function renderArcsTab(host, n) {
     initBibleVirtualList(list, arcItems, renderArcEntry, 'arcs');
     // 点击跳转（事件委托）
     list.addEventListener('click', (e) => {
+      const name = e.target.closest('.arc-name');
+      if (name) {
+        const item = arcItems.find((arc) => arc.char.id === name.dataset.charId);
+        if (item) {
+          jumpToCharacterNode({
+            id: item.char.id,
+            label: item.char.name,
+            group: item.char.fromBible ? 'bible' : 'memory',
+          });
+        }
+        return;
+      }
       const goto = e.target.closest('.arc-goto');
       if (goto) return openChapterFromIndex(goto.dataset.ch);
       const point = e.target.closest('.arc-point');

@@ -178,6 +178,58 @@ export function collectCharacterNodes(novel) {
   return { characters, mentionToId };
 }
 
+/** 人物弧光：把每个有出场记录的人物整理成按章节顺序的状态曲线。
+ *  章号取章节真实的 no（缺失时按全书顺序补），不是出场序号；
+ *  最近状态取最后一个「写了状态变化」的出场章，最后一次出场没写状态时
+ *  不会把前面记录的状态吞掉。没有出场的设定人物不会占一张弧光卡。 */
+export function buildCharacterArcs(novel) {
+  const chapters = Array.isArray(novel?.chapters) ? novel.chapters : [];
+  const index = buildCharacterAppearances(novel);
+  if (!chapters.length || index.size === 0) return [];
+
+  const order = new Map();
+  chapters.forEach((ch, i) => {
+    if (ch?.id) order.set(ch.id, i);
+  });
+
+  const { characters } = collectCharacterNodes(novel);
+  const arcs = [];
+  for (const char of characters) {
+    const appearances = appearancesForCharacter(char, index)
+      .map((ch) => ({ ch, order: order.get(ch.id) ?? chapters.indexOf(ch) }))
+      .sort((a, b) => a.order - b.order);
+    if (!appearances.length) continue;
+
+    const points = appearances.map(({ ch, order: chapterIndex }) => {
+      const mem = ch.memory || {};
+      return {
+        chapter: ch,
+        chapterId: ch.id,
+        chapterNo: ch.no || chapterIndex + 1,
+        title: ch.title || '',
+        state: memoryItems(mem, 'stateChanges').join('；'),
+        events: memoryItems(mem, 'events').join('；'),
+        unresolved: memoryItems(mem, 'unresolved').join('；'),
+      };
+    });
+
+    let latestIndex = -1;
+    points.forEach((point, i) => {
+      if (point.state) latestIndex = i;
+    });
+    const latest = latestIndex >= 0 ? points[latestIndex] : null;
+
+    arcs.push({
+      char,
+      points,
+      latestState: latest?.state || '',
+      latestStateNo: latest ? latest.chapterNo : null,
+      latestStateIsLatest: latestIndex === points.length - 1,
+    });
+  }
+  return arcs;
+}
+
 /** 去掉括号备注、空格和连接符后再比对，兼容「张三（少年）」「艾伦·史密斯」这类写法 */
 
 export function openRevisionCount(ch) {

@@ -1522,14 +1522,25 @@ kbd {
 .beat-row.filled .beat-bar { background: linear-gradient(90deg, var(--success), var(--brand)); }
 
 /* 人物弧光 */
-.arcs-list { display: flex; flex-direction: column; gap: 12px; }
+.arcs-list { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+#bibleBody > .bible-block > .arcs-list { flex: 1; min-height: 0; }
+.arcs-list.virtual { position: relative; overflow: auto; padding: 0; flex: 1; min-height: 0; }
+.arcs-list.virtual > .vl-spacer { display: block; pointer-events: none; flex: none; }
+.arcs-list.virtual > .vl-viewport { position: absolute; top: 0; left: 0; right: 0; }
+.arcs-list.virtual > .vl-viewport > .arc-card { margin-bottom: 12px; }
 .arc-card {
   background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg);
   padding: 14px; transition: border-color var(--dur) var(--ease);
 }
 .arc-card:hover { border-color: var(--border-2); }
 .arc-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
-.arc-name { font-weight: 600; font-size: 13.5px; color: var(--text-1); }
+.arc-name {
+  padding: 0; border: 0; background: none; border-radius: var(--r-sm);
+  appearance: none; font: inherit; font-weight: 600; font-size: 13.5px; line-height: inherit;
+  color: var(--text-1); text-align: left; cursor: pointer;
+}
+.arc-name:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.arc-name:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-bg), 0 0 0 1px var(--accent); }
 .arc-count { font-size: 11px; color: var(--text-3); }
 .arc-goto { font-size: 11px; }
 .arc-timeline { display: flex; flex-direction: column; gap: 6px; margin-left: 4px; }
