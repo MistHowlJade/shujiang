@@ -193,23 +193,60 @@ export function buildCharacterArcs(novel) {
   });
 
   const { characters } = collectCharacterNodes(novel);
-  const arcs = [];
+  const aliases = new Map();
+  const appearancesByChar = new Map();
+  const chapterChars = new Map();
   for (const char of characters) {
+    aliases.set(char.id, characterAliases(char).filter((alias) => alias.length >= 2));
     const appearances = appearancesForCharacter(char, index)
       .map((ch) => ({ ch, order: order.get(ch.id) ?? chapters.indexOf(ch) }))
       .sort((a, b) => a.order - b.order);
+    appearancesByChar.set(char.id, appearances);
+    for (const { ch } of appearances) {
+      if (!chapterChars.has(ch.id)) chapterChars.set(ch.id, new Set());
+      chapterChars.get(ch.id).add(char.id);
+    }
+  }
+
+  // 一章里的状态可能分别属于不同人物。只要有一条状态点到了本章某个人物，
+  // 就只把点到自己的状态算进本人弧光；没点名的状态仍然保留给同章所有人物。
+  const stateInfo = new Map();
+  const infoOf = (ch) => {
+    let info = stateInfo.get(ch.id);
+    if (info) return info;
+    const ids = chapterChars.get(ch.id) || new Set();
+    const states = memoryItems(ch.memory, 'stateChanges').map((text) => {
+      const norm = normalizeCharacterName(text);
+      const named = [...ids].some((id) =>
+        (aliases.get(id) || []).some((alias) => norm.includes(alias)));
+      return { text, norm, named };
+    });
+    info = { states, hasNamed: states.some((state) => state.named) };
+    stateInfo.set(ch.id, info);
+    return info;
+  };
+
+  const arcs = [];
+  for (const char of characters) {
+    const appearances = appearancesByChar.get(char.id) || [];
     if (!appearances.length) continue;
+    const ownAliases = aliases.get(char.id) || [];
 
     const points = appearances.map(({ ch, order: chapterIndex }) => {
-      const mem = ch.memory || {};
+      const info = infoOf(ch);
+      const states = info.hasNamed
+        ? info.states
+          .filter((state) => !state.named || ownAliases.some((alias) => state.norm.includes(alias)))
+          .map((state) => state.text)
+        : info.states.map((state) => state.text);
       return {
         chapter: ch,
         chapterId: ch.id,
         chapterNo: ch.no || chapterIndex + 1,
         title: ch.title || '',
-        state: memoryItems(mem, 'stateChanges').join('；'),
-        events: memoryItems(mem, 'events').join('；'),
-        unresolved: memoryItems(mem, 'unresolved').join('；'),
+        state: states.join('；'),
+        events: memoryItems(ch.memory, 'events').join('；'),
+        unresolved: memoryItems(ch.memory, 'unresolved').join('；'),
       };
     });
 

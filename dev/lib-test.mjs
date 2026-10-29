@@ -1167,6 +1167,46 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
 }
 
 // ---------------------------------------------------------------
+// 人物弧光：同章多人时状态按人物归位
+{
+  const novel = {
+    bible: {
+      characters: [
+        { id: 'p1', name: '艾伦', keywords: ['史密斯'] },
+        { id: 'p2', name: '林昭', keywords: [] },
+      ],
+    },
+    chapters: [
+      {
+        id: 'q1', no: 1, title: '同章',
+        memory: {
+          characters: ['艾伦·史密斯', '林昭'],
+          stateChanges: ['艾伦·史密斯失去左手', '林昭拜入山门', '城门关闭'],
+        },
+      },
+      {
+        id: 'q2', no: 2, title: '分别',
+        memory: { characters: ['艾伦', '林昭'], stateChanges: ['林昭下山历练'] },
+      },
+    ],
+  };
+  const arcs = buildCharacterArcs(novel);
+  const alan = arcs.find((arc) => arc.char.id === 'p1');
+  const lin = arcs.find((arc) => arc.char.id === 'p2');
+
+  check('人物弧光：同章状态只归到本人', alan?.points[0]?.state === '艾伦·史密斯失去左手；城门关闭' && lin?.points[0]?.state === '林昭拜入山门；城门关闭', JSON.stringify({ alan: alan?.points[0]?.state, lin: lin?.points[0]?.state }));
+  check('人物弧光：同章只点名别人时本人留空', alan?.points[1]?.state === '' && lin?.points[1]?.state === '林昭下山历练', JSON.stringify({ alan: alan?.points[1]?.state, lin: lin?.points[1]?.state }));
+  check('人物弧光：别人的状态不会成为最近状态', alan?.latestState === '艾伦·史密斯失去左手；城门关闭' && alan?.latestStateNo === 1 && alan?.latestStateIsLatest === false, JSON.stringify({ state: alan?.latestState, no: alan?.latestStateNo, latest: alan?.latestStateIsLatest }));
+  check('人物弧光：本人后续状态标记最新', lin?.latestState === '林昭下山历练' && lin?.latestStateNo === 2 && lin?.latestStateIsLatest === true, JSON.stringify({ state: lin?.latestState, no: lin?.latestStateNo, latest: lin?.latestStateIsLatest }));
+
+  const unnamed = buildCharacterArcs({
+    bible: { characters: [{ id: 'u1', name: '甲乙' }, { id: 'u2', name: '丙丁' }] },
+    chapters: [{ id: 'u1c', no: 1, memory: { characters: ['甲乙', '丙丁'], stateChanges: ['天降大雨'] } }],
+  });
+  check('人物弧光：没人被点名时状态保留给同章所有人', unnamed.length === 2 && unnamed.every((arc) => arc.points[0]?.state === '天降大雨'), JSON.stringify(unnamed.map((arc) => [arc.char.name, arc.points[0]?.state])));
+}
+
+// ---------------------------------------------------------------
 // 时间轴：时间解析、排序与章节关联
 {
   check('时间轴：阿拉伯数字优先', parseTimelineTime('开元 12 年') === 12, String(parseTimelineTime('开元 12 年')));
