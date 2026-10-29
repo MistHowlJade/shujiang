@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, parseTimelineTime, buildTimelineEvents } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1204,6 +1204,27 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
     chapters: [{ id: 'u1c', no: 1, memory: { characters: ['甲乙', '丙丁'], stateChanges: ['天降大雨'] } }],
   });
   check('人物弧光：没人被点名时状态保留给同章所有人', unnamed.length === 2 && unnamed.every((arc) => arc.points[0]?.state === '天降大雨'), JSON.stringify(unnamed.map((arc) => [arc.char.name, arc.points[0]?.state])));
+}
+
+// ---------------------------------------------------------------
+// 线索汇总与搜索
+{
+  const novel = {
+    chapters: [
+      { id: 'th1', no: 1, title: '北境风雪', memory: { unresolved: ['断剑下落'], foreshadowing: ['神秘来信'] } },
+      { id: 'th2', no: 2, title: '山门夜话', memory: { unresolved: ['断剑下落', '内奸是谁'] } },
+    ],
+  };
+  const threads = collectThreads(novel);
+  const search = (q) => filterEntriesBySearch(threads, q, threadSearchText).map((row) => row.item);
+
+  check('线索汇总：同名线索跨章合并', threads.find((t) => t.text === '断剑下落')?.nos.join(',') === '1,2', JSON.stringify(threads.map((t) => [t.text, t.nos])));
+  check('线索搜索：空查询保留全部', search('').length === 3, String(search('').length));
+  check('线索搜索：按内容匹配', search('断剑').length === 1 && search('断剑')[0]?.text === '断剑下落', JSON.stringify(search('断剑').map((t) => t.text)));
+  check('线索搜索：按类型匹配', search('伏笔').length === 1 && search('伏笔')[0]?.kind === 'foreshadowing', JSON.stringify(search('伏笔').map((t) => t.text)));
+  check('线索搜索：按章节标题匹配', search('北境').length === 2, JSON.stringify(search('北境').map((t) => t.text)));
+  check('线索搜索：按章号匹配', search('第2章').length === 2, JSON.stringify(search('第2章').map((t) => t.text)));
+  check('线索搜索：无匹配返回空', search('不存在').length === 0, JSON.stringify(search('不存在').map((t) => t.text)));
 }
 
 // ---------------------------------------------------------------

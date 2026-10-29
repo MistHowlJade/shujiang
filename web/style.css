@@ -1476,7 +1476,12 @@ kbd {
 .thread-stat b { color: var(--text-1); font-weight: 600; font-variant-numeric: tabular-nums; }
 .thread-filter { display: inline-flex; max-width: 100%; margin-bottom: 12px; }
 .thread-filter button { flex: 0 0 auto; padding-inline: 14px; }
-.thread-list { display: flex; flex-direction: column; gap: 7px; }
+.thread-list { display: flex; flex-direction: column; gap: 7px; min-height: 0; }
+#bibleBody > .bible-block > .thread-list { flex: 1; min-height: 0; }
+.thread-list.virtual { position: relative; overflow: auto; padding: 0; flex: 1; min-height: 0; }
+.thread-list.virtual > .vl-spacer { display: block; pointer-events: none; flex: none; }
+.thread-list.virtual > .vl-viewport { position: absolute; top: 0; left: 0; right: 0; display: flex; flex-direction: column; }
+.thread-list.virtual > .vl-viewport > .thread-row { margin-bottom: 7px; }
 .thread-row {
   display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px;
   align-items: start; width: 100%; padding: 10px 12px;

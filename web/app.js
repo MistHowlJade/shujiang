@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, buildCharacterArcs } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, buildCharacterArcs } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -275,7 +275,7 @@ const S = {
   stageFilter: '',         // 章节列表筛选：'' / 'open' / 'draft' / 'revising' / 'done'
   focusMode: false,        // 专注写作模式：只留稿纸
   threadFilter: 'all',     // 线索页筛选：all / unresolved / foreshadowing
-  bibleSearch: { characters: '', world: '', timeline: '' }, // 设定库搜索词，按页签分别记住
+  bibleSearch: { characters: '', world: '', timeline: '', threads: '' }, // 设定库搜索词，按页签分别记住
   revisionDraftChapterId: null, // 修订输入框里未提交的草稿属于哪一章
   out: '',
   reasoning: '',
@@ -778,7 +778,7 @@ async function openNovel(id, opts = {}) {
   volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   S.stageFilter = '';          // 筛选也一样，换作品先看全貌
   S.threadFilter = 'all';      // 线索页也回到全部
-  S.bibleSearch = { characters: '', world: '', timeline: '' }; // 搜索词属于上一本书，别带过去
+  S.bibleSearch = { characters: '', world: '', timeline: '', threads: '' }; // 搜索词属于上一本书，别带过去
   setView('studio');
   renderStudio();
 }
@@ -3069,12 +3069,17 @@ function renderBibleVirtualList(listEl, scrollTop, listKey) {
       // 条目之间有 margin，滚动步长要把这段间距算进去，否则最后几条会被裁掉
       const margin = parseFloat(getComputedStyle(firstEntry).marginBottom) || 0;
       const h = firstEntry.getBoundingClientRect().height + margin;
-      if (h > 100 && h < 800) {
+      // 线索行比人物卡矮得多，不能再用 100px 当门槛；只要不是 0 高就按实测值走
+      if (h > 20 && h < 800) {
         l.itemHeight = h;
         listEl.querySelector('.vl-spacer').style.height = `${total * h}px`;
         viewport.style.transform = `translateY(${first * h}px)`;
+        l.measureDone = true;
+        // 预估高度往往比真实高度大：按新高度补渲染一屏，避免首屏下方留白
+        renderBibleVirtualList(listEl, scrollTop, listKey);
+      } else {
+        l.measureDone = true;
       }
-      l.measureDone = true;
     }
   }
 }
@@ -8017,11 +8022,17 @@ function renderRelationsTab(host, n) {
 
 /* ---- 线索条目渲染（供虚拟列表复用） ---- */
 function renderThreadEntry(item) {
-  return `<button type="button" class="thread-row" data-thread-ch="${item.latest.id}" title="跳到第 ${item.latest.no} 章">
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'thread-row';
+  btn.dataset.threadCh = item.latest.id;
+  btn.title = `跳到第 ${item.latest.no} 章`;
+  btn.innerHTML = `
     <span class="thread-kind ${item.kind}">${THREAD_KINDS[item.kind].label}</span>
     <span class="thread-text">${esc(item.text)}</span>
     <span class="thread-meta">${threadMeta(item)}</span>
-  </button>`;
+  `;
+  return btn;
 }
 
 /** 线索追踪：基于章节记忆自动生成 */
@@ -8033,8 +8044,7 @@ function renderThreadsTab(host, n) {
   };
   const total = threads.length;
   const memCount = (n.chapters || []).filter((c) => c.memory).length;
-  const filter = ['all', 'unresolved', 'foreshadowing'].includes(S.threadFilter) ? S.threadFilter : 'all';
-  const visible = filter === 'all' ? threads : threads.filter((t) => t.kind === filter);
+  const filterOf = () => (['all', 'unresolved', 'foreshadowing'].includes(S.threadFilter) ? S.threadFilter : 'all');
 
   host.innerHTML = `
     <div class="bible-block">
@@ -8043,6 +8053,7 @@ function renderThreadsTab(host, n) {
         <button class="btn btn-sm" id="threadsBatch">${ico('refresh')}批量补记忆</button>
       </h2>
       <p class="dim small">从每章记忆的「未决」「伏笔」自动汇总，重复的线索会合并；点一条可跳到最近提到的章节。它不替代设定库，只是把散在几十万字里的线头集中起来。线索是否已经回收，以正文为准。</p>
+      ${bibleSearchBar('threads', '搜索线索：内容 / 类型 / 章节')}
       <div class="thread-stats">
         <span class="thread-stat"><b>${counts.unresolved}</b> 条未决</span>
         <span class="thread-stat"><b>${counts.foreshadowing}</b> 条伏笔</span>
@@ -8053,16 +8064,35 @@ function renderThreadsTab(host, n) {
           ['all', '全部', total],
           ['unresolved', '未决', counts.unresolved],
           ['foreshadowing', '伏笔', counts.foreshadowing],
-        ].map(([kind, label, count]) => `<button data-tf="${kind}" class="${filter === kind ? 'on' : ''}">${label} ${count}</button>`).join('')}
+        ].map(([kind, label, count]) => `<button data-tf="${kind}" class="${filterOf() === kind ? 'on' : ''}">${label} ${count}</button>`).join('')}
       </div>` : ''}
       <div class="thread-list" id="threadList"></div>
       ${memCount > 0 && memCount < n.chapters.length ? `<p class="dim small thread-hint">还有 ${n.chapters.length - memCount} 章没有章节记忆，线索可能不完整。</p>` : ''}
     </div>`;
 
+  const list = $('#threadList', host);
+  const renderList = () => {
+    const matched = filterEntriesBySearch(threads, bibleSearchValue('threads'), threadSearchText)
+      .map((row) => row.item);
+    const filter = filterOf();
+    const visible = filter === 'all' ? matched : matched.filter((t) => t.kind === filter);
+    setBibleSearchCount(host, 'threads', visible.length, total);
+    list.scrollTop = 0;
+    initBibleVirtualList(list, visible, (t) => renderThreadEntry(t), 'threads');
+    if (!visible.length) {
+      const q = bibleSearchValue('threads').trim();
+      list.innerHTML = q
+        ? `<p class="dim">没有匹配「${esc(q)}」的线索。</p>`
+        : (total ? '<p class="dim">这个筛选下还没有线索。</p>' : '<p class="thread-empty">还没有线索。给章节存过记忆后，「未决」和「伏笔」会自动汇总到这里。</p>');
+    }
+  };
+
+  bindBibleSearch(host, 'threads', renderList);
   $$('#threadFilter button', host).forEach((btn) => {
     btn.onclick = () => {
       S.threadFilter = btn.dataset.tf;
-      renderThreadsTab(host, n);
+      $$('#threadFilter button', host).forEach((x) => x.classList.toggle('on', x === btn));
+      renderList();
     };
   });
   $('#threadsBatch', host).onclick = () => {
@@ -8070,16 +8100,12 @@ function renderThreadsTab(host, n) {
     openBatchMemory();
   };
 
-  // 虚拟滚动：线索数量大时启用
-  const list = $('#threadList', host);
-  if (list) {
-    initBibleVirtualList(list, visible, (t, i) => renderThreadEntry(t, i), 'threads');
-    // 点击跳转
-    list.addEventListener('click', (e) => {
-      const row = e.target.closest('.thread-row');
-      if (row) openChapterFromIndex(row.dataset.threadCh);
-    });
-  }
+  renderList();
+  // 点击跳转
+  list.addEventListener('click', (e) => {
+    const row = e.target.closest('.thread-row');
+    if (row) openChapterFromIndex(row.dataset.threadCh);
+  });
 }
 
 /** 人物弧光追踪：基于章节记忆自动生成每个角色的情感/状态曲线 */

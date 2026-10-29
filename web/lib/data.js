@@ -40,6 +40,17 @@ export const THREAD_KINDS = {
   foreshadowing: { label: '伏笔', order: 1 },
 };
 
+/** 线索页搜索文本：内容、类型（未决 / 伏笔）、出现过的章节号与标题。
+ *  和设定库搜索共用 filterEntriesBySearch，空格分词、忽略大小写与间隔符。 */
+export function threadSearchText(thread) {
+  const chapters = Array.isArray(thread?.chapters) ? thread.chapters : [];
+  return [
+    thread?.text,
+    THREAD_KINDS[thread?.kind]?.label || '',
+    ...chapters.flatMap((ch) => [ch?.no, ch?.title, ch?.no ? `第 ${ch.no} 章` : '']),
+  ].join('\n');
+}
+
 
 /** 人物卡的检索关键词（兼容字符串写法） */
 export function characterKeywords(character) {
