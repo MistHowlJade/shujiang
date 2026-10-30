@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -275,7 +275,7 @@ const S = {
   stageFilter: '',         // 章节列表筛选：'' / 'open' / 'draft' / 'revising' / 'done'
   focusMode: false,        // 专注写作模式：只留稿纸
   threadFilter: 'all',     // 线索页筛选：all / unresolved / foreshadowing
-  bibleSearch: { characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '' }, // 设定库搜索词，按页签分别记住
+  bibleSearch: { characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '', timelineViz: '' }, // 设定库搜索词，按页签分别记住
   revisionDraftChapterId: null, // 修订输入框里未提交的草稿属于哪一章
   out: '',
   reasoning: '',
@@ -778,7 +778,7 @@ async function openNovel(id, opts = {}) {
   volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   S.stageFilter = '';          // 筛选也一样，换作品先看全貌
   S.threadFilter = 'all';      // 线索页也回到全部
-  S.bibleSearch = { characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '' }; // 搜索词属于上一本书，别带过去
+  S.bibleSearch = { characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '', timelineViz: '' }; // 搜索词属于上一本书，别带过去
   setView('studio');
   renderStudio();
 }
@@ -8580,6 +8580,8 @@ function renderTimelineVizTab(host, n) {
         <button class="btn btn-sm" id="addTlViz">${ico('plus')}新增节点</button>
       </h2>
       <p class="dim small">故事世界的关键时间点可视化。有关联章节的节点单击直接跳转；双击节点回到时间线编辑。中文数字与阿拉伯数字都会参与排序。</p>
+      ${bibleSearchBar('timelineViz', '搜索时间轴：时间 / 标题 / 说明 / 章节')}
+      <p class="dim small tl-viz-empty" id="tlVizSearchEmpty" hidden></p>
       <div class="timeline-viz-wrap" style="position:relative;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;">
         <svg id="timelineSvg" viewBox="0 0 900 400" width="100%" style="display:block;height:auto;"></svg>
       </div>
@@ -8594,6 +8596,24 @@ function renderTimelineVizTab(host, n) {
   let clickTimer = null;
 
   function renderViz() {
+    const query = bibleSearchValue('timelineViz');
+    const active = !!query.trim();
+    const rows = filterEntriesBySearch(timeline, query, timelineEventSearchText);
+    const matched = new Set(rows.map((row) => row.index));
+    const countEl = $('[data-bible-search-count="timelineViz"]', host);
+    if (countEl) {
+      countEl.textContent = active
+        ? `命中 ${rows.length} / ${timeline.length} 个节点`
+        : `共 ${timeline.length} 个节点`;
+    }
+    const emptyEl = $('#tlVizSearchEmpty', host);
+    if (emptyEl) {
+      emptyEl.hidden = !active || rows.length > 0;
+      emptyEl.textContent = active && !rows.length
+        ? `没有匹配「${query.trim()}」的时间节点。`
+        : '';
+    }
+
     const groups = new Map();
     timeline.forEach((e) => {
       const key = e.timeVal == null ? `none-${e.index}` : `t-${e.timeVal}`;
@@ -8623,13 +8643,15 @@ function renderTimelineVizTab(host, n) {
       <line x1="60" y1="200" x2="840" y2="200" stroke="var(--border-2)" stroke-width="2" marker-end="url(#tlArrow)" />
     `;
 
-    timeline.forEach((e) => {
+    timeline.forEach((e, i) => {
       const entry = e.entry;
       const x = e.x;
       const y = e.y;
       const isOdd = e.odd;
+      const searchState = active ? (matched.has(i) ? ' is-hit' : ' is-dim') : '';
 
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('class', `tl-viz-stem${searchState}`);
       line.setAttribute('x1', x);
       line.setAttribute('y1', y);
       line.setAttribute('x2', x);
@@ -8640,6 +8662,7 @@ function renderTimelineVizTab(host, n) {
       svg.appendChild(line);
 
       const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('class', `tl-viz-node${searchState}`);
       circle.setAttribute('cx', x);
       circle.setAttribute('cy', y);
       circle.setAttribute('r', '10');
@@ -8650,7 +8673,7 @@ function renderTimelineVizTab(host, n) {
       circle.setAttribute('data-idx', e.index);
       circle.setAttribute('data-entry-id', entry.id || '');
       circle.setAttribute('data-chapter-id', e.chapterId || '');
-      circle.style.transition = 'r 0.15s, filter 0.15s';
+      circle.style.transition = 'r 0.15s, filter 0.15s, opacity 0.15s';
       circle.addEventListener('mouseenter', () => { circle.setAttribute('r', '14'); circle.style.filter = 'brightness(1.2)'; });
       circle.addEventListener('mouseleave', () => { circle.setAttribute('r', '10'); circle.style.filter = 'none'; });
       const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
@@ -8679,6 +8702,7 @@ function renderTimelineVizTab(host, n) {
 
       if (entry.title) {
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('class', `tl-viz-label${searchState}`);
         text.setAttribute('x', x);
         text.setAttribute('y', isOdd ? y - 18 : y + 28);
         text.setAttribute('text-anchor', 'middle');
@@ -8691,6 +8715,7 @@ function renderTimelineVizTab(host, n) {
 
       if (entry.time) {
         const timeText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        timeText.setAttribute('class', `tl-viz-time${searchState}`);
         timeText.setAttribute('x', x);
         timeText.setAttribute('y', isOdd ? y - 32 : y + 42);
         timeText.setAttribute('text-anchor', 'middle');
@@ -8703,6 +8728,7 @@ function renderTimelineVizTab(host, n) {
     });
   }
 
+  bindBibleSearch(host, 'timelineViz', renderViz);
   renderViz();
 
   $('#addTlViz', host)?.addEventListener('click', () => {

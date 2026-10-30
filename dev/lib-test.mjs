@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1311,6 +1311,34 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('时间轴：章节缺 no 时按原顺序补章号', events[2].chapterNo === 3, String(events[2].chapterNo));
   check('时间轴：关联章节不存在时标记', events[3].chapterMissing === true && events[3].chapterNo === null, JSON.stringify({ missing: events[3].chapterMissing, no: events[3].chapterNo }));
   check('时间轴：空作品返回空', buildTimelineEvents(null).length === 0 && buildTimelineEvents({}).length === 0);
+
+  const searchEvents = buildTimelineEvents({
+    chapters: [
+      { id: 'sc1', no: 1, title: '入宗' },
+      { id: 'sc2', no: 5, title: '试炼' },
+    ],
+    bible: {
+      timeline: [
+        { id: 's1', time: '开元三年', title: '甲', desc: '边关急报', chapterId: 'sc2' },
+        { id: 's2', time: '开元元年', title: '乙', chapterId: 'sc1' },
+        { id: 's3', time: '很久以前', title: '丙', chapterId: 'missing' },
+        { id: 's4', time: '开元四十二年', title: '丁', desc: '雪夜行军' },
+        { id: 's5', time: '', title: '戊', desc: '无时间记录' },
+      ],
+    },
+  });
+  const search = (q) => filterEntriesBySearch(searchEvents, q, timelineEventSearchText).map((row) => row.item.entry.id);
+  check('时间轴搜索：空查询保留全部', search('').length === 5, JSON.stringify(search('')));
+  check('时间轴搜索：按标题匹配', search('丁').join(',') === 's4', JSON.stringify(search('丁')));
+  check('时间轴搜索：按时间文本匹配', search('开元三年').join(',') === 's1', JSON.stringify(search('开元三年')));
+  check('时间轴搜索：按解析出的数字匹配中文时间', search('42').join(',') === 's4', JSON.stringify(search('42')));
+  check('时间轴搜索：按说明匹配', search('雪夜').join(',') === 's4', JSON.stringify(search('雪夜')));
+  check('时间轴搜索：按关联章号匹配', search('第5章').join(',') === 's1', JSON.stringify(search('第5章')));
+  check('时间轴搜索：按关联章节标题匹配', search('试炼').join(',') === 's1', JSON.stringify(search('试炼')));
+  check('时间轴搜索：失效关联也能搜到', search('已不存在').join(',') === 's3', JSON.stringify(search('已不存在')));
+  check('时间轴搜索：多词按都包含匹配', search('开元三年 甲').join(',') === 's1', JSON.stringify(search('开元三年 甲')));
+  check('时间轴搜索：无时间节点也能搜到', search('无时间记录').join(',') === 's5', JSON.stringify(search('无时间记录')));
+  check('时间轴搜索：无匹配返回空', search('没有这个').length === 0, JSON.stringify(search('没有这个')));
 }
 
 // ---------------------------------------------------------------

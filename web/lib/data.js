@@ -494,6 +494,21 @@ export function buildTimelineEvents(novel) {
   });
 }
 
+/** 时间轴可视化搜索文本：时间 / 标题 / 说明 / 关联章节号与标题 / 失效关联。
+ *  timeVal 也放进去，搜「42」能命中「开元四十二年」这种中文写法。 */
+export function timelineEventSearchText(event) {
+  const entry = event?.entry || {};
+  return [
+    entry.time,
+    entry.title,
+    entry.desc,
+    event?.timeVal != null ? String(event.timeVal) : '',
+    event?.chapterNo ? `第 ${event.chapterNo} 章` : '',
+    event?.chapterTitle,
+    event?.chapterMissing ? '关联章节已不存在' : '',
+  ].flat(Infinity).map((value) => String(value ?? '')).join('\n');
+}
+
 /** 一个条目可以用来检索的名字与关键词。单字太容易误命中，直接跳过 */
 export function worldMentionKeys(entry) {
   const rawKeywords = Array.isArray(entry?.keywords)
