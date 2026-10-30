@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1164,6 +1164,18 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('人物弧光：没有状态记录时留空', stranger?.latestState === '' && stranger?.latestStateNo === null && stranger?.latestStateIsLatest === false, JSON.stringify(stranger && { state: stranger.latestState, no: stranger.latestStateNo, latest: stranger.latestStateIsLatest }));
   check('人物弧光：事件与未决字段带出来', alan?.points[0]?.events === '两人相遇' && alan?.points[2]?.unresolved === '断剑下落', JSON.stringify(alan?.points));
   check('人物弧光：空作品返回空', buildCharacterArcs(null).length === 0 && buildCharacterArcs({}).length === 0 && buildCharacterArcs({ chapters: [] }).length === 0);
+
+  const search = (q) => filterEntriesBySearch(arcs, q, arcSearchText).map((row) => row.item);
+  check('人物弧光搜索：空查询保留全部', search('').length === arcs.length, String(search('').length));
+  check('人物弧光搜索：按人物名匹配', search('艾伦').length === 1 && search('艾伦')[0]?.char.id === 'a1', JSON.stringify(search('艾伦').map((a) => a.char.name)));
+  check('人物弧光搜索：按关键词匹配', search('史密斯').length === 1 && search('史密斯')[0]?.char.id === 'a1', JSON.stringify(search('史密斯').map((a) => a.char.name)));
+  check('人物弧光搜索：按章节标题匹配', search('再会').length === 1 && search('再会')[0]?.char.id === 'a1', JSON.stringify(search('再会').map((a) => a.char.name)));
+  check('人物弧光搜索：按章号匹配', search('第4章').length === 1 && search('第4章')[0]?.char.id === 'a1', JSON.stringify(search('第4章').map((a) => a.char.name)));
+  check('人物弧光搜索：按状态匹配', search('找回断剑').length === 1 && search('找回断剑')[0]?.char.id === 'a1', JSON.stringify(search('找回断剑').map((a) => a.char.name)));
+  check('人物弧光搜索：按事件匹配（同章共享）', search('两人相遇').length === 2 && search('两人相遇').every((a) => ['a1', 'a2'].includes(a.char.id)), JSON.stringify(search('两人相遇').map((a) => a.char.name)));
+  check('人物弧光搜索：按未决匹配', search('断剑下落').length === 1 && search('断剑下落')[0]?.char.id === 'a1', JSON.stringify(search('断剑下落').map((a) => a.char.name)));
+  check('人物弧光搜索：搜「未决」筛出有线头的人物', search('未决').length === 1 && search('未决')[0]?.char.id === 'a1', JSON.stringify(search('未决').map((a) => a.char.name)));
+  check('人物弧光搜索：无匹配返回空', search('不存在').length === 0, JSON.stringify(search('不存在').map((a) => a.char.name)));
 }
 
 // ---------------------------------------------------------------

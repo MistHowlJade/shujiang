@@ -278,6 +278,31 @@ export function buildCharacterArcs(novel) {
   return arcs;
 }
 
+/** 人物弧光搜索文本：人物名 / 身份 / 关键词、每章的章号标题、状态、事件与未决。
+ *  有未决的卡会带上「未决」二字，搜这个词就能筛出所有还有线头的人物。 */
+export function arcSearchText(arc) {
+  const char = arc?.char || {};
+  const points = Array.isArray(arc?.points) ? arc.points : [];
+  const values = [
+    char.name, char.role, char.identity, char.desc, char.age, char.appearance,
+    char.personality, char.goal, char.flaw, char.secret, char.speech, char.arc,
+    char.keywords, arc?.latestState,
+  ];
+  for (const point of points) {
+    values.push(
+      point?.chapterNo ? `第 ${point.chapterNo} 章` : '',
+      point?.title,
+      point?.state,
+      point?.events,
+      point?.unresolved,
+      point?.state ? '状态' : '',
+      point?.events ? '事件' : '',
+      point?.unresolved ? '未决' : '',
+    );
+  }
+  return values.flat(Infinity).map((value) => String(value ?? '')).join('\n');
+}
+
 /** 去掉括号备注、空格和连接符后再比对，兼容「张三（少年）」「艾伦·史密斯」这类写法 */
 
 export function openRevisionCount(ch) {

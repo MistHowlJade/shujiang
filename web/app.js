@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, buildCharacterArcs } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, buildCharacterArcs, arcSearchText } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -275,7 +275,7 @@ const S = {
   stageFilter: '',         // 章节列表筛选：'' / 'open' / 'draft' / 'revising' / 'done'
   focusMode: false,        // 专注写作模式：只留稿纸
   threadFilter: 'all',     // 线索页筛选：all / unresolved / foreshadowing
-  bibleSearch: { characters: '', world: '', timeline: '', threads: '' }, // 设定库搜索词，按页签分别记住
+  bibleSearch: { characters: '', world: '', timeline: '', threads: '', arcs: '' }, // 设定库搜索词，按页签分别记住
   revisionDraftChapterId: null, // 修订输入框里未提交的草稿属于哪一章
   out: '',
   reasoning: '',
@@ -778,7 +778,7 @@ async function openNovel(id, opts = {}) {
   volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   S.stageFilter = '';          // 筛选也一样，换作品先看全貌
   S.threadFilter = 'all';      // 线索页也回到全部
-  S.bibleSearch = { characters: '', world: '', timeline: '', threads: '' }; // 搜索词属于上一本书，别带过去
+  S.bibleSearch = { characters: '', world: '', timeline: '', threads: '', arcs: '' }; // 搜索词属于上一本书，别带过去
   setView('studio');
   renderStudio();
 }
@@ -8247,33 +8247,47 @@ function renderArcsTab(host, n) {
     <div class="bible-block">
       <h2>人物弧光</h2>
       <p class="dim small">基于章节记忆自动提取每个角色的出场轨迹、状态变化与未决线索。点人物名可打开人物卡，点章次号可跳转正文。</p>
+      ${bibleSearchBar('arcs', '搜索弧光：人物 / 章节 / 状态 / 事件 / 未决')}
       <div class="arcs-list" id="arcList"></div>
     </div>`;
 
-  // 虚拟滚动：角色数量大时启用
   const list = $('#arcList', host);
-  if (list) {
-    initBibleVirtualList(list, arcItems, renderArcEntry, 'arcs', { measureAll: true });
-    // 点击跳转（事件委托）
-    list.addEventListener('click', (e) => {
-      const name = e.target.closest('.arc-name');
-      if (name) {
-        const item = arcItems.find((arc) => arc.char.id === name.dataset.charId);
-        if (item) {
-          jumpToCharacterNode({
-            id: item.char.id,
-            label: item.char.name,
-            group: item.char.fromBible ? 'bible' : 'memory',
-          });
-        }
-        return;
+  if (!list) return;
+  const renderList = () => {
+    const rows = filterEntriesBySearch(arcItems, bibleSearchValue('arcs'), arcSearchText)
+      .map((row) => row.item);
+    setBibleSearchCount(host, 'arcs', rows.length, arcItems.length);
+    list.scrollTop = 0;
+    initBibleVirtualList(list, rows, renderArcEntry, 'arcs', { measureAll: true });
+    if (!rows.length) {
+      const q = bibleSearchValue('arcs').trim();
+      list.innerHTML = q
+        ? `<p class="dim">没有匹配「${esc(q)}」的人物弧光。</p>`
+        : '<p class="dim">还没有人物弧光。</p>';
+    }
+  };
+  bindBibleSearch(host, 'arcs', renderList);
+  renderList();
+
+  // 点击跳转（事件委托）
+  list.addEventListener('click', (e) => {
+    const name = e.target.closest('.arc-name');
+    if (name) {
+      const item = arcItems.find((arc) => arc.char.id === name.dataset.charId);
+      if (item) {
+        jumpToCharacterNode({
+          id: item.char.id,
+          label: item.char.name,
+          group: item.char.fromBible ? 'bible' : 'memory',
+        });
       }
-      const goto = e.target.closest('.arc-goto');
-      if (goto) return openChapterFromIndex(goto.dataset.ch);
-      const point = e.target.closest('.arc-point');
-      if (point) openChapterFromIndex(point.dataset.ch);
-    });
-  }
+      return;
+    }
+    const goto = e.target.closest('.arc-goto');
+    if (goto) return openChapterFromIndex(goto.dataset.ch);
+    const point = e.target.closest('.arc-point');
+    if (point) openChapterFromIndex(point.dataset.ch);
+  });
 }
 
 /** Save the Cat 风格的故事节拍表 */
