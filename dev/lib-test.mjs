@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1176,6 +1176,43 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('人物弧光搜索：按未决匹配', search('断剑下落').length === 1 && search('断剑下落')[0]?.char.id === 'a1', JSON.stringify(search('断剑下落').map((a) => a.char.name)));
   check('人物弧光搜索：搜「未决」筛出有线头的人物', search('未决').length === 1 && search('未决')[0]?.char.id === 'a1', JSON.stringify(search('未决').map((a) => a.char.name)));
   check('人物弧光搜索：无匹配返回空', search('不存在').length === 0, JSON.stringify(search('不存在').map((a) => a.char.name)));
+}
+
+// ---------------------------------------------------------------
+// 关系图谱搜索：人物、关系类型、证据与邻接高亮
+{
+  const nodes = [
+    { id: 'r1', label: '艾伦' },
+    { id: 'r2', label: '凯' },
+    { id: 'r3', label: '林昭' },
+    { id: 'r4', label: '沈青梧' },
+    { id: 'r5', label: '孤独' },
+    { id: 'r6', label: 'Alice' },
+  ];
+  const edges = [
+    { source: 'r1', target: 'r2', type: '敌对', evidence: ['设定库：艾伦 → 凯 (敌对) · 旧友反目'] },
+    { source: 'r1', target: 'r3', type: '盟友', evidence: ['第 2 章共同出场'] },
+    { source: 'r3', target: 'r4', type: '师徒', evidence: ['第 3 章状态变化关联'] },
+  ];
+  const nodeText = (node) => node.label;
+  const edgeText = (edge, source, target) => [edge.type, edge.evidence, source?.label, target?.label].flat(Infinity).join('\n');
+  const find = (q) => searchRelationGraph(nodes, edges, q, nodeText, edgeText);
+  const ids = (res) => [...(res?.nodes || [])].sort().join(',');
+  const idx = (res) => [...(res?.edges || [])].sort().join(',');
+
+  check('关系图谱搜索：空查询不启用高亮', find('') === null && find('   ') === null, JSON.stringify(find('')));
+  check('关系图谱搜索：按人物名命中节点与邻接关系', ids(find('艾伦')) === 'r1,r2,r3' && idx(find('艾伦')) === '0,1', `${ids(find('艾伦'))} | ${idx(find('艾伦'))}`);
+  check('关系图谱搜索：命中人物时两端节点都亮', find('艾伦')?.nodeCount === 3 && find('艾伦')?.edgeCount === 2, JSON.stringify(find('艾伦') && { n: find('艾伦').nodeCount, e: find('艾伦').edgeCount }));
+  check('关系图谱搜索：按关系类型命中两端人物', ids(find('敌对')) === 'r1,r2' && idx(find('敌对')) === '0', `${ids(find('敌对'))} | ${idx(find('敌对'))}`);
+  check('关系图谱搜索：按证据章节命中', ids(find('第 3 章')) === 'r3,r4' && idx(find('第 3 章')) === '2', `${ids(find('第 3 章'))} | ${idx(find('第 3 章'))}`);
+  check('关系图谱搜索：证据里的空格不影响匹配', ids(find('第3章')) === 'r3,r4' && idx(find('第3章')) === '2', `${ids(find('第3章'))} | ${idx(find('第3章'))}`);
+  check('关系图谱搜索：按证据备注命中', ids(find('旧友')) === 'r1,r2' && idx(find('旧友')) === '0', `${ids(find('旧友'))} | ${idx(find('旧友'))}`);
+  check('关系图谱搜索：多词按都包含匹配', ids(find('艾伦 敌对')) === 'r1,r2' && idx(find('艾伦 敌对')) === '0', `${ids(find('艾伦 敌对'))} | ${idx(find('艾伦 敌对'))}`);
+  check('关系图谱搜索：人物 + 关系类型组合', ids(find('林昭 师徒')) === 'r3,r4' && idx(find('林昭 师徒')) === '2', `${ids(find('林昭 师徒'))} | ${idx(find('林昭 师徒'))}`);
+  check('关系图谱搜索：孤立人物也能命中', ids(find('孤独')) === 'r5' && idx(find('孤独')) === '', `${ids(find('孤独'))} | ${idx(find('孤独'))}`);
+  check('关系图谱搜索：英文大小写忽略', ids(find('alice')) === 'r6' && find('alice')?.nodeCount === 1, `${ids(find('alice'))} | ${JSON.stringify(find('alice') && { n: find('alice').nodeCount })}`);
+  check('关系图谱搜索：首尾空格忽略', ids(find('  艾伦  ')) === 'r1,r2,r3' && idx(find('  艾伦  ')) === '0,1', `${ids(find('  艾伦  '))} | ${idx(find('  艾伦  '))}`);
+  check('关系图谱搜索：无匹配返回空集合', find('不存在')?.nodeCount === 0 && find('不存在')?.edgeCount === 0, JSON.stringify(find('不存在') && { n: find('不存在').nodeCount, e: find('不存在').edgeCount }));
 }
 
 // ---------------------------------------------------------------

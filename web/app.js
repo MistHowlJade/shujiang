@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, buildCharacterArcs, arcSearchText } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -275,7 +275,7 @@ const S = {
   stageFilter: '',         // 章节列表筛选：'' / 'open' / 'draft' / 'revising' / 'done'
   focusMode: false,        // 专注写作模式：只留稿纸
   threadFilter: 'all',     // 线索页筛选：all / unresolved / foreshadowing
-  bibleSearch: { characters: '', world: '', timeline: '', threads: '', arcs: '' }, // 设定库搜索词，按页签分别记住
+  bibleSearch: { characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '' }, // 设定库搜索词，按页签分别记住
   revisionDraftChapterId: null, // 修订输入框里未提交的草稿属于哪一章
   out: '',
   reasoning: '',
@@ -778,7 +778,7 @@ async function openNovel(id, opts = {}) {
   volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   S.stageFilter = '';          // 筛选也一样，换作品先看全貌
   S.threadFilter = 'all';      // 线索页也回到全部
-  S.bibleSearch = { characters: '', world: '', timeline: '', threads: '', arcs: '' }; // 搜索词属于上一本书，别带过去
+  S.bibleSearch = { characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '' }; // 搜索词属于上一本书，别带过去
   setView('studio');
   renderStudio();
 }
@@ -7123,12 +7123,12 @@ function searchKeywordList(value) {
   return Array.isArray(value) ? value : (typeof value === 'string' ? value.split(/[,，、\s]+/).filter(Boolean) : []);
 }
 
-function characterSearchText(c) {
+function characterSearchText(c, opts = {}) {
   return bibleSearchText([
     c?.name, c?.role, c?.identity, c?.desc, c?.age, c?.appearance, c?.personality,
     c?.goal, c?.flaw, c?.secret, c?.speech, c?.arc,
     searchKeywordList(c?.keywords),
-    Array.isArray(c?.relations) ? c.relations.flatMap((r) => [r?.to, r?.type, r?.note]) : [],
+    opts.relations === false ? [] : (Array.isArray(c?.relations) ? c.relations.flatMap((r) => [r?.to, r?.type, r?.note]) : []),
   ]);
 }
 
@@ -7878,6 +7878,12 @@ function renderRelationsTab(host, n) {
   const index = buildCharacterAppearances(n);
   const { characters, mentionToId } = collectCharacterNodes(n);
   const charList = characters;
+  // 记忆里的各种写法（全名 / 分段 / 关键词）都归到同一个节点，搜索时也要能命中
+  const aliasesById = new Map();
+  for (const [mention, id] of mentionToId) {
+    if (!aliasesById.has(id)) aliasesById.set(id, []);
+    aliasesById.get(id).push(mention);
+  }
 
   if (charList.length < 2) {
     host.innerHTML = `
@@ -7966,6 +7972,7 @@ function renderRelationsTab(host, n) {
       id: c.id,
       label: c.name || '未命名',
       group: c.fromBible ? 'bible' : 'memory',
+      char: c,
       size: 20 + Math.min(30, appearances * 3),
       x: svgWidth / 2 + Math.cos((i / charList.length) * Math.PI * 2) * 180,
       y: svgHeight / 2 + Math.sin((i / charList.length) * Math.PI * 2) * 150,
@@ -7993,6 +8000,8 @@ function renderRelationsTab(host, n) {
         </select>
       </h2>
       <p class="dim small">基于设定库关系字段 + 章节记忆共同出场/状态关联自动生成。人物名会按全名、分段与关键词归并，节点大小=出场频度，边粗细=关联强度。拖拽节点可调整布局，双击节点跳转人物卡。</p>
+      ${bibleSearchBar('relations', '搜索人物 / 关系类型 / 证据')}
+      <p class="dim small rel-search-empty" id="relSearchEmpty" hidden></p>
       <div class="relation-svg-wrap" style="position:relative;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;">
         <svg id="relationSvg" viewBox="0 0 ${svgWidth} ${svgHeight}" width="100%" style="display:block;height:auto;"></svg>
       </div>
@@ -8009,8 +8018,54 @@ function renderRelationsTab(host, n) {
   const filterTypeEl = $('#relFilterType', host);
   let draggedNode = null;
 
+  const nodeAliases = (node) => aliasesById.get(node.id) || [];
+  const nodeSearchText = (node) => bibleSearchText([
+    node.label,
+    nodeAliases(node),
+    node.char ? characterSearchText(node.char, { relations: false }) : '',
+  ]);
+  const edgeSearchText = (edge, source, target) => bibleSearchText([
+    edge.type,
+    edge.evidence,
+    source?.label,
+    target?.label,
+    source ? nodeAliases(source) : [],
+    target ? nodeAliases(target) : [],
+    source?.char ? characterSearchText(source.char, { relations: false }) : '',
+    target?.char ? characterSearchText(target.char, { relations: false }) : '',
+  ]);
+
   function renderGraph() {
     const filterType = filterTypeEl.value;
+    const query = bibleSearchValue('relations');
+    // 类型筛选先作用在边上，搜索只在当前可见的关系里找，计数才不会把隐藏的边算进来
+    const passesType = (edge) => !filterType || edge.type === filterType || (filterType === 'other' && !REL_TYPES.includes(edge.type));
+    const visibleEdgeIndexes = [];
+    const visibleEdges = [];
+    edges.forEach((edge, index) => {
+      if (!passesType(edge)) return;
+      visibleEdgeIndexes.push(index);
+      visibleEdges.push(edge);
+    });
+    const found = searchRelationGraph(nodes, visibleEdges, query, nodeSearchText, edgeSearchText);
+    const match = found ? {
+      ...found,
+      edges: new Set([...found.edges].map((index) => visibleEdgeIndexes[index])),
+    } : null;
+    const countEl = $('[data-bible-search-count="relations"]', host);
+    if (countEl) {
+      countEl.textContent = match
+        ? `命中 ${match.nodeCount} / ${nodes.length} 人 · ${match.edgeCount} / ${visibleEdges.length} 条关系`
+        : `共 ${nodes.length} 人 · ${visibleEdges.length} 条关系`;
+    }
+    const emptyEl = $('#relSearchEmpty', host);
+    if (emptyEl) {
+      const q = query.trim();
+      emptyEl.hidden = !q || !!(match && (match.nodeCount || match.edgeCount));
+      emptyEl.textContent = q && match && !match.nodeCount && !match.edgeCount
+        ? (filterType ? `当前关系类型下没有匹配「${q}」的人物或关系。` : `没有匹配「${q}」的人物或关系。`)
+        : '';
+    }
     svg.innerHTML = '';
 
     // 定义箭头标记
@@ -8023,13 +8078,15 @@ function renderRelationsTab(host, n) {
     svg.appendChild(defs);
 
     // 绘制边
-    edges.forEach((edge) => {
-      if (filterType && edge.type !== filterType && !(filterType === 'other' && !REL_TYPES.includes(edge.type))) return;
+    edges.forEach((edge, edgeIndex) => {
+      if (!passesType(edge)) return;
       const sourceNode = nodes.find((n) => n.id === edge.source);
       const targetNode = nodes.find((n) => n.id === edge.target);
       if (!sourceNode || !targetNode) return;
+      const dim = !!match && !match.edges.has(edgeIndex);
 
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('class', `relation-edge${match ? (dim ? ' is-dim' : ' is-hit') : ''}`);
       line.setAttribute('x1', sourceNode.x);
       line.setAttribute('y1', sourceNode.y);
       line.setAttribute('x2', targetNode.x);
@@ -8056,14 +8113,16 @@ function renderRelationsTab(host, n) {
 
     // 绘制节点
     nodes.forEach((node) => {
+      const dim = !!match && !match.nodes.has(node.id);
+      const showLabel = showLabelsEl.checked || (match && match.nodes.has(node.id));
       const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-      g.setAttribute('class', 'relation-node');
+      g.setAttribute('class', `relation-node${match ? (dim ? ' is-dim' : ' is-hit') : ''}`);
       g.setAttribute('data-node-id', node.id);
       g.setAttribute('data-node-group', node.group);
       g.style.cursor = 'move';
       g.innerHTML = `
         <circle cx="${node.x}" cy="${node.y}" r="${node.size}" style="--size:${node.size}px" fill="${node.group === 'bible' ? 'var(--brand)' : 'var(--accent)'}" stroke="var(--surface-1)" stroke-width="2" opacity="0.9" />
-        ${showLabelsEl.checked ? `<text x="${node.x}" y="${node.y + node.size + 14}" text-anchor="middle" font-size="11" fill="var(--text-1)" style="pointer-events:none;">${esc(node.label)}</text>` : ''}
+        ${showLabel ? `<text x="${node.x}" y="${node.y + node.size + 14}" text-anchor="middle" font-size="11" fill="var(--text-1)" style="pointer-events:none;">${esc(node.label)}</text>` : ''}
       `;
       g.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
@@ -8097,6 +8156,7 @@ function renderRelationsTab(host, n) {
   showLabelsEl.onchange = renderGraph;
   showEvidenceEl.onchange = renderGraph;
   filterTypeEl.onchange = renderGraph;
+  bindBibleSearch(host, 'relations', renderGraph);
 
   renderGraph();
 }

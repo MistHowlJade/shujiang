@@ -1575,12 +1575,17 @@ kbd {
 .timeline-legend span { display: inline-flex; align-items: center; gap: 4px; }
 
 /* 人物关系图谱 */
-.relation-svg-wrap { min-height: 500px; }
+.relation-svg-wrap { min-height: 500px; flex-shrink: 0; }
 #relationSvg { width: 100%; height: 100%; }
-.relation-node circle { transition: r 0.1s; }
+.relation-node circle { transition: r 0.1s, opacity 0.15s; }
 .relation-node:hover circle { r: calc(var(--size) + 4px); filter: brightness(1.1); }
 .relation-legend span { display: inline-flex; align-items: center; gap: 4px; }
 .relation-node text { user-select: none; pointer-events: none; }
+.relation-node.is-dim { opacity: 0.12; }
+.relation-node.is-hit circle { stroke: var(--text-2); stroke-width: 3; }
+.relation-edge { transition: opacity 0.15s; }
+.relation-edge.is-dim { opacity: 0.06; }
+.rel-search-empty { margin: -4px 0 10px; }
 .vol-block {
   margin-bottom: 12px; padding: 13px 15px;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg);

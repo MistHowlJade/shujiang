@@ -360,6 +360,55 @@ export function filterEntriesBySearch(items, query, textOf) {
     });
 }
 
+/** 关系图谱搜索：人物按姓名 / 身份 / 关键词匹配，关系按类型与证据匹配。
+ *  命中人物时连带它的全部关系，命中关系时连带两端人物，这样高亮出来的
+ *  每条边都有完整的两端。空查询返回 null，表示不做高亮。
+ *  edges 用数组下标作为身份，调用方每次渲染都从同一份 edges 取值。 */
+export function searchRelationGraph(nodes, edges, query, nodeText, edgeText) {
+  const terms = String(query || '')
+    .trim()
+    .split(/\s+/)
+    .map(normalizeMentionText)
+    .filter(Boolean);
+  if (!terms.length) return null;
+
+  const hit = (text) => {
+    const normalized = normalizeMentionText(text);
+    return terms.every((term) => normalized.includes(term));
+  };
+  const nodeList = Array.isArray(nodes) ? nodes : [];
+  const edgeList = Array.isArray(edges) ? edges : [];
+  const nodeById = new Map(nodeList.map((node) => [node.id, node]));
+
+  const directNodes = new Set(nodeList.filter((node) => hit(nodeText(node))).map((node) => node.id));
+  const directEdges = new Set();
+  edgeList.forEach((edge, index) => {
+    const source = nodeById.get(edge.source);
+    const target = nodeById.get(edge.target);
+    if (hit(edgeText(edge, source, target))) directEdges.add(index);
+  });
+
+  const matchedEdges = new Set(directEdges);
+  edgeList.forEach((edge, index) => {
+    if (directNodes.has(edge.source) || directNodes.has(edge.target)) matchedEdges.add(index);
+  });
+
+  const matchedNodes = new Set(directNodes);
+  matchedEdges.forEach((index) => {
+    const edge = edgeList[index];
+    if (!edge) return;
+    matchedNodes.add(edge.source);
+    matchedNodes.add(edge.target);
+  });
+
+  return {
+    nodes: matchedNodes,
+    edges: matchedEdges,
+    nodeCount: matchedNodes.size,
+    edgeCount: matchedEdges.size,
+  };
+}
+
 /* ============================================================
  * 时间轴：把时间线节点按解析出的时间排序，并带上关联章节
  * ============================================================ */
