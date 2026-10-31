@@ -152,6 +152,12 @@
               <button class="icon-btn sm board-btn" id="boardBtn" title="章节看板：按状态查看全书（Ctrl+Alt+B）" aria-label="章节看板"><svg class="ico"><use href="#i-columns" /></svg></button>
               <span class="stage-stat" id="stageStat"></span>
             </div>
+            <div class="chapter-search">
+              <svg class="ico"><use href="#i-search" /></svg>
+              <input id="chapterSearch" class="chapter-search-input" type="text" placeholder="搜索章节：标题 / 章号" aria-label="搜索章节标题或章号" autocomplete="off" spellcheck="false" />
+              <span class="chapter-search-count" id="chapterSearchCount"></span>
+              <button class="icon-btn sm chapter-search-clear" id="chapterSearchClear" title="清除搜索" aria-label="清除搜索" hidden><svg class="ico"><use href="#i-x" /></svg></button>
+            </div>
             <ul class="chapter-list" id="chapterList"></ul>
           </aside>
 

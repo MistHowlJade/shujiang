@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1370,6 +1370,30 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('大纲搜索：无匹配返回空', ids('没有这个').length === 0, JSON.stringify(ids('没有这个')));
   const hit = filterOutlineVolumes(volumes, '后山')[0];
   check('大纲搜索：保留原卷下标与章下标', hit.volumeIndex === 1 && hit.chapters[0].chapterIndex === 0, JSON.stringify({ vol: hit.volumeIndex, ch: hit.chapters[0].chapterIndex }));
+}
+
+// ---------------------------------------------------------------
+// 章节列表搜索：标题 / 章号，保留原下标
+{
+  const chapters = [
+    { id: 'c1', title: '雪夜行军' },
+    { id: 'c2', title: 'Chapter 2: The Gate' },
+    { id: 'c3', title: '入宗' },
+    { id: 'c4', title: '旧标题' },
+  ];
+  const ids = (q) => filterChaptersBySearch(chapters, q).map(({ chapter }) => chapter.id);
+  check('章节搜索：空查询返回全部', ids('').join(',') === 'c1,c2,c3,c4', JSON.stringify(ids('')));
+  check('章节搜索：按标题匹配', ids('雪夜').join(',') === 'c1', JSON.stringify(ids('雪夜')));
+  check('章节搜索：按章号匹配', ids('第2章').join(',') === 'c2', JSON.stringify(ids('第2章')));
+  check('章节搜索：按数字匹配章号', ids('3').join(',') === 'c3', JSON.stringify(ids('3')));
+  check('章节搜索：忽略大小写', ids('THE GATE').join(',') === 'c2', JSON.stringify(ids('THE GATE')));
+  check('章节搜索：忽略空格', ids('chapter2').join(',') === 'c2', JSON.stringify(ids('chapter2')));
+  check('章节搜索：多词按都包含匹配', ids('chapter gate').join(',') === 'c2', JSON.stringify(ids('chapter gate')));
+  check('章节搜索：无匹配返回空', ids('没有这个').length === 0, JSON.stringify(ids('没有这个')));
+  const hit = filterChaptersBySearch(chapters, '入宗')[0];
+  check('章节搜索：保留原下标', hit.index === 2, String(hit.index));
+  check('章节搜索：空列表不报错', filterChaptersBySearch(null, 'x').length === 0 && filterChaptersBySearch([], '').length === 0);
+  check('章节搜索：空查询时单章也命中', chapterMatchesSearch(chapters[0], 0, '') && !chapterMatchesSearch(chapters[0], 0, '没有这个'));
 }
 
 // ---------------------------------------------------------------

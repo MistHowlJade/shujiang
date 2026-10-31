@@ -548,6 +548,34 @@ export function filterOutlineVolumes(volumes, query) {
     .filter((row) => !terms.length || row.chapters.length > 0);
 }
 
+/** 章节列表搜索文本：章号 + 章节标题。正文检索走「全书查找」，这里不扫正文。 */
+export function chapterSearchText(chapter, index = -1) {
+  return [
+    index >= 0 ? `第 ${index + 1} 章` : '',
+    chapter?.title,
+  ].flat(Infinity).map((value) => String(value ?? '')).join('\n');
+}
+
+/** 单章是否命中章节搜索：空格分隔多词按「都包含」，忽略大小写、空白与间隔符。
+ *  空查询视为命中，方便筛选条件与搜索条件叠加。 */
+export function chapterMatchesSearch(chapter, index, query) {
+  const terms = String(query || '')
+    .trim()
+    .split(/\s+/)
+    .map(normalizeMentionText)
+    .filter(Boolean);
+  if (!terms.length) return true;
+  const text = normalizeMentionText(chapterSearchText(chapter, index));
+  return terms.every((term) => text.includes(term));
+}
+
+/** 章节列表搜索：返回 { chapter, index }，保留原下标，删除 / 移动仍按原数组来。 */
+export function filterChaptersBySearch(chapters, query) {
+  return (Array.isArray(chapters) ? chapters : [])
+    .map((chapter, index) => ({ chapter, index }))
+    .filter(({ chapter, index }) => chapterMatchesSearch(chapter, index, query));
+}
+
 /** 一个条目可以用来检索的名字与关键词。单字太容易误命中，直接跳过 */
 export function worldMentionKeys(entry) {
   const rawKeywords = Array.isArray(entry?.keywords)

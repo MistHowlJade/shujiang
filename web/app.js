@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -273,6 +273,7 @@ const S = {
   controller: null,
   batchController: null,   // 批量补记忆：跑的时候不许关弹窗，也不许再起别的 AI 任务
   stageFilter: '',         // 章节列表筛选：'' / 'open' / 'draft' / 'revising' / 'done'
+  chapterSearch: '',       // 章节列表搜索词：标题 / 章号
   focusMode: false,        // 专注写作模式：只留稿纸
   threadFilter: 'all',     // 线索页筛选：all / unresolved / foreshadowing
   bibleSearch: { outline: '', characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '', timelineViz: '' }, // 设定库搜索词，按页签分别记住
@@ -777,6 +778,7 @@ async function openNovel(id, opts = {}) {
   S.out = ''; S.reasoning = '';
   volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   S.stageFilter = '';          // 筛选也一样，换作品先看全貌
+  S.chapterSearch = '';        // 章节搜索属于上一本书，别带过去
   S.threadFilter = 'all';      // 线索页也回到全部
   S.bibleSearch = { outline: '', characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '', timelineViz: '' }; // 搜索词属于上一本书，别带过去
   setView('studio');
@@ -1693,6 +1695,7 @@ function openChapterMenu(anchor, index) {
   const label = (x) => (x ? (volumeTitle(x.id) || '未分卷') : '未分卷');
   const ch = S.novel?.chapters[index];
   const stage = stageOf(ch);
+  const listFiltered = !!S.stageFilter || !!S.chapterSearch.trim();
   showPop(anchor, [
     { label: ch?.memory ? '查看章节记忆' : '新建章节记忆', disabled: !ch, run: () => ch && (ch.memory ? openMemoryModal(ch) : openMemoryEditor(ch)) },
     '-',
@@ -1710,9 +1713,9 @@ function openChapterMenu(anchor, index) {
     { label: '拆分本章…', run: () => openSplitChapterModal(index) },
     { label: '合并本章…', disabled: index >= (S.novel?.chapters.length || 0) - 1, run: () => openMergeChapterModal(index) },
     '-',
-    { label: S.stageFilter ? '上移本章（先清除筛选）' : '上移本章', disabled: !!S.stageFilter || index === 0, run: () => moveChapter(index, index - 1) },
-    { label: S.stageFilter ? '下移本章（先清除筛选）' : '下移本章', disabled: !!S.stageFilter || index >= (S.novel?.chapters.length || 0) - 1, run: () => moveChapter(index, index + 1) },
-    { label: S.stageFilter ? '移动到指定位置…（先清除筛选）' : '移动到指定位置…', disabled: !!S.stageFilter, run: () => openMoveChapterModal(index) },
+    { label: listFiltered ? '上移本章（先清除搜索 / 筛选）' : '上移本章', disabled: listFiltered || index === 0, run: () => moveChapter(index, index - 1) },
+    { label: listFiltered ? '下移本章（先清除搜索 / 筛选）' : '下移本章', disabled: listFiltered || index >= (S.novel?.chapters.length || 0) - 1, run: () => moveChapter(index, index + 1) },
+    { label: listFiltered ? '移动到指定位置…（先清除搜索 / 筛选）' : '移动到指定位置…', disabled: listFiltered, run: () => openMoveChapterModal(index) },
   ]);
 }
 
@@ -2332,7 +2335,7 @@ function openChapterBoard() {
     }
 
     /** 渲染单列的虚拟滚动 */
-    function renderBoardVirtualList(listEl, stage, scrollTop) {
+    function renderBoardVirtualList(listEl, stage, scrollTop, bindCardEvents) {
       const vl = S.kbVl;
       const colVl = vl.cols[stage];
       if (!colVl) return;
@@ -2382,8 +2385,9 @@ function openChapterBoard() {
       viewport.innerHTML = '';
       const frag = document.createDocumentFragment();
       for (let idx = first; idx <= last; idx++) {
-        const r = rows[idx];
-        frag.appendChild(makeKbCard(r));
+        const card = makeKbCard(rows[idx]);
+        frag.appendChild(card);
+        bindCardEvents(card);   // 虚拟滚动每次重画卡片，事件也要重新挂
       }
       viewport.appendChild(frag);
 
@@ -2535,9 +2539,9 @@ function openChapterBoard() {
         if (vl && vl.enabled !== false) {
           // 虚拟滚动模式
           listEl.classList.add('virtual');
-          renderBoardVirtualList(listEl, stage, scrolls[stage] || 0);
+          renderBoardVirtualList(listEl, stage, scrolls[stage] || 0, bindCardEvents);
           if (!vl.scrollHandler) {
-            vl.scrollHandler = () => renderBoardVirtualList(listEl, stage, listEl.scrollTop);
+            vl.scrollHandler = () => renderBoardVirtualList(listEl, stage, listEl.scrollTop, bindCardEvents);
             listEl.addEventListener('scroll', vl.scrollHandler, { passive: true });
           }
         } else {
@@ -2768,9 +2772,11 @@ function makeChapterItem(c, i, { filtered = false, group = null } = {}) {
  *  在筛选模式下只返回章节行（无分组头）。
  */
 function buildChapterRows(n, stageLabels) {
-  const filterActive = !!S.stageFilter;
+  const filterActive = !!S.stageFilter || !!S.chapterSearch.trim();
   const filteredRows = filterActive
-    ? n.chapters.map((c, i) => ({ c, i })).filter(({ c }) => stageMatches(c, S.stageFilter))
+    ? filterChaptersBySearch(n.chapters, S.chapterSearch)
+        .filter(({ chapter }) => stageMatches(chapter, S.stageFilter))
+        .map(({ chapter, index }) => ({ c: chapter, i: index }))
     : [];
   if (!n.chapters.length) return [];
 
@@ -2809,10 +2815,27 @@ function renderChapterList(n, stageLabels) {
   ul.innerHTML = '';
 
   const rows = buildChapterRows(n, stageLabels);
+  const searchActive = !!S.chapterSearch.trim();
+  const shownChapters = rows.reduce((count, row) => count + (row.kind === 'chapter' ? 1 : 0), 0);
+  const countEl = $('#chapterSearchCount');
+  if (countEl) {
+    countEl.textContent = searchActive ? `${shownChapters} / ${n.chapters.length}` : '';
+    countEl.title = searchActive ? `命中 ${shownChapters} / ${n.chapters.length} 章` : '';
+  }
   const VIRTUAL_THRESHOLD = 500;
 
   if (!rows.length) {
-    ul.innerHTML = `<li class="chapter-empty">还没有章节<br>点上方 ＋ 新建一章</li>`;
+    const filtered = !!S.stageFilter || searchActive;
+    ul.innerHTML = filtered
+      ? `<li class="chapter-empty">没有匹配的章节<br><button type="button" class="btn btn-sm btn-text" id="chapterEmptyClear">清除搜索与筛选</button></li>`
+      : `<li class="chapter-empty">还没有章节<br>点上方 ＋ 新建一章</li>`;
+    if (filtered) {
+      ul.querySelector('#chapterEmptyClear')?.addEventListener('click', () => {
+        S.stageFilter = '';
+        S.chapterSearch = '';
+        renderStudio();
+      });
+    }
     S.vl.enabled = false;
     ul.classList.remove('virtual');
     if (S.vl.scrollHandler) {
@@ -3214,6 +3237,10 @@ function renderStudio({ list = true } = {}) {
     $('#stageFilter').value = '';
     $('#stageFilter').classList.remove('on');
     $('#stageStat').textContent = '';
+    $('.chapter-search').hidden = true;
+    $('#chapterSearch').value = '';
+    $('#chapterSearchCount').textContent = '';
+    $('#chapterSearchClear').hidden = true;
     $('#chStage').value = 'draft';
     $('#chStage').className = 'stage-select';
     $('#footInfo').textContent = '';
@@ -3235,7 +3262,7 @@ function renderStudio({ list = true } = {}) {
   const stageLabels = { '': '全部', open: '未定稿', draft: '草稿', revising: '修改中', done: '定稿' };
   const stageNums = { '': n.chapters.length, open: stageCounts.draft + stageCounts.revising, ...stageCounts };
   if (!Object.prototype.hasOwnProperty.call(stageLabels, S.stageFilter)) S.stageFilter = '';
-  if (!n.chapters.length) S.stageFilter = '';
+  if (!n.chapters.length) { S.stageFilter = ''; S.chapterSearch = ''; }
   $('#chapterMeta').classList.toggle('solo', !n.chapters.length);
   $('.chapter-filter').hidden = !n.chapters.length;
   const filterEl = $('#stageFilter');
@@ -3247,6 +3274,11 @@ function renderStudio({ list = true } = {}) {
     if (opt) opt.textContent = `${label} ${stageNums[value]}`;
   }
   $('#stageStat').textContent = n.chapters.length ? `${stageCounts.done}/${n.chapters.length} 定稿` : '';
+
+  $('.chapter-search').hidden = !n.chapters.length;
+  const searchEl = $('#chapterSearch');
+  if (searchEl.value !== S.chapterSearch) searchEl.value = S.chapterSearch;
+  $('#chapterSearchClear').hidden = !S.chapterSearch;
 
   if (list) renderChapterList(n, stageLabels);
   else syncChapterSelection();
@@ -3790,13 +3822,22 @@ function updateFoot() {
 }
 
 function selectChapter(id) {
+  const n = S.novel;
+  const idx = n ? n.chapters.findIndex((c) => c.id === id) : -1;
+  const ch = idx >= 0 ? n.chapters[idx] : null;
+  // 从看板 / 全局检索 / 命令面板跳过来时，目标章可能被搜索或筛选藏起来，先恢复完整列表
+  const hidden = !!ch && (!stageMatches(ch, S.stageFilter) || !chapterMatchesSearch(ch, idx, S.chapterSearch));
+  if (hidden) {
+    S.stageFilter = '';
+    S.chapterSearch = '';
+  }
   flushSave();
   S.chapterId = id;
   S.out = ''; S.reasoning = '';
   renderOut();
   // 列表已经在就只挪选中态；首次进入 / 刚切回写作台时才整块重建
   const hasList = !!$('#chapterList').querySelector('.chapter-item');
-  renderStudio({ list: !hasList });
+  renderStudio({ list: !hasList || hidden });
 }
 
 $('#chStage').addEventListener('change', () => {
@@ -3813,6 +3854,28 @@ $('#chStage').addEventListener('change', () => {
 $('#stageFilter').addEventListener('change', () => {
   S.stageFilter = $('#stageFilter').value;
   renderStudio();
+});
+// 搜索只改左侧列表，不必整块重画编辑器；长篇连续输入时更跟手
+const refreshChapterList = () => { if (S.novel) renderChapterList(S.novel); };
+$('#chapterSearch').addEventListener('input', () => {
+  S.chapterSearch = $('#chapterSearch').value;
+  $('#chapterSearchClear').hidden = !S.chapterSearch;
+  refreshChapterList();
+});
+$('#chapterSearchClear').addEventListener('click', () => {
+  S.chapterSearch = '';
+  $('#chapterSearch').value = '';
+  $('#chapterSearchClear').hidden = true;
+  refreshChapterList();
+  $('#chapterSearch').focus();
+});
+$('#chapterSearch').addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !$('#chapterSearch').value) return;
+  e.preventDefault();
+  S.chapterSearch = '';
+  $('#chapterSearch').value = '';
+  $('#chapterSearchClear').hidden = true;
+  refreshChapterList();
 });
 $('#boardBtn').addEventListener('click', openChapterBoard);
 $('#chWords').addEventListener('click', () => {
@@ -3903,8 +3966,9 @@ async function addChapter() {
     volumeId: volId,
   });
   n.chapters.splice(insertAt, 0, chapter);
-  // 新章是草稿；如果当前正筛着「定稿」之类，会把刚建的章藏起来，先回到全部
+  // 新章是草稿；如果当前正筛着「定稿」之类，或搜索词不匹配，会把刚建的章藏起来，先回到全部
   if (!stageMatches(chapter, S.stageFilter)) S.stageFilter = '';
+  if (!chapterMatchesSearch(chapter, insertAt, S.chapterSearch)) S.chapterSearch = '';
   // 新章带着明确归属；紧跟其后的那一章若原本只是「跟着上一章」，会被它带跑，
   // 所以顺手把那一章的归属写死。
   if (eff && insertAt < eff.length) {
@@ -7516,7 +7580,8 @@ function characterIndexHtml(c, i, charIndex, mentionIndex, stateCache) {
 function openChapterFromIndex(id) {
   const ch = S.novel?.chapters.find((c) => c.id === id);
   if (!ch) return toast('这一章已经不存在了', 'err');
-  S.stageFilter = '';                 // 从索引跳转时先看全貌，别让当前筛选把目标章藏起来
+  S.stageFilter = '';                 // 从索引跳转时先看全貌，别让当前筛选 / 搜索把目标章藏起来
+  S.chapterSearch = '';
   setView('studio');
   selectChapter(ch.id);
   requestAnimationFrame(() => {
