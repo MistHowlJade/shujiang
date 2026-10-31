@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1339,6 +1339,37 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('时间轴搜索：多词按都包含匹配', search('开元三年 甲').join(',') === 's1', JSON.stringify(search('开元三年 甲')));
   check('时间轴搜索：无时间节点也能搜到', search('无时间记录').join(',') === 's5', JSON.stringify(search('无时间记录')));
   check('时间轴搜索：无匹配返回空', search('没有这个').length === 0, JSON.stringify(search('没有这个')));
+}
+
+// ---------------------------------------------------------------
+// 大纲搜索：按卷与章纲过滤，保留原下标
+{
+  const volumes = [
+    { name: '风起卷', desc: '边关烽火', chapters: [
+      { id: 'o1', title: '雪夜行军', scene: '雁门关', summary: '林昭遇袭', characters: '林昭', hook: '黑衣人' },
+      { id: 'o2', title: '入宗', scene: '青云宗', summary: '拜师', characters: '苏晴', hook: '玉佩' },
+    ] },
+    { name: '云涌卷', desc: '宗门试炼', chapters: [
+      { id: 'o3', title: '后山试炼', scene: '青云宗后山', summary: '苏晴比剑', characters: '林昭、苏晴', hook: '禁地' },
+    ] },
+    { name: '归途卷', desc: '回京', chapters: [] },
+  ];
+  const ids = (q) => filterOutlineVolumes(volumes, q).flatMap((row) => row.chapters.map(({ chapter }) => chapter.id));
+  check('大纲搜索：空查询保留全部卷与章', ids('').join(',') === 'o1,o2,o3', JSON.stringify(ids('')));
+  check('大纲搜索：空查询保留空卷', filterOutlineVolumes(volumes, '').length === 3, String(filterOutlineVolumes(volumes, '').length));
+  check('大纲搜索：按章节名匹配', ids('雪夜').join(',') === 'o1', JSON.stringify(ids('雪夜')));
+  check('大纲搜索：按场景匹配', ids('青云宗').join(',') === 'o2,o3', JSON.stringify(ids('青云宗')));
+  check('大纲搜索：按核心事件匹配', ids('比剑').join(',') === 'o3', JSON.stringify(ids('比剑')));
+  check('大纲搜索：按出场人物匹配', ids('苏晴').join(',') === 'o2,o3', JSON.stringify(ids('苏晴')));
+  check('大纲搜索：按章末钩子匹配', ids('禁地').join(',') === 'o3', JSON.stringify(ids('禁地')));
+  check('大纲搜索：按卷名匹配整卷', ids('云涌').join(',') === 'o3', JSON.stringify(ids('云涌')));
+  check('大纲搜索：按卷说明匹配整卷', ids('边关').join(',') === 'o1,o2', JSON.stringify(ids('边关')));
+  check('大纲搜索：按章号匹配', ids('第2章').join(',') === 'o2', JSON.stringify(ids('第2章')));
+  check('大纲搜索：按卷号匹配', ids('第2卷').join(',') === 'o3', JSON.stringify(ids('第2卷')));
+  check('大纲搜索：多词按都包含匹配', ids('云涌 禁地').join(',') === 'o3', JSON.stringify(ids('云涌 禁地')));
+  check('大纲搜索：无匹配返回空', ids('没有这个').length === 0, JSON.stringify(ids('没有这个')));
+  const hit = filterOutlineVolumes(volumes, '后山')[0];
+  check('大纲搜索：保留原卷下标与章下标', hit.volumeIndex === 1 && hit.chapters[0].chapterIndex === 0, JSON.stringify({ vol: hit.volumeIndex, ch: hit.chapters[0].chapterIndex }));
 }
 
 // ---------------------------------------------------------------

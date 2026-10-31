@@ -954,7 +954,7 @@ kbd {
 .vol-row-head .vol-head:hover { background: var(--surface-2); }
 .vol-row-head .vol-head:hover .vol-toggle { color: var(--text-2); }
 .chapter-item.has-vol { padding-left: 18px; }
-.bible-block.flash, .chapter-item.flash, .outline-row.flash, .entry.flash { animation: flashRing 1.3s var(--ease); border-radius: var(--r-sm); }
+.bible-block.flash, .chapter-item.flash, .outline-row.flash, .entry.flash, .vol-head.flash { animation: flashRing 1.3s var(--ease); border-radius: var(--r-sm); }
 @keyframes flashRing {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
   15%, 60% { box-shadow: 0 0 0 2px var(--accent-line); }

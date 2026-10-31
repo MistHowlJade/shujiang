@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -275,7 +275,7 @@ const S = {
   stageFilter: '',         // 章节列表筛选：'' / 'open' / 'draft' / 'revising' / 'done'
   focusMode: false,        // 专注写作模式：只留稿纸
   threadFilter: 'all',     // 线索页筛选：all / unresolved / foreshadowing
-  bibleSearch: { characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '', timelineViz: '' }, // 设定库搜索词，按页签分别记住
+  bibleSearch: { outline: '', characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '', timelineViz: '' }, // 设定库搜索词，按页签分别记住
   revisionDraftChapterId: null, // 修订输入框里未提交的草稿属于哪一章
   out: '',
   reasoning: '',
@@ -778,7 +778,7 @@ async function openNovel(id, opts = {}) {
   volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   S.stageFilter = '';          // 筛选也一样，换作品先看全貌
   S.threadFilter = 'all';      // 线索页也回到全部
-  S.bibleSearch = { characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '', timelineViz: '' }; // 搜索词属于上一本书，别带过去
+  S.bibleSearch = { outline: '', characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '', timelineViz: '' }; // 搜索词属于上一本书，别带过去
   setView('studio');
   renderStudio();
 }
@@ -2026,12 +2026,27 @@ function openMergeChapterModal(index) {
   });
 }
 
+/** 设定库渲染是异步的（切页签会先拉一次最新作品），目标元素可能要等几帧才出现 */
+function flashBibleTarget(find, attempt = 0) {
+  const el = find();
+  if (!el) {
+    if (attempt < 20) requestAnimationFrame(() => flashBibleTarget(find, attempt + 1));
+    return;
+  }
+  el.scrollIntoView({ block: 'center' });
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 1400);
+}
+
 function gotoSettingsVolume(vid) {
+  S.bibleSearch.outline = '';   // 搜索过滤时目标卷可能被藏起来，先恢复完整列表
   setView('bible');
+  if (bibleTab !== 'outline') $('#bibleTabs button[data-bible="outline"]')?.click();
   const i = volumesOf().findIndex((v) => v.id === vid);
-  requestAnimationFrame(() => {
-    const block = $$('#volList .vol-block')[i];
-    if (block) { block.scrollIntoView({ block: 'center' }); block.classList.add('flash'); setTimeout(() => block.classList.remove('flash'), 1400); }
+  flashBibleTarget(() => {
+    const block = $$('#volList .vol-block').find((el) => el.dataset.volId === vid) || $$('#volList .vol-block')[i];
+    // 卷可能很长，滚到卷标题而不是整卷中心，否则标题会被顶到视口外
+    return block?.querySelector('.vol-head') || block;
   });
 }
 
@@ -2039,16 +2054,11 @@ function gotoSettingsVolume(vid) {
 function gotoSettingsOutline(outlineId) {
   const ref = findOutlineRef(S.novel, outlineId);
   if (!ref) return toast('这条章纲已经不在设定库里了', 'err');
+  S.bibleSearch.outline = '';   // 搜索过滤时目标章纲可能被藏起来，先恢复完整列表
   setView('bible');
-  $('#bibleTabs button[data-bible="outline"]')?.click();
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    const block = $$('#volList .vol-block')[ref.volIndex];
-    const row = block?.querySelectorAll('.outline-row')[ref.index];
-    if (!row) return;
-    row.scrollIntoView({ block: 'center' });
-    row.classList.add('flash');
-    setTimeout(() => row.classList.remove('flash'), 1400);
-  }));
+  if (bibleTab !== 'outline') $('#bibleTabs button[data-bible="outline"]')?.click();
+  flashBibleTarget(() => $$('#volList .outline-row').find((el) => el.dataset.outlineId === outlineId)
+    || $$('#volList .vol-block')[ref.volIndex]?.querySelectorAll('.outline-row')[ref.index]);
 }
 
 /** 新建 / 编辑一卷。startIndex >= 0 表示「从这一章起归入新卷」 */
@@ -7190,6 +7200,7 @@ function renderOutlineTab(host, n) {
     </div>
     <div class="bible-block">
       <h2>分卷与章纲</h2>
+      ${bibleSearchBar('outline', '搜索章纲：卷名 / 章节名 / 场景 / 事件 / 人物 / 钩子')}
       <div id="volList"></div>
     </div>`;
 
@@ -7205,77 +7216,114 @@ function renderOutlineTab(host, n) {
   host.querySelector('[data-key="notes"]').addEventListener('input', () => saveNovelPart({ outline: n.outline }));
 
   const vl = $('#volList', host);
-  if (!n.outline.volumes.length) vl.innerHTML = '<p class="dim">还没有分卷。可以点「AI 生成大纲」，或手动加一卷。</p>';
-  n.outline.volumes.forEach((v, vi) => {
-    const block = document.createElement('div');
-    block.className = 'vol-block';
-    block.innerHTML = `
-      <div class="vol-head">
-        <span class="dim small">第 ${vi + 1} 卷</span>
-        <input class="input" data-vk="name" value="${esc(v.name || '')}" placeholder="卷名" style="max-width:220px" />
-        <input class="input" data-vk="desc" value="${esc(v.desc || '')}" placeholder="本卷定位与主要冲突" />
-        <button class="btn btn-sm btn-text" data-act="up" title="上移这一卷">${ico('chev-up')}</button>
-        <button class="btn btn-sm btn-text" data-act="down" title="下移这一卷">${ico('chev-down')}</button>
-        <button class="btn btn-sm btn-text" data-act="add" title="加一条章纲">${ico('plus')}</button>
-        <button class="btn btn-sm btn-text" data-act="del" title="删除本卷">${ico('trash')}</button>
-      </div>
-      <div class="vol-chapters"></div>`;
-    block.querySelectorAll('[data-vk]').forEach((el) => el.addEventListener('input', () => {
-      v[el.dataset.vk] = el.value;
-      saveNovelPart({ outline: n.outline });
-    }));
-    const swap = (a, b) => {
-      const t = n.outline.volumes[a];
-      n.outline.volumes[a] = n.outline.volumes[b];
-      n.outline.volumes[b] = t;
-      renderBible();
-      saveNovelPart({ outline: n.outline });
-    };
-    block.querySelector('[data-act="up"]').onclick = () => { if (vi > 0) swap(vi, vi - 1); };
-    block.querySelector('[data-act="down"]').onclick = () => { if (vi < n.outline.volumes.length - 1) swap(vi, vi + 1); };
-    block.querySelector('[data-act="del"]').onclick = () => {
-      if (!confirm('删除本卷及其全部章纲？')) return;
-      const vid = v.id;
-      n.outline.volumes.splice(vi, 1);
-      renderBible();
-      saveNovelPart({ outline: n.outline });
-      // 章节列表里原本归这一卷的，改回未分卷（别留下指向已删卷的僵尸标记）
-      if (vid) unassignVolume(vid, '').then(renderStudio);
-    };
-    block.querySelector('[data-act="add"]').onclick = () => {
-      v.chapters = v.chapters || [];
-      v.chapters.push({ id: uid('o'), title: '', scene: '', characters: '', summary: '', hook: '' });
-      renderBible();
-      saveNovelPart({ outline: n.outline });
-    };
 
-    const cl = block.querySelector('.vol-chapters');
-    (v.chapters || []).forEach((c, ci) => {
-      const row = document.createElement('div');
-      row.className = 'outline-row';
-      row.innerHTML = `
-        <span class="dim small" title="双击左侧标签可删除这条章纲">第 ${ci + 1} 章</span>
-        <input class="input" data-ck="title" value="${esc(c.title || '')}" placeholder="章节名" />
-        <textarea class="input" data-ck="scene" placeholder="场景 / 地点">${esc(c.scene || '')}</textarea>
-        <textarea class="input" data-ck="summary" placeholder="核心事件">${esc(c.summary || '')}</textarea>
-        <div class="outline-extra">
-          <input class="input" data-ck="characters" value="${esc(c.characters || '')}" placeholder="出场人物" />
-          <input class="input" data-ck="hook" value="${esc(c.hook || '')}" placeholder="章末钩子" />
-        </div>`;
-      row.querySelectorAll('[data-ck]').forEach((el) => el.addEventListener('input', () => {
-        c[el.dataset.ck] = el.value;
+  const renderVolumes = () => {
+    const query = bibleSearchValue('outline');
+    const active = !!query.trim();
+    const totalChapters = n.outline.volumes.reduce((sum, v) => sum + (Array.isArray(v.chapters) ? v.chapters.length : 0), 0);
+    const visible = filterOutlineVolumes(n.outline.volumes, query);
+    const shownChapters = visible.reduce((sum, row) => sum + row.chapters.length, 0);
+    const countEl = $('[data-bible-search-count="outline"]', host);
+    if (countEl) {
+      countEl.textContent = active
+        ? `命中 ${shownChapters} / ${totalChapters} 条章纲`
+        : `共 ${totalChapters} 条章纲`;
+    }
+    const addVolBtn = $('#addVol', host);
+    if (addVolBtn) {
+      addVolBtn.disabled = active;
+      addVolBtn.title = active ? '清除搜索后可新增卷' : '';
+    }
+
+    vl.innerHTML = '';
+    if (!n.outline.volumes.length) {
+      vl.innerHTML = '<p class="dim">还没有分卷。可以点「AI 生成大纲」，或手动加一卷。</p>';
+      return;
+    }
+    if (!visible.length) {
+      vl.innerHTML = `<p class="dim">没有匹配「${esc(query.trim())}」的章纲。</p>`;
+      return;
+    }
+
+    visible.forEach(({ volume: v, volumeIndex: vi, chapters: chapterRows }) => {
+      const block = document.createElement('div');
+      block.className = 'vol-block';
+      block.dataset.volId = v.id || '';
+      block.dataset.volIndex = String(vi);
+      block.innerHTML = `
+        <div class="vol-head">
+          <span class="dim small">第 ${vi + 1} 卷</span>
+          <input class="input" data-vk="name" value="${esc(v.name || '')}" placeholder="卷名" style="max-width:220px" />
+          <input class="input" data-vk="desc" value="${esc(v.desc || '')}" placeholder="本卷定位与主要冲突" />
+          <button class="btn btn-sm btn-text" data-act="up" title="${active ? '清除搜索后可调整分卷' : '上移这一卷'}" ${active || vi === 0 ? 'disabled' : ''}>${ico('chev-up')}</button>
+          <button class="btn btn-sm btn-text" data-act="down" title="${active ? '清除搜索后可调整分卷' : '下移这一卷'}" ${active || vi === n.outline.volumes.length - 1 ? 'disabled' : ''}>${ico('chev-down')}</button>
+          <button class="btn btn-sm btn-text" data-act="add" title="${active ? '清除搜索后可新增章纲' : '加一条章纲'}" ${active ? 'disabled' : ''}>${ico('plus')}</button>
+          <button class="btn btn-sm btn-text" data-act="del" title="${active ? '清除搜索后可删除本卷' : '删除本卷'}" ${active ? 'disabled' : ''}>${ico('trash')}</button>
+        </div>
+        <div class="vol-chapters"></div>`;
+      block.querySelectorAll('[data-vk]').forEach((el) => el.addEventListener('input', () => {
+        v[el.dataset.vk] = el.value;
         saveNovelPart({ outline: n.outline });
       }));
-      row.querySelector('span').addEventListener('dblclick', () => {
-        if (!confirm('删除这条章纲？')) return;
-        v.chapters.splice(ci, 1);
+      const swap = (a, b) => {
+        const t = n.outline.volumes[a];
+        n.outline.volumes[a] = n.outline.volumes[b];
+        n.outline.volumes[b] = t;
         renderBible();
         saveNovelPart({ outline: n.outline });
+      };
+      block.querySelector('[data-act="up"]').onclick = () => { if (vi > 0) swap(vi, vi - 1); };
+      block.querySelector('[data-act="down"]').onclick = () => { if (vi < n.outline.volumes.length - 1) swap(vi, vi + 1); };
+      block.querySelector('[data-act="del"]').onclick = () => {
+        if (!confirm('删除本卷及其全部章纲？')) return;
+        const vid = v.id;
+        n.outline.volumes.splice(vi, 1);
+        renderBible();
+        saveNovelPart({ outline: n.outline });
+        // 章节列表里原本归这一卷的，改回未分卷（别留下指向已删卷的僵尸标记）
+        if (vid) unassignVolume(vid, '').then(renderStudio);
+      };
+      block.querySelector('[data-act="add"]').onclick = () => {
+        v.chapters = v.chapters || [];
+        v.chapters.push({ id: uid('o'), title: '', scene: '', characters: '', summary: '', hook: '' });
+        renderBible();
+        saveNovelPart({ outline: n.outline });
+      };
+
+      const cl = block.querySelector('.vol-chapters');
+      chapterRows.forEach(({ chapter: c, chapterIndex: ci }) => {
+        const row = document.createElement('div');
+        row.className = 'outline-row';
+        row.dataset.outlineId = c.id || '';
+        row.dataset.volIndex = String(vi);
+        row.dataset.chapterIndex = String(ci);
+        row.innerHTML = `
+          <span class="dim small" title="双击左侧标签可删除这条章纲">第 ${ci + 1} 章</span>
+          <input class="input" data-ck="title" value="${esc(c.title || '')}" placeholder="章节名" />
+          <textarea class="input" data-ck="scene" placeholder="场景 / 地点">${esc(c.scene || '')}</textarea>
+          <textarea class="input" data-ck="summary" placeholder="核心事件">${esc(c.summary || '')}</textarea>
+          <div class="outline-extra">
+            <input class="input" data-ck="characters" value="${esc(c.characters || '')}" placeholder="出场人物" />
+            <input class="input" data-ck="hook" value="${esc(c.hook || '')}" placeholder="章末钩子" />
+          </div>`;
+        row.querySelectorAll('[data-ck]').forEach((el) => el.addEventListener('input', () => {
+          c[el.dataset.ck] = el.value;
+          saveNovelPart({ outline: n.outline });
+        }));
+        row.querySelector('span').addEventListener('dblclick', () => {
+          if (!confirm('删除这条章纲？')) return;
+          v.chapters.splice(ci, 1);
+          renderBible();
+          saveNovelPart({ outline: n.outline });
+        });
+        cl.appendChild(row);
       });
-      cl.appendChild(row);
+      vl.appendChild(block);
     });
-    vl.appendChild(block);
-  });
+  };
+
+  bindBibleSearch(host, 'outline', renderVolumes);
+  renderVolumes();
 
   $('#addVol', host).onclick = () => {
     n.outline.volumes.push({ name: `${n.outline.volumes.length + 1}`, desc: '', chapters: [] });

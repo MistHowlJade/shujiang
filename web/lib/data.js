@@ -509,6 +509,45 @@ export function timelineEventSearchText(event) {
   ].flat(Infinity).map((value) => String(value ?? '')).join('\n');
 }
 
+/** 大纲章纲搜索文本：卷号 / 卷名 / 卷说明 / 章号 / 章节名 / 场景 / 事件 / 人物 / 钩子。
+ *  卷字段也放进来，搜卷名时整卷章纲都会命中。 */
+export function outlineSearchText(volume, chapter, volumeIndex = -1, chapterIndex = -1) {
+  return [
+    volumeIndex >= 0 ? `第 ${volumeIndex + 1} 卷` : '',
+    volume?.name,
+    volume?.desc,
+    chapterIndex >= 0 ? `第 ${chapterIndex + 1} 章` : '',
+    chapter?.title,
+    chapter?.scene,
+    chapter?.summary,
+    chapter?.characters,
+    chapter?.hook,
+  ].flat(Infinity).map((value) => String(value ?? '')).join('\n');
+}
+
+/** 大纲搜索：按卷与章纲过滤，保留原卷下标与章纲下标，删除 / 移动仍按原数组来。
+ *  空查询返回全部卷（包括还没写章纲的空卷）；有查询时只留下有命中章纲的卷。 */
+export function filterOutlineVolumes(volumes, query) {
+  const terms = String(query || '')
+    .trim()
+    .split(/\s+/)
+    .map(normalizeMentionText)
+    .filter(Boolean);
+  return (Array.isArray(volumes) ? volumes : [])
+    .map((volume, volumeIndex) => {
+      const chapters = (Array.isArray(volume?.chapters) ? volume.chapters : [])
+        .map((chapter, chapterIndex) => ({
+          chapter,
+          chapterIndex,
+          text: normalizeMentionText(outlineSearchText(volume, chapter, volumeIndex, chapterIndex)),
+        }))
+        .filter((row) => !terms.length || terms.every((term) => row.text.includes(term)))
+        .map(({ chapter, chapterIndex }) => ({ chapter, chapterIndex }));
+      return { volume, volumeIndex, chapters };
+    })
+    .filter((row) => !terms.length || row.chapters.length > 0);
+}
+
 /** 一个条目可以用来检索的名字与关键词。单字太容易误命中，直接跳过 */
 export function worldMentionKeys(entry) {
   const rawKeywords = Array.isArray(entry?.keywords)
