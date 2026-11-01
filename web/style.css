@@ -904,6 +904,8 @@ kbd {
 .chapter-item:hover { background: var(--surface-3); }
 .chapter-item.on { background: var(--accent-bg); }
 .chapter-item.on .ci-title { color: var(--accent-hover); font-weight: 500; }
+.chapter-item.cursor { background: var(--surface-3); outline: 1px solid var(--accent); outline-offset: -1px; }
+.chapter-item.on.cursor { background: var(--accent-bg); }
 .chapter-item[data-stage="revising"] { box-shadow: inset 2px 0 0 var(--warning); }
 .chapter-item[data-stage="done"] { box-shadow: inset 2px 0 0 var(--success); }
 .ci-no { font-size: 11px; color: var(--text-3); text-align: center; font-variant-numeric: tabular-nums; }

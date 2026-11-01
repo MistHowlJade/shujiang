@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1394,6 +1394,13 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('章节搜索：保留原下标', hit.index === 2, String(hit.index));
   check('章节搜索：空列表不报错', filterChaptersBySearch(null, 'x').length === 0 && filterChaptersBySearch([], '').length === 0);
   check('章节搜索：空查询时单章也命中', chapterMatchesSearch(chapters[0], 0, '') && !chapterMatchesSearch(chapters[0], 0, '没有这个'));
+  check('章节搜索光标：空结果返回 -1', stepSearchCursor(-1, 1, 0) === -1, String(stepSearchCursor(-1, 1, 0)));
+  check('章节搜索光标：首次向下选第一条', stepSearchCursor(-1, 1, 5) === 0, String(stepSearchCursor(-1, 1, 5)));
+  check('章节搜索光标：首次向上选最后一条', stepSearchCursor(-1, -1, 5) === 4, String(stepSearchCursor(-1, -1, 5)));
+  check('章节搜索光标：向下移动一位', stepSearchCursor(1, 1, 5) === 2, String(stepSearchCursor(1, 1, 5)));
+  check('章节搜索光标：向下越界回到第一条', stepSearchCursor(4, 1, 5) === 0, String(stepSearchCursor(4, 1, 5)));
+  check('章节搜索光标：向上越界回到最后一条', stepSearchCursor(0, -1, 5) === 4, String(stepSearchCursor(0, -1, 5)));
+  check('章节搜索光标：只有一条时原地不动', stepSearchCursor(0, 1, 1) === 0 && stepSearchCursor(0, -1, 1) === 0);
 }
 
 // ---------------------------------------------------------------

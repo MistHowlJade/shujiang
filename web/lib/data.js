@@ -576,6 +576,19 @@ export function filterChaptersBySearch(chapters, query) {
     .filter(({ chapter, index }) => chapterMatchesSearch(chapter, index, query));
 }
 
+/** 章节搜索的键盘光标：在结果里走一步，越界时绕回另一端。
+ *  current 为 -1 表示还没选过：向下从第一条开始，向上从最后一条开始。
+ *  空结果返回 -1，调用方据此不响应方向键。 */
+export function stepSearchCursor(current, step, total) {
+  const count = Math.floor(Number(total));
+  if (!Number.isFinite(count) || count <= 0) return -1;
+  const dir = step < 0 ? -1 : 1;
+  if (!Number.isInteger(current) || current < 0 || current >= count) {
+    return dir > 0 ? 0 : count - 1;
+  }
+  return (current + dir + count) % count;
+}
+
 /** 一个条目可以用来检索的名字与关键词。单字太容易误命中，直接跳过 */
 export function worldMentionKeys(entry) {
   const rawKeywords = Array.isArray(entry?.keywords)

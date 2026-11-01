@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -274,6 +274,7 @@ const S = {
   batchController: null,   // 批量补记忆：跑的时候不许关弹窗，也不许再起别的 AI 任务
   stageFilter: '',         // 章节列表筛选：'' / 'open' / 'draft' / 'revising' / 'done'
   chapterSearch: '',       // 章节列表搜索词：标题 / 章号
+  chapterCursor: '',       // 章节搜索的键盘光标：当前高亮结果的章节 id
   focusMode: false,        // 专注写作模式：只留稿纸
   threadFilter: 'all',     // 线索页筛选：all / unresolved / foreshadowing
   bibleSearch: { outline: '', characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '', timelineViz: '' }, // 设定库搜索词，按页签分别记住
@@ -779,6 +780,7 @@ async function openNovel(id, opts = {}) {
   volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   S.stageFilter = '';          // 筛选也一样，换作品先看全貌
   S.chapterSearch = '';        // 章节搜索属于上一本书，别带过去
+  S.chapterCursor = '';
   S.threadFilter = 'all';      // 线索页也回到全部
   S.bibleSearch = { outline: '', characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '', timelineViz: '' }; // 搜索词属于上一本书，别带过去
   setView('studio');
@@ -1944,6 +1946,7 @@ function openSplitChapterModal(index) {
       // 3) 同步 novel 数据并切到新章
       if (res.novel) S.novel = res.novel;
       S.chapterId = res.chapter.id;
+      clearFiltersHidingChapter(res.chapter.id);   // 新标题 / 新章号可能不匹配当前搜索
       closeModal();
       renderStudio();
       toast(`已拆分为「${esc(chapterTitle)}」+「${esc(newTitle)}」`, 'ok');
@@ -2022,6 +2025,7 @@ function openMergeChapterModal(index) {
       S.novel = res.novel;
 
       // 5) 刷新
+      clearFiltersHidingChapter(chapterId);   // 合并后标题可能不再匹配当前搜索
       closeModal();
       renderStudio();
       toast(`已合并为「${esc(newTitle)}」`, 'ok');
@@ -2710,7 +2714,7 @@ function makeVolHead({ vid, group, open }) {
 /** 章节行（含 ⋯ 操作菜单）。分卷模式下按卷塞进不同分组，平铺模式直接进 ul。 */
 function makeChapterItem(c, i, { filtered = false, group = null } = {}) {
   const li = document.createElement('li');
-  li.className = `chapter-item ${c.id === S.chapterId ? 'on' : ''}${group ? ' has-vol' : ''}`;
+  li.className = `chapter-item ${c.id === S.chapterId ? 'on' : ''}${c.id === S.chapterCursor ? ' cursor' : ''}${group ? ' has-vol' : ''}`;
   li.dataset.id = c.id;
   li.dataset.stage = stageOf(c);
   if (group) li.dataset.vol = group.id;
@@ -2812,6 +2816,7 @@ function buildChapterRows(n, stageLabels) {
 function renderChapterList(n, stageLabels) {
   const ul = $('#chapterList');
   const keepScroll = ul.scrollTop;
+  S.chapterCursor = '';   // 列表重建后，旧的键盘光标不一定还对得上
   ul.innerHTML = '';
 
   const rows = buildChapterRows(n, stageLabels);
@@ -2837,6 +2842,7 @@ function renderChapterList(n, stageLabels) {
       });
     }
     S.vl.enabled = false;
+    S.vl.rows = [];
     ul.classList.remove('virtual');
     if (S.vl.scrollHandler) {
       ul.removeEventListener('scroll', S.vl.scrollHandler, { passive: true });
@@ -3241,6 +3247,7 @@ function renderStudio({ list = true } = {}) {
     $('#chapterSearch').value = '';
     $('#chapterSearchCount').textContent = '';
     $('#chapterSearchClear').hidden = true;
+    S.chapterCursor = '';
     $('#chStage').value = 'draft';
     $('#chStage').className = 'stage-select';
     $('#footInfo').textContent = '';
@@ -3821,16 +3828,25 @@ function updateFoot() {
   ].filter(Boolean).join('　·　');
 }
 
-function selectChapter(id) {
+/** 当前搜索 / 筛选会把这一章藏起来时，清掉对应的条件；返回是否清过。
+ *  拆分 / 合并 / 新建章节后，新标题或新章号可能不匹配当前搜索，先用它恢复可见性。 */
+function clearFiltersHidingChapter(id) {
   const n = S.novel;
   const idx = n ? n.chapters.findIndex((c) => c.id === id) : -1;
   const ch = idx >= 0 ? n.chapters[idx] : null;
+  if (!ch) return false;
+  let cleared = false;
+  if (!stageMatches(ch, S.stageFilter)) { S.stageFilter = ''; cleared = true; }
+  if (!chapterMatchesSearch(ch, idx, S.chapterSearch)) { S.chapterSearch = ''; cleared = true; }
+  return cleared;
+}
+
+function selectChapter(id) {
   // 从看板 / 全局检索 / 命令面板跳过来时，目标章可能被搜索或筛选藏起来，先恢复完整列表
-  const hidden = !!ch && (!stageMatches(ch, S.stageFilter) || !chapterMatchesSearch(ch, idx, S.chapterSearch));
-  if (hidden) {
-    S.stageFilter = '';
-    S.chapterSearch = '';
-  }
+  const hidden = clearFiltersHidingChapter(id);
+  // 搜索还在时，光标跟着选中章走，继续按 ↑ / ↓ 就从这里往下翻
+  S.chapterCursor = S.chapterSearch.trim() ? id : '';
+  paintChapterCursor();
   flushSave();
   S.chapterId = id;
   S.out = ''; S.reasoning = '';
@@ -3857,25 +3873,84 @@ $('#stageFilter').addEventListener('change', () => {
 });
 // 搜索只改左侧列表，不必整块重画编辑器；长篇连续输入时更跟手
 const refreshChapterList = () => { if (S.novel) renderChapterList(S.novel); };
+const visibleChapterRows = () => (S.vl.rows || []).filter((row) => row.kind === 'chapter');
+
+/** 把键盘光标画到当前列表里；虚拟滚动重画时 makeChapterItem 也会带上 cursor 类 */
+function paintChapterCursor() {
+  const ul = $('#chapterList');
+  if (!ul) return;
+  ul.querySelectorAll('.chapter-item.cursor').forEach((el) => el.classList.remove('cursor'));
+  if (!S.chapterCursor) return;
+  ul.querySelector(`.chapter-item[data-id="${S.chapterCursor}"]`)?.classList.add('cursor');
+}
+
+/** 把键盘光标滚进可视区；虚拟滚动时先滚再重画，普通列表直接 scrollIntoView */
+function revealChapterCursor(rows, index) {
+  const ul = $('#chapterList');
+  const id = rows[index]?.c.id;
+  if (!ul || !id) return;
+  if (!S.vl.enabled) {
+    ul.querySelector(`.chapter-item[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest' });
+    return;
+  }
+  const rowIndex = (S.vl.rows || []).findIndex((row) => row.kind === 'chapter' && row.c.id === id);
+  if (rowIndex < 0) return;
+  const top = S.vl.offsets[rowIndex];
+  const bottom = S.vl.offsets[rowIndex + 1];
+  const clientH = ul.clientHeight || 400;
+  if (top < ul.scrollTop || bottom > ul.scrollTop + clientH) {
+    ul.scrollTop = Math.max(0, top - Math.floor(clientH / 2) + Math.floor((bottom - top) / 2));
+    renderVirtualList(ul, ul.scrollTop);
+  }
+}
+
+function moveChapterCursor(step) {
+  const rows = visibleChapterRows();
+  if (!rows.length) return;
+  const current = rows.findIndex((row) => row.c.id === S.chapterCursor);
+  const next = stepSearchCursor(current, step, rows.length);
+  S.chapterCursor = rows[next]?.c.id || '';
+  revealChapterCursor(rows, next);
+  paintChapterCursor();
+}
+
 $('#chapterSearch').addEventListener('input', () => {
   S.chapterSearch = $('#chapterSearch').value;
+  S.chapterCursor = '';
   $('#chapterSearchClear').hidden = !S.chapterSearch;
   refreshChapterList();
 });
 $('#chapterSearchClear').addEventListener('click', () => {
   S.chapterSearch = '';
+  S.chapterCursor = '';
   $('#chapterSearch').value = '';
   $('#chapterSearchClear').hidden = true;
   refreshChapterList();
   $('#chapterSearch').focus();
 });
 $('#chapterSearch').addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || !$('#chapterSearch').value) return;
-  e.preventDefault();
-  S.chapterSearch = '';
-  $('#chapterSearch').value = '';
-  $('#chapterSearchClear').hidden = true;
-  refreshChapterList();
+  if (e.isComposing || e.keyCode === 229) return;   // 中文输入法回车 / 方向键留给候选词
+  if (e.key === 'Escape') {
+    if (!$('#chapterSearch').value) return;
+    e.preventDefault();
+    S.chapterSearch = '';
+    S.chapterCursor = '';
+    $('#chapterSearch').value = '';
+    $('#chapterSearchClear').hidden = true;
+    refreshChapterList();
+    return;
+  }
+  if (!S.chapterSearch.trim()) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    moveChapterCursor(e.key === 'ArrowDown' ? 1 : -1);
+    return;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const id = S.chapterCursor || visibleChapterRows()[0]?.c.id;
+    if (id) selectChapter(id);
+  }
 });
 $('#boardBtn').addEventListener('click', openChapterBoard);
 $('#chWords').addEventListener('click', () => {
@@ -3967,8 +4042,7 @@ async function addChapter() {
   });
   n.chapters.splice(insertAt, 0, chapter);
   // 新章是草稿；如果当前正筛着「定稿」之类，或搜索词不匹配，会把刚建的章藏起来，先回到全部
-  if (!stageMatches(chapter, S.stageFilter)) S.stageFilter = '';
-  if (!chapterMatchesSearch(chapter, insertAt, S.chapterSearch)) S.chapterSearch = '';
+  clearFiltersHidingChapter(chapter.id);
   // 新章带着明确归属；紧跟其后的那一章若原本只是「跟着上一章」，会被它带跑，
   // 所以顺手把那一章的归属写死。
   if (eff && insertAt < eff.length) {
