@@ -10659,6 +10659,39 @@ async function jumpToGlobalTitle(novelId, chapterId) {
   }
 }
 
+/** 查找结果列表的键盘光标：↑ / ↓ 在命中项间移动，回车打开当前项。
+ *  结果列表每次重建，调用方在渲染后 reset()；查询变化时 setActive(false)，
+ *  避免在还没刷新的旧结果上跳转。 */
+function bindFindCursor(listEl) {
+  let idx = -1;
+  let active = false;
+  const hits = () => [...listEl.querySelectorAll('.find-hit')];
+  const paint = () => {
+    const list = hits();
+    list.forEach((el, i) => el.classList.toggle('cursor', i === idx));
+    if (idx >= 0) list[idx]?.scrollIntoView({ block: 'nearest' });
+  };
+  return {
+    reset() { idx = -1; paint(); },
+    setActive(on) { active = !!on; if (!active) idx = -1; paint(); },
+    move(step) {
+      if (!active) return;
+      const list = hits();
+      if (!list.length) return;
+      idx = stepSearchCursor(idx, step, list.length);
+      paint();
+    },
+    open() {
+      if (!active) return false;
+      const list = hits();
+      if (!list.length) return false;
+      (list[idx] || list[0]).click();
+      return true;
+    },
+    get active() { return active; },
+  };
+}
+
 async function openGlobalSearch(presetWord = '') {
   if (S.novel && S.chapterId) await saveChapterNow().catch(() => {});
   if (!S.novels?.length) await loadNovels().catch(() => {});
@@ -10671,7 +10704,7 @@ async function openGlobalSearch(presetWord = '') {
   showModal(`<h3>全局检索</h3>
     <p class="modal-sub">在书架里 ${workCount} 部作品的正文和章节标题中查找。结果按作品分组，点命中处直接跳过去。</p>
     <div class="find-bar">
-      <input class="input" id="gFindQ" placeholder="输入关键词，回车检索" autocomplete="off" />
+      <input class="input" id="gFindQ" placeholder="输入关键词，回车检索" title="回车检索；↑ / ↓ 选择命中，回车打开" autocomplete="off" />
       <button class="btn btn-primary" id="gFindGo">${ico('search')}检索</button>
     </div>
     <div class="find-sum" id="gFindSum"></div>
@@ -10683,6 +10716,8 @@ async function openGlobalSearch(presetWord = '') {
     const sumEl = box.querySelector('#gFindSum');
     let seq = 0;
     let timer = null;
+    let lastQ = '';
+    const cursor = bindFindCursor(listEl);
     box.querySelector('#gFindClose').onclick = () => { clearTimeout(timer); closeModal(); };
     if (preset) qEl.value = preset;
     qEl.focus();
@@ -10692,6 +10727,7 @@ async function openGlobalSearch(presetWord = '') {
       if (!j.total) {
         sumEl.textContent = '';
         listEl.innerHTML = `<div class="find-empty">所有作品里都没有找到「${esc(j.q)}」。<br>可以试试更短的关键词。</div>`;
+        cursor.setActive(false);
         return;
       }
       sumEl.innerHTML = `共 <b>${j.total}</b> 处 · <b>${j.works}</b> 部作品 / <b>${j.chapters}</b> 章${j.truncated ? '（下方只列出部分结果）' : ''}`;
@@ -10727,6 +10763,8 @@ async function openGlobalSearch(presetWord = '') {
           else jumpToGlobalHit(el.dataset.novel, el.dataset.cid, Number(el.dataset.start), Number(el.dataset.len));
         };
       });
+      cursor.setActive(lastQ === qEl.value.trim());
+      cursor.reset();
     };
 
     const run = async () => {
@@ -10734,18 +10772,24 @@ async function openGlobalSearch(presetWord = '') {
       const q = qEl.value.trim();
       if (!q) {
         seq += 1;
+        lastQ = '';
+        cursor.setActive(false);
         sumEl.textContent = '';
         listEl.innerHTML = '<div class="find-empty">输入关键词，检索整个书架。</div>';
         return;
       }
       const mine = ++seq;
+      lastQ = '';
+      cursor.setActive(false);
       sumEl.textContent = '检索中…';
       try {
         const j = await api.get(`/api/library-search?q=${encodeURIComponent(q)}`);
         if (mine !== seq || !listEl.isConnected) return;
+        lastQ = q;
         render(j);
       } catch (err) {
         if (mine !== seq || !listEl.isConnected) return;
+        cursor.setActive(false);
         sumEl.textContent = '';
         listEl.innerHTML = `<div class="find-empty">检索失败：${esc(err.message || '未知错误')}</div>`;
       }
@@ -10754,8 +10798,10 @@ async function openGlobalSearch(presetWord = '') {
     box.querySelector('#gFindGo').onclick = run;
     qEl.addEventListener('input', () => {
       clearTimeout(timer);
+      seq += 1;   // 输入一变，在途的旧结果就作废
+      lastQ = '';
+      cursor.setActive(false);
       if (!qEl.value.trim()) {
-        seq += 1;
         sumEl.textContent = '';
         listEl.innerHTML = '<div class="find-empty">输入关键词，检索整个书架。</div>';
         return;
@@ -10765,7 +10811,19 @@ async function openGlobalSearch(presetWord = '') {
       }, 320);
     });
     qEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); run(); }
+      if (e.isComposing || e.keyCode === 229) return;   // 中文输入法回车 / 方向键留给候选词
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!cursor.active) return;
+        e.preventDefault();
+        cursor.move(e.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        // 结果已经是这次关键词的，就直接打开当前命中；否则先检索
+        if (qEl.value.trim() === lastQ && cursor.open()) return;
+        run();
+      }
     });
     if (preset) run();
   }, { wide: true });
@@ -10781,7 +10839,7 @@ async function openFind(presetWord = '') {
   const preset = picked && picked.length <= 40 && !picked.includes('\n') ? picked : '';
   showModal(`<h3>全书查找 · 《${esc(S.novel.title)}》</h3>
     <div class="find-bar">
-      <input class="input" id="findQ" placeholder="查找任意文字，回车开始" autocomplete="off" />
+      <input class="input" id="findQ" placeholder="查找任意文字，回车开始" title="回车查找；↑ / ↓ 选择命中，回车打开" autocomplete="off" />
       <button class="btn btn-primary" id="findGo">${ico('search')}查找</button>
     </div>
     <div class="find-bar">
@@ -10797,6 +10855,9 @@ async function openFind(presetWord = '') {
     const rEl = box.querySelector('#findR');
     const listEl = box.querySelector('#findList');
     const sumEl = box.querySelector('#findSum');
+    let seq = 0;
+    let lastQ = '';
+    const cursor = bindFindCursor(listEl);
     box.querySelector('#findClose').onclick = closeModal;
     if (preset) qEl.value = preset;
     qEl.focus();
@@ -10806,6 +10867,7 @@ async function openFind(presetWord = '') {
       if (!j.total) {
         sumEl.textContent = '';
         listEl.innerHTML = `<div class="find-empty">全书没有找到「${esc(j.q)}」。</div>`;
+        cursor.setActive(false);
         return;
       }
       sumEl.innerHTML = `全书共 <b>${j.total}</b> 处，分布在 <b>${j.chapters}</b> 章${j.truncated ? '（下方只列出前几章）' : ''}`;
@@ -10817,22 +10879,55 @@ async function openFind(presetWord = '') {
       listEl.querySelectorAll('.find-hit').forEach((el) => {
         el.onclick = () => jumpToHit(el.dataset.cid, Number(el.dataset.start), Number(el.dataset.len));
       });
+      cursor.setActive(lastQ === qEl.value.trim());
+      cursor.reset();
     };
 
     const run = async () => {
       const q = qEl.value.trim();
-      if (!q) return;
+      if (!q) {
+        lastQ = '';
+        cursor.setActive(false);
+        return;
+      }
+      const mine = ++seq;
+      lastQ = '';
+      cursor.setActive(false);
       sumEl.textContent = '查找中…';
       try {
-        render(await api.get(`/api/novels/${novelId}/search?q=${encodeURIComponent(q)}`));
+        const j = await api.get(`/api/novels/${novelId}/search?q=${encodeURIComponent(q)}`);
+        if (mine !== seq || !listEl.isConnected) return;
+        lastQ = q;
+        render(j);
       } catch (err) {
+        if (mine !== seq || !listEl.isConnected) return;
+        cursor.setActive(false);
         sumEl.textContent = '';
         listEl.innerHTML = `<div class="find-empty">查找失败：${esc(err.message)}</div>`;
       }
     };
 
     box.querySelector('#findGo').onclick = run;
-    qEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } });
+    qEl.addEventListener('input', () => {
+      seq += 1;
+      lastQ = '';
+      cursor.setActive(false);
+    });
+    qEl.addEventListener('keydown', (e) => {
+      if (e.isComposing || e.keyCode === 229) return;   // 中文输入法回车 / 方向键留给候选词
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!cursor.active) return;
+        e.preventDefault();
+        cursor.move(e.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        // 结果已经是这次关键词的，就直接打开当前命中；否则先查找
+        if (qEl.value.trim() === lastQ && cursor.open()) return;
+        run();
+      }
+    });
     rEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); box.querySelector('#findAll').click(); } });
 
     box.querySelector('#findAll').onclick = async () => {

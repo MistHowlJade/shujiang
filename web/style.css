@@ -2157,7 +2157,7 @@ kbd {
 }
 .find-empty { padding: 26px 12px; text-align: center; color: var(--text-3); font-size: 12.5px; line-height: 1.9; }
 .find-row {
-  overflow: hidden; background: var(--surface-2);
+  flex: none; overflow: hidden; background: var(--surface-2);
   border: 1px solid var(--border); border-radius: var(--r-md);
 }
 .find-head {
@@ -2173,11 +2173,12 @@ kbd {
 }
 .find-hit + .find-hit { border-top: 1px solid var(--border); }
 .find-hit:hover { background: var(--surface-3); color: var(--text-1); }
+.find-hit.cursor { background: var(--surface-3); color: var(--text-1); outline: 1px solid var(--accent); outline-offset: -1px; }
 .find-hit mark { padding: 0 2px; color: var(--accent-hover); background: var(--accent-bg); border-radius: var(--r-xs); }
 
 /* 全局检索：按作品分组 */
 .global-find-list { max-height: 48vh; }
-.gfind-work { display: flex; flex-direction: column; gap: 6px; }
+.gfind-work { display: flex; flex-direction: column; gap: 6px; flex: none; }
 .gfind-work + .gfind-work { margin-top: 4px; }
 .gfind-work-head {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
