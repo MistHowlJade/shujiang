@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -4268,6 +4268,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
     }
   }
   if (idx < 0) idx = 0;
+  const volumeLabels = effVolumeIds().map((id) => volumeTitle(id || ''));
   const prevFocus = document.activeElement;
 
   const mask = document.createElement('div');
@@ -4283,8 +4284,9 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
         <span class="reader-progress-bar" id="readerProgressBar"></span>
       </div>
       <div class="reader-tools">
+        <button type="button" class="btn btn-sm btn-text reader-toc-btn" id="readerTocBtn" title="目录（T）" aria-haspopup="dialog" aria-expanded="false">${ico('book-open')}<span>目录</span></button>
+        <span class="reader-pos" id="readerPos" title="当前章节位置"></span>
         <button type="button" class="btn btn-sm btn-text" id="readerPrev" title="上一章（←）">上一章</button>
-        <select class="select reader-select" id="readerSelect" aria-label="选择章节"></select>
         <button type="button" class="btn btn-sm btn-text" id="readerNext" title="下一章（→）">下一章</button>
         <span class="reader-divider"></span>
         <button type="button" class="btn btn-sm btn-text" id="readerMinus" title="缩小字号">A−</button>
@@ -4304,19 +4306,41 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
           <button type="button" class="btn" id="readerNext2">下一章</button>
         </div>
       </article>
-    </main>`;
+    </main>
+    <div class="reader-toc-mask" id="readerTocMask" hidden>
+      <aside class="reader-toc" role="dialog" aria-modal="true" aria-labelledby="readerTocTitle">
+        <div class="reader-toc-head">
+          <h2 id="readerTocTitle">目录</h2>
+          <span class="reader-toc-count" id="readerTocCount"></span>
+          <button type="button" class="icon-btn sm" id="readerTocClose" title="关闭目录（Esc）" aria-label="关闭目录"><svg class="ico"><use href="#i-x" /></svg></button>
+        </div>
+        <div class="find-bar reader-toc-find">
+          <input class="input" id="readerTocSearch" placeholder="搜索章节名 / 章号 / 卷名" title="支持章节名、章号和卷名；Esc 先清空搜索" autocomplete="off" aria-label="搜索目录" />
+          <button type="button" class="icon-btn sm" id="readerTocClear" title="清除搜索" aria-label="清除搜索" hidden><svg class="ico"><use href="#i-x" /></svg></button>
+        </div>
+        <div class="reader-toc-list" id="readerTocList" role="listbox" aria-label="章节列表"></div>
+      </aside>
+    </div>`;
   document.body.appendChild(mask);
 
   const $r = (sel) => mask.querySelector(sel);
   const scroll = $r('#readerScroll');
   const page = $r('#readerPage');
-  const select = $r('#readerSelect');
+  const tocBtn = $r('#readerTocBtn');
+  const tocMask = $r('#readerTocMask');
+  const tocSearch = $r('#readerTocSearch');
+  const tocClear = $r('#readerTocClear');
+  const tocCount = $r('#readerTocCount');
+  const tocList = $r('#readerTocList');
   const prev = $r('#readerPrev');
   const next = $r('#readerNext');
   const prev2 = $r('#readerPrev2');
   const next2 = $r('#readerNext2');
   const minus = $r('#readerMinus');
   const plus = $r('#readerPlus');
+  let tocOpen = false;
+  let tocQuery = '';
+  let tocCursor = '';
 
   const close = () => {
     document.removeEventListener('keydown', onKey);
@@ -4370,7 +4394,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
     const html = paragraphHtml(ch.content);
     $r('#readerContent').innerHTML = html || '<p class="reader-empty">本章还没有正文。</p>';
     $r('#readerEnd').hidden = !html;
-    select.value = ch.id;
+    $r('#readerPos').textContent = `${idx + 1} / ${chapters.length}`;
     prev.disabled = prev2.disabled = idx <= 0;
     next.disabled = next2.disabled = idx >= chapters.length - 1;
     // 更新阅读进度条
@@ -4411,9 +4435,115 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
     render();
   };
 
+  /* ---------- 目录抽屉 ---------- */
+  const tocGroups = () => buildReaderToc(chapters, volumeLabels, tocQuery);
+  const tocRows = () => tocGroups().flatMap((group) => group.chapters);
+
+  const paintTocCursor = () => {
+    $$('.reader-toc-item', tocList).forEach((el) => {
+      el.classList.toggle('cursor', el.dataset.id === tocCursor);
+    });
+  };
+
+  const revealTocCursor = () => {
+    const el = $$('.reader-toc-item', tocList).find((item) => item.dataset.id === tocCursor);
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  };
+
+  const renderToc = ({ revealCurrent = false } = {}) => {
+    const groups = tocGroups();
+    const matched = groups.reduce((sum, group) => sum + group.chapters.length, 0);
+    tocCount.textContent = tocQuery ? `找到 ${matched} / ${chapters.length} 章` : `共 ${chapters.length} 章`;
+    tocClear.hidden = !tocQuery;
+    if (!groups.length) {
+      tocList.innerHTML = '<div class="reader-toc-empty">没有匹配的章节<br><span>换个章节名、章号或卷名试试</span></div>';
+      return;
+    }
+    tocList.innerHTML = groups.map((group) => `
+      <div class="reader-toc-vol"><span>${esc(group.title)}</span><em>${group.chapters.length}</em></div>
+      ${group.chapters.map(({ chapter, index }) => {
+        const cur = chapter.id === chapters[idx]?.id;
+        const stage = stageOf(chapter);
+        return `<button type="button" class="reader-toc-item${cur ? ' current' : ''}${chapter.id === tocCursor ? ' cursor' : ''}" role="option" aria-selected="${cur}"${cur ? ' aria-current="true"' : ''} tabindex="-1" data-id="${esc(chapter.id)}" data-i="${index}">
+          <span class="reader-toc-no">${index + 1}</span>
+          <i class="reader-toc-dot ${stage}" title="${STAGE_LABEL[stage]}" aria-hidden="true"></i>
+          <span class="reader-toc-name" title="${esc(chapter.title || '未命名')}">${esc(chapter.title || '未命名')}</span>
+          <span class="reader-toc-words">${fmtWords(wordsOf(chapter))}</span>
+        </button>`;
+      }).join('')}
+    `).join('');
+    if (revealCurrent) {
+      tocList.querySelector('.reader-toc-item.current')?.scrollIntoView({ block: 'center' });
+    } else if (tocQuery) {
+      tocList.scrollTop = 0;
+    }
+  };
+
+  const openToc = () => {
+    if (tocOpen) return;
+    tocOpen = true;
+    tocQuery = '';
+    tocCursor = chapters[idx]?.id || '';
+    tocSearch.value = '';
+    tocMask.hidden = false;
+    tocBtn.setAttribute('aria-expanded', 'true');
+    renderToc({ revealCurrent: true });
+    tocSearch.focus({ preventScroll: true });
+  };
+
+  const closeToc = ({ focus = true } = {}) => {
+    if (!tocOpen) return;
+    tocOpen = false;
+    tocMask.hidden = true;
+    tocBtn.setAttribute('aria-expanded', 'false');
+    if (focus) tocBtn.focus({ preventScroll: true });
+  };
+
+  const jumpToc = (index) => {
+    if (!(index >= 0 && index < chapters.length)) return;
+    closeToc({ focus: false });
+    page.focus({ preventScroll: true });
+    if (index === idx) return;   // 点当前章只关目录，别把阅读位置带回顶部
+    idx = index;
+    render();
+  };
+
+  const clearTocSearch = () => {
+    tocQuery = '';
+    tocCursor = chapters[idx]?.id || '';
+    tocSearch.value = '';
+    renderToc({ revealCurrent: true });
+    tocSearch.focus({ preventScroll: true });
+  };
+
+  const moveTocCursor = (step) => {
+    const rows = tocRows();
+    if (!rows.length) return;
+    const current = rows.findIndex((row) => row.chapter.id === tocCursor);
+    const next = stepSearchCursor(current, step, rows.length);
+    tocCursor = rows[next]?.chapter.id || '';
+    paintTocCursor();
+    revealTocCursor();
+  };
+
   const onKey = (e) => {
-    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (tocOpen) {
+        if (tocQuery) clearTocSearch();
+        else closeToc();
+        return;
+      }
+      close();
+      return;
+    }
+    if (tocOpen) return;
     if (e.target?.closest?.('input, textarea, select')) return;
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 't' || e.key === 'T')) {
+      e.preventDefault();
+      openToc();
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
     if (window.getSelection() && !window.getSelection().isCollapsed) return;
     if (e.key === 'ArrowLeft') { e.preventDefault(); go(idx - 1); }
@@ -4424,10 +4554,42 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
     else if (e.key === 'End') { e.preventDefault(); scroll.scrollTop = scroll.scrollHeight; }
   };
 
-  select.innerHTML = chapters.map((c, i) => `<option value="${esc(c.id)}">第 ${i + 1} 章 · ${esc(c.title || '未命名')}</option>`).join('');
-  select.addEventListener('change', () => {
-    const nextIdx = chapters.findIndex((c) => c.id === select.value);
-    if (nextIdx >= 0) { idx = nextIdx; render(); page.focus({ preventScroll: true }); }
+  tocBtn.addEventListener('click', () => (tocOpen ? closeToc() : openToc()));
+  $r('#readerTocClose').addEventListener('click', () => closeToc());
+  tocClear.addEventListener('click', clearTocSearch);
+  tocMask.addEventListener('click', (e) => { if (e.target === tocMask) closeToc(); });
+  tocList.addEventListener('click', (e) => {
+    const item = e.target.closest('.reader-toc-item');
+    if (item) jumpToc(Number(item.dataset.i));
+  });
+  tocSearch.addEventListener('input', () => {
+    tocQuery = tocSearch.value.trim();
+    tocCursor = '';
+    renderToc();
+  });
+  tocSearch.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveTocCursor(e.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const rows = tocRows();
+      const target = rows.find((row) => row.chapter.id === tocCursor) || rows[0];
+      if (target) jumpToc(target.index);
+    }
+  });
+  tocMask.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const focusables = $$('input, button', tocMask)
+      .filter((el) => el.tabIndex >= 0 && !el.disabled && !el.hidden && el.getClientRects().length);
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   });
   prev.addEventListener('click', () => go(idx - 1));
   next.addEventListener('click', () => go(idx + 1));

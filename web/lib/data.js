@@ -597,6 +597,27 @@ export function chapterBoardMatchesSearch(chapter, index, volume, query) {
   return terms.every((term) => text.includes(term));
 }
 
+/** 阅读模式目录：按章节在书里的顺序分卷，并按章节名 / 章号 / 卷名过滤。
+ *  volumeTitles 与 chapters 等长，空串表示未分卷（显示为「未分卷」）。
+ *  返回 [{ title, chapters: [{ chapter, index }] }]，空卷不会留下。 */
+export function buildReaderToc(chapters, volumeTitles = [], query = '') {
+  const list = Array.isArray(chapters) ? chapters : [];
+  const labels = Array.isArray(volumeTitles) ? volumeTitles : [];
+  const groups = [];
+  list.forEach((chapter, index) => {
+    const label = String(labels[index] ?? '').trim();
+    if (!chapterBoardMatchesSearch(chapter, index, label, query)) return;
+    const title = label || '未分卷';
+    let group = groups[groups.length - 1];
+    if (!group || group.title !== title) {
+      group = { title, chapters: [] };
+      groups.push(group);
+    }
+    group.chapters.push({ chapter, index });
+  });
+  return groups;
+}
+
 /** 书架搜索文本：书名 + 类型 + 标签。 */
 export function novelSearchText(novel) {
   const tags = Array.isArray(novel?.tags)

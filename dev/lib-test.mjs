@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1418,6 +1418,40 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('看板搜索：无匹配', !chapterBoardMatchesSearch(ch, 4, vol, '没有这个'));
   check('看板搜索：空卷名不影响标题', chapterBoardMatchesSearch(ch, 4, '', '第5章') && !chapterBoardMatchesSearch(ch, 4, '', '少年游'));
   check('看板搜索：空章节不报错', chapterBoardMatchesSearch(null, -1, '', '') && !chapterBoardMatchesSearch(null, -1, '', 'x'));
+}
+
+// ---------------------------------------------------------------
+// 阅读目录：按卷分组，按章节名 / 章号 / 卷名过滤
+{
+  const chapters = [
+    { id: 'c1', title: '雪夜行军' },
+    { id: 'c2', title: 'Gate of Stars' },
+    { id: 'c3', title: '入宗' },
+    { id: 'c4', title: '风雪归人' },
+    { id: 'c5', title: '尾声' },
+  ];
+  const vols = ['第 1 卷 · 少年游', '第 1 卷 · 少年游', '', '第 2 卷 · 风雪夜', '第 2 卷 · 风雪夜'];
+  const shape = (q = '') => buildReaderToc(chapters, vols, q)
+    .map((group) => `${group.title}:${group.chapters.map(({ chapter, index }) => `${chapter.id}@${index}`).join(',')}`)
+    .join('|');
+  check('阅读目录：按卷分组并保留顺序', shape() === '第 1 卷 · 少年游:c1@0,c2@1|未分卷:c3@2|第 2 卷 · 风雪夜:c4@3,c5@4', shape());
+  check('阅读目录：按章节名过滤并丢掉空卷', shape('gate') === '第 1 卷 · 少年游:c2@1', shape('gate'));
+  check('阅读目录：按章号匹配', shape('第4章') === '第 2 卷 · 风雪夜:c4@3', shape('第4章'));
+  check('阅读目录：按卷名匹配', shape('风雪夜') === '第 2 卷 · 风雪夜:c4@3,c5@4', shape('风雪夜'));
+  check('阅读目录：多词跨字段都包含', shape('gate 少年游') === '第 1 卷 · 少年游:c2@1', shape('gate 少年游'));
+  check('阅读目录：多词缺一不命中', shape('gate 风雪夜') === '', shape('gate 风雪夜'));
+  check('阅读目录：无匹配返回空', buildReaderToc(chapters, vols, '没有这个').length === 0);
+  check('阅读目录：空列表不报错', buildReaderToc([], [], 'x').length === 0 && buildReaderToc(null, null, '').length === 0);
+  check('阅读目录：卷名不足归入未分卷', (() => {
+    const got = buildReaderToc([{ id: 'a', title: '一' }, { id: 'b', title: '二' }], ['第 1 卷'], '')
+      .map((group) => `${group.title}:${group.chapters.map((row) => row.chapter.id).join(',')}`).join('|');
+    return got === '第 1 卷:a|未分卷:b';
+  })(), '第 1 卷:a|未分卷:b');
+  check('阅读目录：未分卷不参与卷名搜索', shape('未分卷') === '', shape('未分卷'));
+  check('阅读目录：同卷不连续时不合并', (() => {
+    const rows = [{ id: 'a', title: '一' }, { id: 'b', title: '二' }, { id: 'c', title: '三' }];
+    return buildReaderToc(rows, ['第 1 卷', '第 2 卷', '第 1 卷'], '').map((group) => group.title).join('|') === '第 1 卷|第 2 卷|第 1 卷';
+  })());
 }
 
 // ---------------------------------------------------------------
