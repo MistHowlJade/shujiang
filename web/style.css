@@ -560,7 +560,8 @@ kbd {
 .page-head h1 { margin: 0; font-size: 20px; font-weight: 600; }
 .page-sub { margin: 5px 0 0; font-size: 12.5px; color: var(--text-3); }
 .page-sub-line { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.trash-link {
+.trash-link,
+.shelf-sort-link {
   display: inline-flex; align-items: center; gap: 5px;
   height: 21px; margin-top: 5px; padding: 0 8px;
   border: 1px solid var(--border); border-radius: var(--r-full);
@@ -568,9 +569,13 @@ kbd {
   font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap;
   transition: all var(--dur) var(--ease);
 }
-.trash-link:hover { color: var(--text-1); border-color: var(--border-2); background: var(--surface-3); }
+.trash-link:hover,
+.shelf-sort-link:hover { color: var(--text-1); border-color: var(--border-2); background: var(--surface-3); }
 .trash-link.has-items { color: var(--accent-hover); border-color: var(--accent-line); }
-.trash-link .ico { width: 12px; height: 12px; }
+.trash-link .ico,
+.shelf-sort-link .ico { width: 12px; height: 12px; }
+.shelf-sort-link:disabled { opacity: .45; cursor: not-allowed; }
+.shelf-sort-link:disabled:hover { color: var(--text-3); border-color: var(--border); background: var(--surface-2); }
 .trash-count {
   display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px;
   border-radius: var(--r-full); background: var(--accent-bg); color: var(--accent-hover);

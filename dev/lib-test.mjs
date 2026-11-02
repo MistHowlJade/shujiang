@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1421,6 +1421,33 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('书架搜索：多词缺一不命中', ids('科幻 权谋').length === 0, JSON.stringify(ids('科幻 权谋')));
   check('书架搜索：保持原顺序', ids('科幻').join(',') === 'n1,n3', JSON.stringify(ids('科幻')));
   check('书架搜索：空列表不报错', filterNovelsBySearch(null, 'x').length === 0 && filterNovelsBySearch([], '').length === 0);
+}
+
+// ---------------------------------------------------------------
+// 书架排序：时间 / 书名自然序 / 字数，返新数组
+{
+  const books = [
+    { id: 'b10', title: 'Book 10', words: 310, updatedAt: 100, createdAt: 400 },
+    { id: 'b2', title: 'Book 2', words: 100, updatedAt: 400, createdAt: 100 },
+    { id: 'alpha', title: 'Alpha', words: 300, updatedAt: 200, createdAt: 300 },
+    { id: 'beta', title: 'beta', words: 200, updatedAt: 300, createdAt: 200 },
+  ];
+  const ids = (key) => sortNovels(books, key).map((n) => n.id);
+
+  check('书架排序：默认按最近更新', ids('updated').join(',') === 'b2,beta,alpha,b10', JSON.stringify(ids('updated')));
+  check('书架排序：按最近创建', ids('created').join(',') === 'b10,alpha,beta,b2', JSON.stringify(ids('created')));
+  check('书架排序：书名自然序', ids('title').join(',') === 'alpha,beta,b2,b10', JSON.stringify(ids('title')));
+  check('书架排序：字数从多到少', ids('words-desc').join(',') === 'b10,alpha,beta,b2', JSON.stringify(ids('words-desc')));
+  check('书架排序：字数从少到多', ids('words-asc').join(',') === 'b2,beta,alpha,b10', JSON.stringify(ids('words-asc')));
+  check('书架排序：未知键回落最近更新', ids('weird').join(',') === 'b2,beta,alpha,b10', JSON.stringify(ids('weird')));
+  check('书架排序：不改原数组', books.map((n) => n.id).join(',') === 'b10,b2,alpha,beta', books.map((n) => n.id).join(','));
+  check('书架排序：中文数字按自然序', sortNovels([
+    { id: 'c10', title: '第10部' }, { id: 'c2', title: '第2部' }, { id: 'c1', title: '第1部' },
+  ], 'title').map((n) => n.id).join(',') === 'c1,c2,c10');
+  check('书架排序：空列表不报错', sortNovels(null).length === 0 && sortNovels([], 'words-asc').length === 0);
+  check('书架排序：选项键值齐全',
+    SHELF_SORT_OPTIONS.map((o) => o.key).join(',') === 'updated,created,title,words-desc,words-asc'
+      && SHELF_SORT_OPTIONS.every((o) => o.label));
 }
 
 // ---------------------------------------------------------------

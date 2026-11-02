@@ -604,6 +604,37 @@ export function filterNovelsBySearch(novels, query) {
   return (Array.isArray(novels) ? novels : []).filter((novel) => novelMatchesSearch(novel, query));
 }
 
+/** 书架排序：键名会存进 localStorage，保持稳定，别随手改。 */
+export const SHELF_SORT_OPTIONS = [
+  { key: 'updated', label: '最近更新' },
+  { key: 'created', label: '最近创建' },
+  { key: 'title', label: '书名' },
+  { key: 'words-desc', label: '字数从多到少' },
+  { key: 'words-asc', label: '字数从少到多' },
+];
+
+const shelfTitleCollator = new Intl.Collator('zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+const shelfTitleCmp = (a, b) => shelfTitleCollator.compare(String(a?.title || ''), String(b?.title || ''));
+const shelfTimeCmp = (field) => (a, b) => (Number(b?.[field]) || 0) - (Number(a?.[field]) || 0) || shelfTitleCmp(a, b);
+const shelfWords = (n) => Number(n?.words) || 0;
+
+/** 书架排序：返回新数组，不改原数组；时间类都是新到旧，书名按拼音与数字自然序。 */
+export function sortNovels(novels, sort = 'updated') {
+  const list = [...(Array.isArray(novels) ? novels : [])];
+  switch (sort) {
+    case 'created':
+      return list.sort(shelfTimeCmp('createdAt'));
+    case 'title':
+      return list.sort((a, b) => shelfTitleCmp(a, b) || shelfTimeCmp('updatedAt')(a, b));
+    case 'words-asc':
+      return list.sort((a, b) => shelfWords(a) - shelfWords(b) || shelfTitleCmp(a, b));
+    case 'words-desc':
+      return list.sort((a, b) => shelfWords(b) - shelfWords(a) || shelfTitleCmp(a, b));
+    default:
+      return list.sort(shelfTimeCmp('updatedAt'));
+  }
+}
+
 /** 版本快照类型：列表徽标与搜索共用。 */
 export const SNAP_KINDS = {
   auto: '自动',

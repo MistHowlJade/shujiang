@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -15,6 +15,7 @@ import { importBibleMarkdown } from './lib/markdown.js';
 /* 阅读进度只存在本浏览器，不写作品 JSON，也不走服务端 */
 const READER_PROGRESS_KEY = 'shu.reader.progress.v1';
 const READER_SIZE_KEY = 'shu.reader.size.v1';
+const SHELF_SORT_KEY = 'shu.shelf.sort.v1';
 
 /* 章节字数缓存：切章 / 改状态 / 刷进度时不再反复重扫全书 */
 const wordsOf = createWordCounter();
@@ -80,6 +81,16 @@ function readerFontSize() {
 
 function saveReaderFontSize(size) {
   try { localStorage.setItem(READER_SIZE_KEY, String(size)); } catch {}
+}
+
+/** 书架排序偏好：存坏了 / 旧版本留下的键都回落到「最近更新」 */
+function shelfSortPreference() {
+  try {
+    const saved = localStorage.getItem(SHELF_SORT_KEY);
+    return SHELF_SORT_OPTIONS.some((option) => option.key === saved) ? saved : 'updated';
+  } catch {
+    return 'updated';
+  }
 }
 
 /** 极简 Markdown 渲染（标题 / 加粗 / 列表 / 行内代码），全部转义后拼装，安全 */
@@ -267,6 +278,7 @@ const S = {
   dirty: false,
   stats: null,
   statsAt: 0,
+  shelfSort: shelfSortPreference(),   // 书架排序：最近更新 / 最近创建 / 书名 / 字数
   unsaved: new Set(),   // 还没写进磁盘的章节 id —— 按章追踪，切章后也不会忘
   savingId: null,
   saveErr: null,
@@ -401,7 +413,15 @@ function coverOf(title) {
 function renderShelf() {
   const input = $('#shelfSearch');
   const q = (input.value || '').trim();
-  const list = filterNovelsBySearch(S.novels, q);
+  const list = sortNovels(filterNovelsBySearch(S.novels, q), S.shelfSort);
+  const sortOption = SHELF_SORT_OPTIONS.find((option) => option.key === S.shelfSort) || SHELF_SORT_OPTIONS[0];
+  const sortBtn = $('#shelfSortBtn');
+  if (sortBtn) {
+    sortBtn.disabled = S.novels.length < 2;
+    sortBtn.title = `书架排序：${sortOption.label}`;
+    const label = $('#shelfSortLabel');
+    if (label) label.textContent = sortOption.label;
+  }
   $('#shelfSearchClear').hidden = !q;
   const grid = $('#shelfGrid');
   grid.innerHTML = '';
@@ -483,6 +503,14 @@ function renderShelf() {
   }
 }
 
+function setShelfSort(key) {
+  if (!SHELF_SORT_OPTIONS.some((option) => option.key === key) || key === S.shelfSort) return;
+  S.shelfSort = key;
+  try { localStorage.setItem(SHELF_SORT_KEY, key); } catch {}
+  renderShelf();
+  window.scrollTo(0, 0);   // 排完直接看第一本，别停在原来的滚动位置
+}
+
 function clearShelfSearch(focus = true) {
   const input = $('#shelfSearch');
   input.value = '';
@@ -513,6 +541,13 @@ document.addEventListener('keydown', (e) => {
 });
 $('#globalSearchBtn').addEventListener('click', () => openGlobalSearch());
 $('#trashBtn').addEventListener('click', () => openTrash());
+$('#shelfSortBtn').addEventListener('click', (e) => {
+  const anchor = e.currentTarget;
+  showPop(anchor, SHELF_SORT_OPTIONS.map((option) => ({
+    label: `${option.key === S.shelfSort ? '✓ ' : ''}${option.label}`,
+    run: () => setShelfSort(option.key),
+  })));
+});
 
 function setTrashBadge(count) {
   const n = Math.max(0, Number(count) || 0);
