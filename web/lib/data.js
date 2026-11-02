@@ -618,6 +618,21 @@ export function buildReaderToc(chapters, volumeTitles = [], query = '') {
   return groups;
 }
 
+/** 阅读目录里一卷的稳定键：首章下标 + 卷名，同名卷分在两处也不会串。 */
+export function readerTocGroupKey(group) {
+  const first = group?.chapters?.[0]?.index;
+  return `${Number.isInteger(first) ? first : 0}|${String(group?.title || '')}`;
+}
+
+/** 长篇的阅读目录默认只展开当前章所在的卷，短篇全部展开。
+ *  返回需要收起的卷键集合；当前章找不到时全部收起。 */
+export function defaultReaderTocClosed(groups, currentChapterId, longBook) {
+  const list = Array.isArray(groups) ? groups : [];
+  if (!longBook) return new Set();
+  const current = list.find((group) => group.chapters?.some(({ chapter }) => chapter.id === currentChapterId));
+  return new Set(list.filter((group) => group !== current).map(readerTocGroupKey));
+}
+
 /* ---------- 阅读进度：最后阅读章 + 每章滚动位置 ---------- */
 
 /** 每部作品最多记住多少章的阅读位置，防止 localStorage 无限膨胀。

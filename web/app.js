@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -4360,6 +4360,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
         <div class="reader-toc-head">
           <h2 id="readerTocTitle">目录</h2>
           <span class="reader-toc-count" id="readerTocCount"></span>
+          <button type="button" class="icon-btn sm" id="readerTocExpand" title="展开全部卷" aria-label="展开全部卷" hidden><svg class="ico"><use href="#i-unfold" /></svg></button>
           <button type="button" class="icon-btn sm" id="readerTocClose" title="关闭目录（Esc）" aria-label="关闭目录"><svg class="ico"><use href="#i-x" /></svg></button>
         </div>
         <div class="find-bar reader-toc-find">
@@ -4379,6 +4380,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
   const tocSearch = $r('#readerTocSearch');
   const tocClear = $r('#readerTocClear');
   const tocCount = $r('#readerTocCount');
+  const tocExpand = $r('#readerTocExpand');
   const tocList = $r('#readerTocList');
   const prev = $r('#readerPrev');
   const next = $r('#readerNext');
@@ -4389,6 +4391,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
   let tocOpen = false;
   let tocQuery = '';
   let tocCursor = '';
+  let tocClosed = null;       // 手动收起的卷键；null 表示还没按当前章初始化
 
   const close = () => {
     document.removeEventListener('keydown', onKey);
@@ -4502,7 +4505,23 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
 
   /* ---------- 目录抽屉 ---------- */
   const tocGroups = () => buildReaderToc(chapters, volumeLabels, tocQuery);
-  const tocRows = () => tocGroups().flatMap((group) => group.chapters);
+  const tocLongBook = () => chapters.length > 40;
+  const tocIsClosed = (group) => !tocQuery && !!tocClosed?.has(readerTocGroupKey(group));
+  const tocRows = () => tocGroups()
+    .filter((group) => !tocIsClosed(group))
+    .flatMap((group) => group.chapters);
+
+  /** 长篇打开目录时只展开当前章所在卷；之后换章再打开，也保证当前卷是开的 */
+  const ensureTocCurrentOpen = () => {
+    const groups = buildReaderToc(chapters, volumeLabels, '');
+    if (!tocClosed) {
+      tocClosed = defaultReaderTocClosed(groups, chapters[idx]?.id, tocLongBook());
+      return;
+    }
+    if (!tocLongBook()) { tocClosed.clear(); return; }
+    const cur = groups.find((group) => group.chapters.some(({ chapter }) => chapter.id === chapters[idx]?.id));
+    if (cur) tocClosed.delete(readerTocGroupKey(cur));
+  };
 
   const paintTocCursor = () => {
     $$('.reader-toc-item', tocList).forEach((el) => {
@@ -4520,13 +4539,22 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
     const matched = groups.reduce((sum, group) => sum + group.chapters.length, 0);
     tocCount.textContent = tocQuery ? `找到 ${matched} / ${chapters.length} 章` : `共 ${chapters.length} 章`;
     tocClear.hidden = !tocQuery;
+    const canExpandAll = !tocQuery && groups.length >= 2;
+    tocExpand.hidden = !canExpandAll;
+    if (canExpandAll) {
+      const allOpen = groups.every((group) => !tocIsClosed(group));
+      const label = allOpen ? '收起全部卷' : '展开全部卷';
+      tocExpand.title = label;
+      tocExpand.setAttribute('aria-label', label);
+    }
     if (!groups.length) {
       tocList.innerHTML = '<div class="reader-toc-empty">没有匹配的章节<br><span>换个章节名、章号或卷名试试</span></div>';
       return;
     }
-    tocList.innerHTML = groups.map((group) => `
-      <div class="reader-toc-vol"><span>${esc(group.title)}</span><em>${group.chapters.length}</em></div>
-      ${group.chapters.map(({ chapter, index }) => {
+    tocList.innerHTML = groups.map((group) => {
+      const key = readerTocGroupKey(group);
+      const open = !tocIsClosed(group);
+      const rows = open ? group.chapters.map(({ chapter, index }) => {
         const cur = chapter.id === chapters[idx]?.id;
         const stage = stageOf(chapter);
         return `<button type="button" class="reader-toc-item${cur ? ' current' : ''}${chapter.id === tocCursor ? ' cursor' : ''}" role="option" aria-selected="${cur}"${cur ? ' aria-current="true"' : ''} tabindex="-1" data-id="${esc(chapter.id)}" data-i="${index}">
@@ -4535,13 +4563,40 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
           <span class="reader-toc-name" title="${esc(chapter.title || '未命名')}">${esc(chapter.title || '未命名')}</span>
           <span class="reader-toc-words">${fmtWords(wordsOf(chapter))}</span>
         </button>`;
-      }).join('')}
-    `).join('');
+      }).join('') : '';
+      return `<div class="reader-toc-group${open ? '' : ' closed'}">
+        <button type="button" class="reader-toc-vol" data-toc-vol="${esc(key)}" aria-expanded="${open}" title="${tocQuery ? '搜索时全部展开' : open ? '收起这一卷' : '展开这一卷'}"${tocQuery ? ' disabled' : ''}>
+          <svg class="ico reader-toc-chev"><use href="#i-chev-down" /></svg>
+          <span>${esc(group.title)}</span><em>${group.chapters.length}</em>
+        </button>
+        ${rows}
+      </div>`;
+    }).join('');
     if (revealCurrent) {
       tocList.querySelector('.reader-toc-item.current')?.scrollIntoView({ block: 'center' });
     } else if (tocQuery) {
       tocList.scrollTop = 0;
     }
+  };
+
+  const toggleTocGroup = (key) => {
+    if (tocQuery || !tocClosed) return;
+    const keep = tocList.scrollTop;
+    if (tocClosed.has(key)) tocClosed.delete(key);
+    else tocClosed.add(key);
+    renderToc();
+    tocList.scrollTop = keep;
+  };
+
+  const toggleAllTocGroups = () => {
+    if (tocQuery || !tocClosed) return;
+    const groups = tocGroups();
+    if (groups.length < 2) return;
+    const keep = tocList.scrollTop;
+    if (groups.some((group) => tocClosed.has(readerTocGroupKey(group)))) tocClosed.clear();
+    else groups.forEach((group) => tocClosed.add(readerTocGroupKey(group)));
+    renderToc();
+    tocList.scrollTop = keep;
   };
 
   const openToc = () => {
@@ -4550,6 +4605,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
     tocQuery = '';
     tocCursor = chapters[idx]?.id || '';
     tocSearch.value = '';
+    ensureTocCurrentOpen();
     tocMask.hidden = false;
     tocBtn.setAttribute('aria-expanded', 'true');
     renderToc({ revealCurrent: true });
@@ -4578,6 +4634,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
     tocQuery = '';
     tocCursor = chapters[idx]?.id || '';
     tocSearch.value = '';
+    ensureTocCurrentOpen();
     renderToc({ revealCurrent: true });
     tocSearch.focus({ preventScroll: true });
   };
@@ -4623,15 +4680,27 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
   tocBtn.addEventListener('click', () => (tocOpen ? closeToc() : openToc()));
   $r('#readerTocClose').addEventListener('click', () => closeToc());
   tocClear.addEventListener('click', clearTocSearch);
+  tocExpand.addEventListener('click', toggleAllTocGroups);
   tocMask.addEventListener('click', (e) => { if (e.target === tocMask) closeToc(); });
   tocList.addEventListener('click', (e) => {
+    const head = e.target.closest('.reader-toc-vol');
+    if (head) {
+      if (!head.disabled) toggleTocGroup(head.dataset.tocVol);
+      return;
+    }
     const item = e.target.closest('.reader-toc-item');
     if (item) jumpToc(Number(item.dataset.i));
   });
   tocSearch.addEventListener('input', () => {
+    const hadQuery = !!tocQuery;
     tocQuery = tocSearch.value.trim();
     tocCursor = '';
-    renderToc();
+    if (!tocQuery && hadQuery) {
+      ensureTocCurrentOpen();
+      renderToc({ revealCurrent: true });
+    } else {
+      renderToc();
+    }
   });
   tocSearch.addEventListener('keydown', (e) => {
     if (e.isComposing || e.keyCode === 229) return;

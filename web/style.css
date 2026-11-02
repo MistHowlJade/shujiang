@@ -2807,10 +2807,17 @@ button.hm-cell:focus-visible { outline: 1px solid var(--accent); outline-offset:
 .reader-toc-list { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 8px 16px; }
 .reader-toc-vol {
   position: sticky; top: 0; z-index: 1;
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 8px; width: 100%;
   padding: 9px 8px 6px; background: var(--surface-1);
-  color: var(--text-3); font-size: 10.5px; letter-spacing: .04em;
+  border: 0; border-radius: var(--r-sm);
+  color: var(--text-3); font: inherit; font-size: 10.5px; letter-spacing: .04em;
+  text-align: left; cursor: pointer;
 }
+.reader-toc-vol:hover { color: var(--text-2); }
+.reader-toc-vol:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent-line); }
+.reader-toc-vol:disabled { cursor: default; color: var(--text-4); }
+.reader-toc-chev { flex: 0 0 auto; width: 11px; height: 11px; color: var(--text-4); transition: transform var(--dur) var(--ease); }
+.reader-toc-group.closed .reader-toc-chev { transform: rotate(-90deg); }
 .reader-toc-vol span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reader-toc-vol em { font-style: normal; color: var(--text-4); font-variant-numeric: tabular-nums; }
 .reader-toc-item {

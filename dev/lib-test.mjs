@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1451,6 +1451,17 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('阅读目录：同卷不连续时不合并', (() => {
     const rows = [{ id: 'a', title: '一' }, { id: 'b', title: '二' }, { id: 'c', title: '三' }];
     return buildReaderToc(rows, ['第 1 卷', '第 2 卷', '第 1 卷'], '').map((group) => group.title).join('|') === '第 1 卷|第 2 卷|第 1 卷';
+  })());
+  const groups = buildReaderToc(chapters, vols, '');
+  const keys = groups.map(readerTocGroupKey);
+  check('阅读目录：长篇默认只展开当前卷', [...defaultReaderTocClosed(groups, 'c3', true)].join(',') === `${keys[0]},${keys[2]}`,
+    [...defaultReaderTocClosed(groups, 'c3', true)].join(','));
+  check('阅读目录：短篇默认全部展开', defaultReaderTocClosed(groups, 'c3', false).size === 0);
+  check('阅读目录：当前章缺失时全部收起', defaultReaderTocClosed(groups, 'nope', true).size === groups.length);
+  check('阅读目录：同名卷的键互不相同', (() => {
+    const rows = [{ id: 'a', title: '一' }, { id: 'b', title: '二' }, { id: 'c', title: '三' }];
+    const list = buildReaderToc(rows, ['第 1 卷', '第 2 卷', '第 1 卷'], '');
+    return readerTocGroupKey(list[0]) !== readerTocGroupKey(list[2]);
   })());
 }
 
