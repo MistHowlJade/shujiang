@@ -576,6 +576,34 @@ export function filterChaptersBySearch(chapters, query) {
     .filter(({ chapter, index }) => chapterMatchesSearch(chapter, index, query));
 }
 
+/** 书架搜索文本：书名 + 类型 + 标签。 */
+export function novelSearchText(novel) {
+  const tags = Array.isArray(novel?.tags)
+    ? novel.tags
+    : (typeof novel?.tags === 'string' ? novel.tags.split(/[,，、\s]+/) : []);
+  return [novel?.title, novel?.genre, ...tags]
+    .map((value) => String(value ?? ''))
+    .join('\n');
+}
+
+/** 单部作品是否命中书架搜索：空格分隔多词按「都包含」，忽略大小写、空白与间隔符。
+ *  空查询视为命中。 */
+export function novelMatchesSearch(novel, query) {
+  const terms = String(query || '')
+    .trim()
+    .split(/\s+/)
+    .map(normalizeMentionText)
+    .filter(Boolean);
+  if (!terms.length) return true;
+  const text = normalizeMentionText(novelSearchText(novel));
+  return terms.every((term) => text.includes(term));
+}
+
+/** 书架搜索：返回原顺序的命中作品。 */
+export function filterNovelsBySearch(novels, query) {
+  return (Array.isArray(novels) ? novels : []).filter((novel) => novelMatchesSearch(novel, query));
+}
+
 /** 章节搜索的键盘光标：在结果里走一步，越界时绕回另一端。
  *  current 为 -1 表示还没选过：向下从第一条开始，向上从最后一条开始。
  *  空结果返回 -1，调用方据此不响应方向键。 */

@@ -106,7 +106,8 @@
             <span class="stat-slot" id="shelfStats"></span>
             <div class="field-inline">
               <svg class="ico"><use href="#i-search" /></svg>
-              <input id="shelfSearch" placeholder="搜索书名 / 类型" />
+              <input id="shelfSearch" placeholder="搜索书名 / 类型 / 标签" title="搜索书名 / 类型 / 标签；按 / 快速定位，Esc 清空" />
+              <button class="icon-btn sm shelf-search-clear" id="shelfSearchClear" title="清除搜索" aria-label="清除搜索" hidden><svg class="ico"><use href="#i-x" /></svg></button>
             </div>
             <button class="btn" id="globalSearchBtn" title="在所有作品的正文和章节标题中检索（Ctrl+Shift+F）"><svg class="ico"><use href="#i-search" /></svg><span>全局检索</span></button>
             <button class="btn" id="restoreBackupBtn" title="从书匠 JSON 备份恢复为一部新作品"><svg class="ico"><use href="#i-upload" /></svg>恢复备份</button>

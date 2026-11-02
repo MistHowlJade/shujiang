@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1401,6 +1401,26 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('章节搜索光标：向下越界回到第一条', stepSearchCursor(4, 1, 5) === 0, String(stepSearchCursor(4, 1, 5)));
   check('章节搜索光标：向上越界回到最后一条', stepSearchCursor(0, -1, 5) === 4, String(stepSearchCursor(0, -1, 5)));
   check('章节搜索光标：只有一条时原地不动', stepSearchCursor(0, 1, 1) === 0 && stepSearchCursor(0, -1, 1) === 0);
+}
+
+// ---------------------------------------------------------------
+// 书架搜索：书名 / 类型 / 标签，多词取交集
+{
+  const novels = [
+    { id: 'n1', title: '星海孤舟', genre: '科幻', tags: ['太空', '远航'] },
+    { id: 'n2', title: '雪落长安', genre: '历史', tags: ['权谋'] },
+    { id: 'n3', title: 'Gate of Stars', genre: '科幻', tags: [] },
+  ];
+  const ids = (q) => filterNovelsBySearch(novels, q).map((n) => n.id);
+  check('书架搜索：空查询返回全部', ids('').join(',') === 'n1,n2,n3', JSON.stringify(ids('')));
+  check('书架搜索：按书名匹配', ids('星海').join(',') === 'n1', JSON.stringify(ids('星海')));
+  check('书架搜索：按类型匹配', ids('历史').join(',') === 'n2', JSON.stringify(ids('历史')));
+  check('书架搜索：按标签匹配', ids('权谋').join(',') === 'n2', JSON.stringify(ids('权谋')));
+  check('书架搜索：忽略大小写', ids('GATE').join(',') === 'n3', JSON.stringify(ids('GATE')));
+  check('书架搜索：多词跨字段都包含', ids('科幻 太空').join(',') === 'n1', JSON.stringify(ids('科幻 太空')));
+  check('书架搜索：多词缺一不命中', ids('科幻 权谋').length === 0, JSON.stringify(ids('科幻 权谋')));
+  check('书架搜索：保持原顺序', ids('科幻').join(',') === 'n1,n3', JSON.stringify(ids('科幻')));
+  check('书架搜索：空列表不报错', filterNovelsBySearch(null, 'x').length === 0 && filterNovelsBySearch([], '').length === 0);
 }
 
 // ---------------------------------------------------------------

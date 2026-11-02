@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -399,17 +399,22 @@ function coverOf(title) {
  * 书架卡片拿的是列表数据（words + targetWords），工作台拿的是完整作品（meta + chapters），两种都认。
  */
 function renderShelf() {
-  const q = ($('#shelfSearch').value || '').trim().toLowerCase();
-  const list = S.novels.filter((n) => !q
-    || n.title.toLowerCase().includes(q)
-    || (n.genre || '').toLowerCase().includes(q)
-    || (n.tags || []).join(',').toLowerCase().includes(q));
+  const input = $('#shelfSearch');
+  const q = (input.value || '').trim();
+  const list = filterNovelsBySearch(S.novels, q);
+  $('#shelfSearchClear').hidden = !q;
   const grid = $('#shelfGrid');
   grid.innerHTML = '';
-  const totalWords = S.novels.reduce((s, n) => s + (n.words || 0), 0);
-  $('#shelfSub').textContent = S.novels.length
-    ? `共 ${S.novels.length} 部作品 · ${fmtWords(totalWords)} 字 · 全部保存在本机`
-    : '所有作品都保存在本机，不上传云端';
+  const totalWords = list.reduce((s, n) => s + (n.words || 0), 0);
+  if (q) {
+    $('#shelfSub').textContent = list.length
+      ? `找到 ${list.length} / ${S.novels.length} 部作品 · ${fmtWords(totalWords)} 字 · 全部保存在本机`
+      : `没有找到匹配「${q}」的作品 · 共 ${S.novels.length} 部`;
+  } else {
+    $('#shelfSub').textContent = S.novels.length
+      ? `共 ${S.novels.length} 部作品 · ${fmtWords(totalWords)} 字 · 全部保存在本机`
+      : '所有作品都保存在本机，不上传云端';
+  }
   $('#shelfEmpty').hidden = S.novels.length > 0;
 
   for (const n of list) {
@@ -468,8 +473,44 @@ function renderShelf() {
     });
     grid.appendChild(div);
   }
+
+  if (q && !list.length && S.novels.length) {
+    const empty = document.createElement('div');
+    empty.className = 'shelf-no-match';
+    empty.innerHTML = `<p>没有找到匹配「${esc(q)}」的作品</p><button type="button" class="btn btn-sm" id="shelfNoMatchClear">清空搜索</button>`;
+    empty.querySelector('#shelfNoMatchClear')?.addEventListener('click', () => clearShelfSearch());
+    grid.appendChild(empty);
+  }
 }
-$('#shelfSearch').addEventListener('input', debounce(renderShelf, 150));
+
+function clearShelfSearch(focus = true) {
+  const input = $('#shelfSearch');
+  input.value = '';
+  $('#shelfSearchClear').hidden = true;
+  renderShelf();
+  if (focus) input.focus();
+}
+
+const renderShelfDebounced = debounce(renderShelf, 150);
+$('#shelfSearch').addEventListener('input', () => {
+  $('#shelfSearchClear').hidden = !$('#shelfSearch').value.trim();
+  renderShelfDebounced();
+});
+$('#shelfSearch').addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !$('#shelfSearch').value) return;
+  e.preventDefault();
+  clearShelfSearch();
+});
+$('#shelfSearchClear').addEventListener('click', () => clearShelfSearch());
+document.addEventListener('keydown', (e) => {
+  if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+  if (!$('#modalMask').hidden || $('#readerMask') || S.view !== 'shelf') return;
+  const tag = (e.target?.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return;
+  e.preventDefault();
+  $('#shelfSearch').focus();
+  $('#shelfSearch').select();
+});
 $('#globalSearchBtn').addEventListener('click', () => openGlobalSearch());
 $('#trashBtn').addEventListener('click', () => openTrash());
 
