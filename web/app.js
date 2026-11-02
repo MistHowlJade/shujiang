@@ -126,6 +126,7 @@ $('#modalMask').addEventListener('mousedown', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  if (e.defaultPrevented) return;   // 输入框里的 Esc 已经处理过（例如关命令面板），别再往下退专注
   // 弹窗、命令面板、阅读器、浮层和选中工具条优先处理 Esc，避免误退出专注模式
   if (!$('#modalMask').hidden && !S.batchController) { closeModal(); return; }
   if (S.batchController) return;
@@ -2830,6 +2831,8 @@ function renderFocusBar() {
   const title = $('#focusTitle');
   const meta = $('#focusMeta');
   const goal = $('#focusGoal');
+  const prevBtn = $('#focusPrev');
+  const nextBtn = $('#focusNext');
   if (!title || !meta || !goal) return;
   const ch = currentChapter();
   if (!ch || !S.novel) {
@@ -2837,6 +2840,8 @@ function renderFocusBar() {
     meta.textContent = '';
     goal.textContent = '';
     goal.classList.remove('done');
+    if (prevBtn) prevBtn.disabled = true;
+    if (nextBtn) nextBtn.disabled = true;
     return;
   }
   const i = S.novel.chapters.indexOf(ch);
@@ -2850,6 +2855,8 @@ function renderFocusBar() {
   goal.title = target
     ? `本章目标 ${fmtWords(target)} 字，已完成 ${pct}%`
     : '退出专注后可在字数胶囊里设置目标';
+  if (prevBtn) prevBtn.disabled = i <= 0;
+  if (nextBtn) nextBtn.disabled = i >= S.novel.chapters.length - 1;
 }
 
 /** 进入专注写作：只留稿纸，Esc 退出 */
@@ -2879,6 +2886,27 @@ function exitFocus() {
 function toggleFocus() {
   if (S.focusMode) exitFocus();
   else enterFocus();
+}
+
+/** 在整本书的章节顺序里前后翻一章；专注模式下把光标送回正文，不用退出再进来 */
+function stepChapter(delta) {
+  const n = S.novel;
+  if (!n || !n.chapters.length) return false;
+  const i = n.chapters.findIndex((c) => c.id === S.chapterId);
+  const target = i < 0 ? (delta > 0 ? 0 : n.chapters.length - 1) : i + delta;
+  if (target < 0 || target >= n.chapters.length) return false;
+  selectChapter(n.chapters[target].id);
+  if (S.focusMode) {
+    const ta = $('#chContent');
+    if (ta && !ta.disabled) {
+      ta.focus({ preventScroll: true });
+      // 往后翻接着写，落在正文末尾；往前翻先看开头
+      const pos = delta > 0 ? ta.value.length : 0;
+      ta.setSelectionRange(pos, pos);
+      ta.scrollTop = delta > 0 ? ta.scrollHeight : 0;
+    }
+  }
+  return true;
 }
 
 /** 卷标题行（用于虚拟滚动与普通渲染的统一入口） */
@@ -4153,6 +4181,8 @@ $('#chWords').addEventListener('click', () => {
   openChapterTargetModal(S.novel.chapters.indexOf(ch));
 });
 $('#focusBtn').addEventListener('click', toggleFocus);
+$('#focusPrev').addEventListener('click', () => stepChapter(-1));
+$('#focusNext').addEventListener('click', () => stepChapter(1));
 $('#focusExit').addEventListener('click', exitFocus);
 
 $('#coEdit').addEventListener('click', openChapterOutlineModal);
@@ -11395,6 +11425,17 @@ $('#findBtn').addEventListener('click', () => openFind());
 /* ---------------- 快捷键 ---------------- */
 document.addEventListener('keydown', (e) => {
   if ($('#readerMask')) return;
+  // Alt+↑ / ↓：在当前作品里翻章；下拉框的原生 Alt+↓ 不抢
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey
+    && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.isComposing) {
+    const tag = (e.target?.tagName || '').toLowerCase();
+    if (tag === 'select') return;
+    if ($('#cmdkMask')?.hidden === false || $('#modalMask')?.hidden === false) return;
+    if (S.view !== 'studio' || !S.novel || !S.chapterId) return;
+    e.preventDefault();
+    stepChapter(e.key === 'ArrowDown' ? 1 : -1);
+    return;
+  }
   if (!(e.ctrlKey || e.metaKey)) return;
   if (e.altKey && String(e.key).toLowerCase() === 's') {
     e.preventDefault();
@@ -11470,6 +11511,8 @@ function cmdkSource() {
     op('生成本章', 'spark', () => { setView('studio'); showAssistTab('write'); generateChapter(); }, 'Ctrl+Shift+↵');
     op('阅读模式', 'book-open', () => { setView('studio'); openReader(S.chapterId, { restore: true }); });
     op('继续阅读', 'book-open', () => continueReading(S.novel.id));
+    op('上一章', 'chev-up', () => { setView('studio'); stepChapter(-1); }, 'Alt+↑');
+    op('下一章', 'chev-down', () => { setView('studio'); stepChapter(1); }, 'Alt+↓');
     op(S.focusMode ? '退出专注写作' : '进入专注写作', 'focus', toggleFocus, 'Ctrl+Alt+F');
     op('续写当前章', 'pen', () => { setView('studio'); showAssistTab('write'); continueWriting(); }, 'Ctrl+↵');
     op('对比两个模型', 'columns', () => { setView('studio'); showAssistTab('write'); openModelCompare(); });

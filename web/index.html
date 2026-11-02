@@ -25,6 +25,8 @@
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
   <symbol id="i-chev-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
   <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chev-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-chev-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
   <symbol id="i-unfold" viewBox="0 0 24 24"><path d="m8 9 4-4 4 4"/><path d="m8 15 4 4 4-4"/></symbol>
   <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5 13.9 9l5.6 1.9-5.6 1.9L12 18.4l-1.9-5.6L4.5 11 10.1 9z"/><path d="M18.5 4v3M17 5.5h3"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 5 5L19.5 7"/></symbol>
@@ -174,6 +176,10 @@
                 <span class="focus-bar-meta" id="focusMeta"></span>
               </div>
               <div class="focus-bar-end">
+                <div class="focus-nav">
+                  <button class="icon-btn sm" id="focusPrev" title="上一章（Alt+↑）" aria-label="上一章" disabled><svg class="ico"><use href="#i-chev-left" /></svg></button>
+                  <button class="icon-btn sm" id="focusNext" title="下一章（Alt+↓）" aria-label="下一章" disabled><svg class="ico"><use href="#i-chev-right" /></svg></button>
+                </div>
                 <span class="focus-goal" id="focusGoal"></span>
                 <button class="btn btn-sm btn-text" id="focusExit" title="退出专注（Esc）">退出专注 <kbd>Esc</kbd></button>
               </div>
