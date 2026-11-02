@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -32,29 +32,16 @@ function readerProgressMap() {
 
 function getReaderProgress(novelId) {
   if (!novelId) return null;
-  const p = readerProgressMap()[novelId];
-  if (!p || !p.chapterId) return null;
-  const ratio = Number(p.ratio);
-  return {
-    chapterId: String(p.chapterId),
-    chapterNo: Math.max(1, Math.floor(Number(p.chapterNo) || 1)),
-    chapterTitle: String(p.chapterTitle || ''),
-    ratio: Number.isFinite(ratio) ? Math.min(1, Math.max(0, ratio)) : 0,
-    updatedAt: Number(p.updatedAt) || 0,
-  };
+  return normalizeReaderProgress(readerProgressMap()[novelId]);
 }
 
 function saveReaderProgress(novelId, data) {
   if (!novelId || !data?.chapterId) return;
   try {
     const map = readerProgressMap();
-    map[novelId] = {
-      chapterId: String(data.chapterId),
-      chapterNo: Math.max(1, Math.floor(Number(data.chapterNo) || 1)),
-      chapterTitle: String(data.chapterTitle || ''),
-      ratio: Math.min(1, Math.max(0, Number(data.ratio) || 0)),
-      updatedAt: Date.now(),
-    };
+    const next = mergeReaderProgress(map[novelId], data);
+    if (!next) return;
+    map[novelId] = next;
     localStorage.setItem(READER_PROGRESS_KEY, JSON.stringify(map));
   } catch {}
 }
@@ -4344,6 +4331,8 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
 
   const close = () => {
     document.removeEventListener('keydown', onKey);
+    if (restoreTimer) { clearTimeout(restoreTimer); restoreTimer = null; }
+    flushProgress();
     // 保存字号偏好
     saveReaderFontSize(size);
     mask.remove();
@@ -4368,20 +4357,40 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
   };
 
   let saveTimer = null;
+  let scrollTimer = null;
+  let restoreTimer = null;
   let restoring = false;
+
+  const currentRatio = () => {
+    const maxScroll = scroll.scrollHeight - scroll.clientHeight;
+    return maxScroll > 0 ? Math.min(1, Math.max(0, scroll.scrollTop / maxScroll)) : 0;
+  };
+
+  const updateProgressBar = () => {
+    const progressBar = $r('#readerProgressBar');
+    if (!progressBar) return;
+    const maxScroll = scroll.scrollHeight - scroll.clientHeight;
+    const pct = maxScroll > 0 ? Math.min(100, Math.max(0, (scroll.scrollTop / maxScroll) * 100)) : 0;
+    progressBar.style.width = `${pct}%`;
+  };
+
   const saveProgress = () => {
     if (restoring) return;
     const ch = chapters[idx];
     if (!ch) return;
-    const ratio = scroll.scrollHeight > scroll.clientHeight
-      ? scroll.scrollTop / (scroll.scrollHeight - scroll.clientHeight)
-      : 0;
     saveReaderProgress(S.novel.id, {
       chapterId: ch.id,
       chapterNo: idx + 1,
       chapterTitle: ch.title || '',
-      ratio,
+      ratio: currentRatio(),
     });
+  };
+
+  /** 切章 / 关阅读器前先把当前章位置落盘，别让 200–300ms 的节流吞掉上一章 */
+  const flushProgress = () => {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    if (scrollTimer) { clearTimeout(scrollTimer); scrollTimer = null; }
+    saveProgress();
   };
 
   const render = () => {
@@ -4397,33 +4406,27 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
     $r('#readerPos').textContent = `${idx + 1} / ${chapters.length}`;
     prev.disabled = prev2.disabled = idx <= 0;
     next.disabled = next2.disabled = idx >= chapters.length - 1;
-    // 更新阅读进度条
-    const progressBar = $r('#readerProgressBar');
-    if (progressBar) {
-      const maxScroll = scroll.scrollHeight - scroll.clientHeight;
-      const pct = maxScroll > 0 ? Math.min(100, Math.max(0, (scroll.scrollTop / maxScroll) * 100)) : 0;
-      progressBar.style.width = `${pct}%`;
-    }
-    // 恢复滚动位置
-    if (restore) {
-      const prog = getReaderProgress(S.novel.id);
-      if (prog && prog.chapterId === ch.id) {
-        restoring = true;
-        // 用 setTimeout 50ms 确保布局完全完成后再恢复滚动位置
-        setTimeout(() => {
-          const maxScroll = scroll.scrollHeight - scroll.clientHeight;
-          if (maxScroll > 0) {
-            const target = maxScroll * prog.ratio;
-            scroll.scrollTop = Math.max(0, Math.min(target, maxScroll));
-          }
-          restoring = false;
-        }, 50);
-      } else {
-        scroll.scrollTop = 0;
-      }
+    // 恢复该章上次的滚动位置（每章独立，不再只记住最后读的一章）
+    if (restoreTimer) { clearTimeout(restoreTimer); restoreTimer = null; }
+    restoring = false;
+    const savedRatio = restore ? readerPositionOf(getReaderProgress(S.novel.id), ch.id) : null;
+    if (savedRatio !== null) {
+      restoring = true;
+      // 用 setTimeout 50ms 确保布局完全完成后再恢复滚动位置
+      restoreTimer = setTimeout(() => {
+        restoreTimer = null;
+        const maxScroll = scroll.scrollHeight - scroll.clientHeight;
+        if (maxScroll > 0) {
+          const target = maxScroll * savedRatio;
+          scroll.scrollTop = Math.max(0, Math.min(target, maxScroll));
+        }
+        restoring = false;
+        updateProgressBar();
+      }, 50);
     } else {
       scroll.scrollTop = 0;
     }
+    updateProgressBar();
     // 节流保存进度
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(saveProgress, 300);
@@ -4431,6 +4434,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
 
   const go = (nextIdx) => {
     if (nextIdx < 0 || nextIdx >= chapters.length) return;
+    flushProgress();
     idx = nextIdx;
     render();
   };
@@ -4504,6 +4508,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
     closeToc({ focus: false });
     page.focus({ preventScroll: true });
     if (index === idx) return;   // 点当前章只关目录，别把阅读位置带回顶部
+    flushProgress();
     idx = index;
     render();
   };
@@ -4605,17 +4610,10 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
   page.focus({ preventScroll: true });
 
   // 首次渲染完成后再监听滚动，避免初始化时触发保存
-  let scrollTimer = null;
   scroll.addEventListener('scroll', () => {
     if (scrollTimer) clearTimeout(scrollTimer);
     scrollTimer = setTimeout(saveProgress, 200);
-    // 实时更新进度条
-    const progressBar = $r('#readerProgressBar');
-    if (progressBar) {
-      const maxScroll = scroll.scrollHeight - scroll.clientHeight;
-      const pct = maxScroll > 0 ? Math.min(100, Math.max(0, (scroll.scrollTop / maxScroll) * 100)) : 0;
-      progressBar.style.width = `${pct}%`;
-    }
+    updateProgressBar();
   });
 }
 

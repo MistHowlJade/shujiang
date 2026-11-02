@@ -618,6 +618,87 @@ export function buildReaderToc(chapters, volumeTitles = [], query = '') {
   return groups;
 }
 
+/* ---------- 阅读进度：最后阅读章 + 每章滚动位置 ---------- */
+
+/** 每部作品最多记住多少章的阅读位置，防止 localStorage 无限膨胀。
+ *  长篇通常也就几百章，600 足够覆盖，超出时先丢最久没读的章节。 */
+export const READER_POSITION_LIMIT = 600;
+
+/** 滚动比例只接受 0–1 的有限数字；坏数据一律当 0，避免阅读器跳到奇怪的位置。 */
+export function clampReaderRatio(value) {
+  const ratio = Number(value);
+  return Number.isFinite(ratio) ? Math.min(1, Math.max(0, ratio)) : 0;
+}
+
+/** 把本浏览器里存的旧版 / 新版阅读进度整理成统一结构。
+ *  旧版只有最外层一章 `{ chapterId, ratio, ... }`，读的时候补成 positions，
+ *  写回时仍保留最外层字段，书架「继续阅读」和旧数据都不用改。
+ *  结构不合法（没有 chapterId）时返回 null。 */
+export function normalizeReaderProgress(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !entry.chapterId) return null;
+  const chapterId = String(entry.chapterId);
+  const ratio = clampReaderRatio(entry.ratio);
+  const updatedAt = Number(entry.updatedAt) || 0;
+  const positions = {};
+  const raw = entry.positions && typeof entry.positions === 'object' && !Array.isArray(entry.positions)
+    ? entry.positions
+    : {};
+  for (const [id, pos] of Object.entries(raw)) {
+    if (!id || !pos || typeof pos !== 'object' || Array.isArray(pos)) continue;
+    positions[String(id)] = {
+      ratio: clampReaderRatio(pos.ratio),
+      updatedAt: Number(pos.updatedAt) || 0,
+    };
+  }
+  // 最外层永远代表「最后读的那一章」，以它为准，避免两处数据不一致
+  positions[chapterId] = { ratio, updatedAt };
+  return {
+    chapterId,
+    chapterNo: Math.max(1, Math.floor(Number(entry.chapterNo) || 1)),
+    chapterTitle: String(entry.chapterTitle || ''),
+    ratio,
+    updatedAt,
+    positions,
+  };
+}
+
+/** 取某一章上次读到的比例；没读过返回 null（「在开头」和「没读过」要分开）。 */
+export function readerPositionOf(progress, chapterId) {
+  if (!progress || !chapterId) return null;
+  const pos = progress.positions?.[String(chapterId)];
+  if (!pos || typeof pos !== 'object') return null;
+  const ratio = Number(pos.ratio);
+  return Number.isFinite(ratio) ? clampReaderRatio(ratio) : null;
+}
+
+/** 写入一章的阅读位置：同时更新「继续阅读」指向的最后章节和该章自己的位置。
+ *  超过 limit 时按最后阅读时间从旧到新淘汰，刚写入的章节永远保留。 */
+export function mergeReaderProgress(entry, data, { now = Date.now(), limit = READER_POSITION_LIMIT } = {}) {
+  const base = normalizeReaderProgress(entry);
+  if (!data?.chapterId) return base;
+  const chapterId = String(data.chapterId);
+  const ratio = clampReaderRatio(data.ratio);
+  const updatedAt = Number(now) || Date.now();
+  const positions = { ...(base?.positions || {}), [chapterId]: { ratio, updatedAt } };
+  const max = Math.max(1, Math.floor(Number(limit) || READER_POSITION_LIMIT));
+  const ids = Object.keys(positions);
+  if (ids.length > max) {
+    ids
+      .filter((id) => id !== chapterId)
+      .sort((a, b) => (positions[a].updatedAt || 0) - (positions[b].updatedAt || 0))
+      .slice(0, ids.length - max)
+      .forEach((id) => { delete positions[id]; });
+  }
+  return {
+    chapterId,
+    chapterNo: Math.max(1, Math.floor(Number(data.chapterNo) || Number(base?.chapterNo) || 1)),
+    chapterTitle: String(data.chapterTitle || ''),
+    ratio,
+    updatedAt,
+    positions,
+  };
+}
+
 /** 书架搜索文本：书名 + 类型 + 标签。 */
 export function novelSearchText(novel) {
   const tags = Array.isArray(novel?.tags)

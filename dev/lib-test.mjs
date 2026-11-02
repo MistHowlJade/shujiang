@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1451,6 +1451,53 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('阅读目录：同卷不连续时不合并', (() => {
     const rows = [{ id: 'a', title: '一' }, { id: 'b', title: '二' }, { id: 'c', title: '三' }];
     return buildReaderToc(rows, ['第 1 卷', '第 2 卷', '第 1 卷'], '').map((group) => group.title).join('|') === '第 1 卷|第 2 卷|第 1 卷';
+  })());
+}
+
+// ---------------------------------------------------------------
+// 阅读进度：每章滚动位置、旧数据迁移、上限淘汰
+{
+  check('阅读进度：比例夹在 0–1', clampReaderRatio(-0.2) === 0 && clampReaderRatio(1.4) === 1 && clampReaderRatio('0.35') === 0.35);
+  check('阅读进度：坏比例当 0', clampReaderRatio('abc') === 0 && clampReaderRatio(null) === 0 && clampReaderRatio(undefined) === 0);
+  check('阅读进度：空数据返回 null', normalizeReaderProgress(null) === null && normalizeReaderProgress({}) === null && normalizeReaderProgress([]) === null);
+
+  const legacy = normalizeReaderProgress({ chapterId: 'c2', chapterNo: 2, chapterTitle: 'Gate', ratio: 0.4, updatedAt: 100 });
+  check('阅读进度：迁移旧版单章数据', legacy?.chapterId === 'c2' && legacy.positions.c2.ratio === 0.4 && legacy.positions.c2.updatedAt === 100);
+  check('阅读进度：旧版数据取位置', readerPositionOf(legacy, 'c2') === 0.4 && readerPositionOf(legacy, 'c9') === null);
+
+  const p1 = mergeReaderProgress(legacy, { chapterId: 'c1', chapterNo: 1, chapterTitle: '雪夜', ratio: 0.2 }, { now: 200 });
+  check('阅读进度：写入新章并保留旧章', p1.chapterId === 'c1' && p1.positions.c1.ratio === 0.2 && p1.positions.c2.ratio === 0.4);
+  check('阅读进度：继续阅读指向最后写入章', p1.chapterNo === 1 && p1.chapterTitle === '雪夜' && p1.updatedAt === 200);
+  check('阅读进度：同一章更新比例', (() => {
+    const p = mergeReaderProgress(p1, { chapterId: 'c2', chapterNo: 2, chapterTitle: 'Gate', ratio: 0.75 }, { now: 300 });
+    return p.chapterId === 'c2' && p.positions.c2.ratio === 0.75 && p.positions.c1.ratio === 0.2;
+  })());
+
+  check('阅读进度：0 和没读过分开', (() => {
+    const p = mergeReaderProgress(null, { chapterId: 'c3', chapterNo: 3, ratio: 0 }, { now: 1 });
+    return readerPositionOf(p, 'c3') === 0 && readerPositionOf(p, 'c4') === null;
+  })());
+
+  check('阅读进度：坏 positions 不污染', (() => {
+    const p = normalizeReaderProgress({
+      chapterId: 'c1', ratio: 0.5,
+      positions: { c1: { ratio: 0.1 }, bad: null, arr: [], c2: { ratio: 9, updatedAt: 'x' } },
+    });
+    return p.positions.c1.ratio === 0.5 && p.positions.c2.ratio === 1 && p.positions.c2.updatedAt === 0
+      && !('bad' in p.positions) && !('arr' in p.positions);
+  })());
+
+  check('阅读进度：超过上限先淘汰最久没读的', (() => {
+    let p = null;
+    for (let i = 1; i <= 4; i++) p = mergeReaderProgress(p, { chapterId: `c${i}`, chapterNo: i, ratio: i / 10 }, { now: i, limit: 3 });
+    return Object.keys(p.positions).sort().join(',') === 'c2,c3,c4'
+      && p.positions.c2.ratio === 0.2 && p.positions.c4.ratio === 0.4;
+  })());
+  check('阅读进度：上限非法时回退默认值', mergeReaderProgress(null, { chapterId: 'c1', ratio: 0.3 }, { limit: 0 })?.positions?.c1?.ratio === 0.3);
+  check('阅读进度：默认上限是 600', READER_POSITION_LIMIT === 600);
+  check('阅读进度：缺章号时沿用旧章号', (() => {
+    const p = mergeReaderProgress(normalizeReaderProgress({ chapterId: 'c1', chapterNo: 7, ratio: 0.1 }), { chapterId: 'c2', ratio: 0.2 });
+    return p.chapterNo === 7 && p.chapterId === 'c2';
   })());
 }
 
