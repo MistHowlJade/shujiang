@@ -682,6 +682,30 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { novel: snap });
     }
 
+    // 只恢复某一章的正文：标题、阶段、目标、章纲、记忆、场景、批注都保留，
+    // 其他章节也不动。恢复前同样强制留一份快照，错了可以再撤回。
+    if (seg[3] === 'restore-chapter' && seg.length === 4 && method === 'POST') {
+      const body = await readBody(req);
+      const ts = Number(body.ts);
+      if (!Number.isInteger(ts) || ts <= 0) return sendJson(res, 400, { error: '快照时间无效' });
+      const chapterId = typeof body.chapterId === 'string' ? body.chapterId : '';
+      if (!chapterId) return sendJson(res, 400, { error: '缺少章节 id' });
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      const snap = readSnapshot(id, ts);
+      if (!snap) return sendJson(res, 404, { error: '快照不存在或已被清理' });
+      const snapCh = (snap.chapters || []).find((c) => c?.id === chapterId);
+      if (!snapCh) return sendJson(res, 404, { error: '这一版里没有这一章，无法恢复' });
+      const i = n.chapters.findIndex((c) => c.id === chapterId);
+      if (i < 0) return sendJson(res, 404, { error: '章节不存在或已被删除' });
+      const title = n.chapters[i].title || '未命名';
+      createSnapshot(n, { kind: 'before-restore', label: `恢复本章前：${title}`, force: true });
+      // 直接改内存里的章节再 saveNovel，不走 writeChapter：恢复旧文不该算进今日码字量
+      n.chapters[i].content = snapCh.content || '';
+      saveNovel(n);
+      return sendJson(res, 200, { chapter: n.chapters[i] });
+    }
+
     // 章节集合
     if (seg[3] === 'chapters') {
       const n = getNovel(id);

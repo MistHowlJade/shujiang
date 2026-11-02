@@ -536,6 +536,58 @@ async function main() {
   const restoreRes = await post(`${BASE}/api/novels/${id}/restore`, { ts: snaps[0].ts });
   check('恢复版本成功', !!restoreRes.novel);
 
+  // 本章级恢复：只把正文换回旧版，当前标题 / 阶段 / 目标 / 记忆 / 章纲和其他章节都不动
+  const chNovel = await post(`${BASE}/api/novels`, { title: '本章恢复测试', genre: '测试' });
+  const chNovelId = chNovel.novel?.id;
+  const oldContent = '旧版第一段。\n旧版第二段。';
+  const ch1 = await post(`${BASE}/api/novels/${chNovelId}/chapters`, {
+    title: '第一章', content: oldContent, stage: 'done', targetWords: 1800,
+  });
+  const chSecond = await post(`${BASE}/api/novels/${chNovelId}/chapters`, { title: '第二章', content: '第二章原样。' });
+  const ch1Id = ch1.chapter?.id;
+  const ch2Id = chSecond.chapter?.id;
+  const chSnap = await post(`${BASE}/api/novels/${chNovelId}/snapshots`, { kind: 'manual', label: '本章恢复基准', force: true });
+  const chSnapTs = chSnap.snapshot?.ts;
+
+  await put(`${BASE}/api/novels/${chNovelId}/chapters/${ch1Id}`, {
+    title: '改过的标题',
+    content: '当前第一段。\n当前第二段。\n当前新增段。',
+    stage: 'revising',
+    targetWords: 2400,
+    summary: '当前摘要',
+    memory: { summary: '不该被恢复覆盖' },
+    outline: { scene: '当前场景' },
+  });
+  const beforeRestore = (await get(`${BASE}/api/novels/${chNovelId}`)).novel;
+  const ch2Before = beforeRestore.chapters.find((c) => c.id === ch2Id);
+  const snapChapter = await get(`${BASE}/api/novels/${chNovelId}/snapshots/${chSnapTs}/chapter/${ch1Id}`);
+  check('本章恢复：快照读取到旧正文', snapChapter.chapter?.content === oldContent);
+
+  const chRestore = await req('POST', `${BASE}/api/novels/${chNovelId}/restore-chapter`, { ts: chSnapTs, chapterId: ch1Id });
+  check('本章恢复：接口成功', chRestore.status === 200 && !!chRestore.json?.chapter, JSON.stringify(chRestore.json));
+  const chAfter = (await get(`${BASE}/api/novels/${chNovelId}`)).novel;
+  const restoredCh = chAfter.chapters.find((c) => c.id === ch1Id);
+  check('本章恢复：正文回到旧版', restoredCh?.content === oldContent, restoredCh?.content);
+  check('本章恢复：保留当前标题', restoredCh?.title === '改过的标题', restoredCh?.title);
+  check('本章恢复：保留阶段与目标', restoredCh?.stage === 'revising' && restoredCh?.targetWords === 2400);
+  check('本章恢复：保留摘要 / 记忆 / 章纲',
+    restoredCh?.summary === '当前摘要' && restoredCh?.memory?.summary === '不该被恢复覆盖' && restoredCh?.outline?.scene === '当前场景');
+  check('本章恢复：其他章节不动',
+    chAfter.chapters.find((c) => c.id === ch2Id)?.content === ch2Before?.content && chAfter.chapters.length === 2);
+
+  const chSnaps = (await get(`${BASE}/api/novels/${chNovelId}/snapshots`)).snapshots || [];
+  check('本章恢复：恢复前自动备份',
+    chSnaps.some((s) => s.kind === 'before-restore' && s.label === '恢复本章前：改过的标题'));
+
+  const chMissing = await req('POST', `${BASE}/api/novels/${chNovelId}/restore-chapter`, { ts: chSnapTs, chapterId: 'c_missing' });
+  check('本章恢复：拒绝不存在的章节', chMissing.status === 404);
+  const chBadTs = await req('POST', `${BASE}/api/novels/${chNovelId}/restore-chapter`, { ts: 0, chapterId: ch1Id });
+  check('本章恢复：拒绝无效时间', chBadTs.status === 400);
+  const chNew = await post(`${BASE}/api/novels/${chNovelId}/chapters`, { title: '新增章', content: '新增正文。' });
+  const chOldSnap = await req('POST', `${BASE}/api/novels/${chNovelId}/restore-chapter`, { ts: chSnapTs, chapterId: chNew.chapter?.id });
+  check('本章恢复：旧版里没有的章节拒绝恢复', chOldSnap.status === 404);
+  await req('DELETE', `${BASE}/api/novels/${chNovelId}?permanent=1`);
+
   const txt = await req('GET', `${BASE}/api/novels/${id}/export?format=txt`);
   check('TXT 导出 200', txt.status === 200 && txt.buf.length > 50);
   const epub = await req('GET', `${BASE}/api/novels/${id}/export?format=epub`);

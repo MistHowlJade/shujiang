@@ -10539,7 +10539,7 @@ async function openSnapshotDiff(snap, query = '') {
   const chapterId = ch.id;
   const label = `${fmtDate(snap.ts)} · ${SNAP_KINDS[snap.kind] || '快照'}`;
   const box = showModal(`<h3>版本对比 · ${esc(ch.title || '未命名')}</h3>
-    <p class="modal-sub">当前正文 ↔ ${esc(label)}。红色是旧版里被删掉的段落，绿色是现在新增的段落；对比只读，不会改动任何内容。</p>
+    <p class="modal-sub">当前正文 ↔ ${esc(label)}。红色是旧版里被删掉的段落，绿色是现在新增的段落；对比本身不改动正文，需要时可以用下方「恢复本章正文」只恢复这一章。</p>
     <div class="diff-bar">
       <div class="diff-sum" id="diffSum"></div>
       <label class="diff-toggle" id="diffToggleWrap"><input type="checkbox" id="diffShowSame">显示未改动段落</label>
@@ -10547,6 +10547,7 @@ async function openSnapshotDiff(snap, query = '') {
     <div class="diff-list only-changes" id="diffList"><div class="diff-empty">读取备份中…</div></div>
     <div class="modal-foot">
       <button class="btn btn-text" id="diffBack">返回版本历史</button>
+      <button class="btn btn-primary" id="diffRestoreCh" hidden>${ico('rotate')}恢复本章正文</button>
       <button class="btn" id="diffClose">关闭</button>
     </div>`, (b) => {
     b.querySelector('#diffBack').onclick = () => openHistory(query);
@@ -10557,6 +10558,7 @@ async function openSnapshotDiff(snap, query = '') {
   const listEl = box.querySelector('#diffList');
   const toggleWrap = box.querySelector('#diffToggleWrap');
   const showSame = box.querySelector('#diffShowSame');
+  const restoreBtn = box.querySelector('#diffRestoreCh');
   let snapCh;
   try {
     const j = await api.get(`/api/novels/${novelId}/snapshots/${snap.ts}/chapter/${chapterId}`);
@@ -10565,6 +10567,7 @@ async function openSnapshotDiff(snap, query = '') {
   } catch (err) {
     sumEl.textContent = '';
     toggleWrap.hidden = true;
+    restoreBtn.hidden = true;
     listEl.innerHTML = `<div class="diff-empty">无法读取这个版本的本章：${esc(err.message)}</div>`;
     return;
   }
@@ -10575,13 +10578,38 @@ async function openSnapshotDiff(snap, query = '') {
   const same = ops.filter((o) => o.type === 'same').length;
   const titleChanged = (snapCh.title || '') !== (ch.title || '');
   sumEl.innerHTML = `<span class="d-add">+${added} 段</span><span class="d-del">−${removed} 段</span><span>${same} 段未变</span>`;
-  const titleNote = titleChanged ? `<div class="diff-title-note">旧版标题：${esc(snapCh.title || '未命名')}</div>` : '';
+  const titleNote = titleChanged ? `<div class="diff-title-note">旧版标题：${esc(snapCh.title || '未命名')}（恢复本章正文不会改标题）</div>` : '';
+  restoreBtn.hidden = !(added || removed);
   if (!added && !removed) {
     toggleWrap.hidden = true;
     listEl.classList.remove('only-changes');
     listEl.innerHTML = `${titleNote}<div class="diff-empty">这一章的正文与当前版本一致，没有段落改动。</div>`;
     return;
   }
+
+  restoreBtn.onclick = async () => {
+    const when = `${fmtDate(snap.ts)} · ${SNAP_KINDS[snap.kind] || '快照'}`;
+    if (!confirm(`恢复本章正文到 ${when} 的版本？\n\n只会替换「${ch.title || '未命名'}」这一章的正文；标题、写作阶段、目标、章纲、记忆、场景和批注都不会变，其他章节也不受影响。\n恢复前会先把当前版本存一份，恢复错了还能再撤回。`)) return;
+    restoreBtn.disabled = true;
+    try {
+      // 先把还没落盘的正文写进去，服务端备份的才是「恢复前」真实的样子
+      const ok = await flushSave();
+      if (!ok) throw new Error('当前还有章节没保存成功，先别恢复');
+      const j = await api.send(`/api/novels/${novelId}/restore-chapter`, { ts: snap.ts, chapterId });
+      const target = S.novel?.chapters.find((c) => c.id === chapterId);
+      if (target && j.chapter) Object.assign(target, j.chapter);
+      S.unsaved.delete(chapterId);
+      S.dirty = S.unsaved.size > 0;
+      refreshSavePill();
+      closeModal();
+      selectChapter(chapterId);
+      await loadNovels();
+      toast(`已恢复本章正文到 ${fmtDate(snap.ts)} 的版本`, 'ok');
+    } catch (err) {
+      restoreBtn.disabled = false;
+      toast(`恢复失败：${err.message || '未知错误'}`, 'err');
+    }
+  };
 
   listEl.innerHTML = `${titleNote}${ops.map((o) => `
     <div class="diff-line ${o.type}">
@@ -10598,7 +10626,7 @@ async function openHistory(presetWord = '') {
   await saveChapterNow().catch(() => {});
   const novelId = S.novel.id;
   showModal(`<h3>版本历史 · 《${esc(S.novel.title)}》</h3>
-    <p class="modal-sub">写作时每 10 分钟自动存一份；AI 替换正文、删除章节前也会自动备份。恢复前会先把当前版本存一份，所以恢复本身也能撤回。不确定改了什么时，先点「对比」看当前章与那一版的差异。</p>
+    <p class="modal-sub">写作时每 10 分钟自动存一份；AI 替换正文、删除章节前也会自动备份。恢复前会先把当前版本存一份，所以恢复本身也能撤回。不确定改了什么时，先点「对比」看当前章与那一版的差异；对比里也可以只恢复本章正文，不会动其他章节。</p>
     <div class="hist-bar">
       <button class="btn btn-primary btn-sm" id="histNow">${ico('clock')}立即备份当前版本</button>
       <span class="hist-count" id="histCount"></span>
