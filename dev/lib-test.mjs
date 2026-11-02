@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1549,6 +1549,26 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   })());
   check('写作位置：上限非法时回退默认值', mergeEditorPosition(null, 'n1', 'c1', { s: 0, e: 0, ratio: 0.3 }, { limit: 0 })?.n1?.c1?.ratio === 0.3);
   check('写作位置：默认上限是 600', EDITOR_POSITION_LIMIT === 600);
+}
+
+// ---------------------------------------------------------------
+// 作品标签：分隔符 / 去空 / 去重 / 上限
+{
+  check('标签解析：空输入返回空数组', JSON.stringify(parseNovelTags(null)) === '[]'
+    && JSON.stringify(parseNovelTags(undefined)) === '[]'
+    && JSON.stringify(parseNovelTags('')) === '[]'
+    && JSON.stringify(parseNovelTags(' ，、; ')) === '[]'
+    && JSON.stringify(parseNovelTags([])) === '[]');
+  check('标签解析：空格 / 中文逗号 / 顿号 / 中英文分号', JSON.stringify(parseNovelTags('无限流，群像、复仇; 太空； 权谋\n悬疑')) === JSON.stringify(['无限流', '群像', '复仇', '太空', '权谋', '悬疑']));
+  check('标签解析：去掉首尾空白与空项', JSON.stringify(parseNovelTags('  星际 ,, 远航，,  ')) === JSON.stringify(['星际', '远航']));
+  check('标签解析：重复标签只留第一次', JSON.stringify(parseNovelTags('权谋, 权谋，权谋')) === JSON.stringify(['权谋']));
+  check('标签解析：大小写不同也算重复', JSON.stringify(parseNovelTags('SciFi, scifi, SCIFI, 太空')) === JSON.stringify(['SciFi', '太空']));
+  check('标签解析：数组输入保持顺序并去空去重', JSON.stringify(parseNovelTags([' 群像 ', '', '群像', null, '复仇'])) === JSON.stringify(['群像', '复仇']));
+  check('标签解析：非字符串项跳过', JSON.stringify(parseNovelTags([1, true, {}, '有效'])) === JSON.stringify(['有效']));
+  check('标签解析：最多保留 20 个', (() => {
+    const tags = parseNovelTags(Array.from({ length: 30 }, (_, i) => `t${i + 1}`));
+    return NOVEL_TAG_LIMIT === 20 && tags.length === 20 && tags[0] === 't1' && tags[19] === 't20';
+  })());
 }
 
 // ---------------------------------------------------------------

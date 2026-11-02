@@ -774,12 +774,36 @@ export function mergeEditorPosition(map, novelId, chapterId, data, { now = Date.
   return out;
 }
 
+/* ---------- 作品标签：输入整理与书架搜索 ---------- */
+
+/** 一部作品最多保留多少个标签，防止输入框和书架卡片被撑爆。 */
+export const NOVEL_TAG_LIMIT = 20;
+
+/** 把标签输入整理成去重数组。
+ *  字符串支持空格、中英文逗号、顿号、分号与换行分隔；数组只做去空和去重。
+ *  重复判断忽略大小写，保留第一次出现的写法。 */
+export function parseNovelTags(value) {
+  const list = Array.isArray(value)
+    ? value
+    : String(value ?? '').split(/[\s,，、;；]+/);
+  const out = [];
+  const seen = new Set();
+  for (const raw of list) {
+    if (typeof raw !== 'string') continue;
+    const tag = raw.trim();
+    if (!tag) continue;
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+    if (out.length >= NOVEL_TAG_LIMIT) break;
+  }
+  return out;
+}
+
 /** 书架搜索文本：书名 + 类型 + 标签。 */
 export function novelSearchText(novel) {
-  const tags = Array.isArray(novel?.tags)
-    ? novel.tags
-    : (typeof novel?.tags === 'string' ? novel.tags.split(/[,，、\s]+/) : []);
-  return [novel?.title, novel?.genre, ...tags]
+  return [novel?.title, novel?.genre, ...parseNovelTags(novel?.tags)]
     .map((value) => String(value ?? ''))
     .join('\n');
 }

@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, editorPositionOf, mergeEditorPosition, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -491,6 +491,9 @@ function renderShelf() {
           ? ` · 还差 ${fmtWords(goal.left)} 字 · 按日均 ${fmtWords(est.rate)} 字算${daysPhrase(est.days)}，预计 ${datePhrase(est.date)}完稿`
           : ` · 还差 ${fmtWords(goal.left)} 字`)
       : '';
+    const tags = parseNovelTags(n.tags);
+    const tagText = tags.length > 3 ? `${tags.slice(0, 3).join(' ')} +${tags.length - 3}` : tags.join(' ');
+    const tagTitle = tags.length ? ` title="${esc(tags.join('，'))}"` : '';
     const div = document.createElement('div');
     div.className = 'book';
     div.style.setProperty('--cover', coverOf(n.title));
@@ -498,7 +501,7 @@ function renderShelf() {
       <button class="bk-del" title="移到回收站">${ico('trash')}</button>
       ${hasProgress ? `<button class="bk-read" title="继续阅读（第 ${prog.chapterNo} 章）">${ico('book-open')}</button>` : ''}
       <h3>${esc(n.title)}</h3>
-      <div class="bk-genre">${esc(n.genre || '未分类')}${(n.tags || []).length ? ' · ' + esc(n.tags.join(' ')) : ''}</div>
+      <div class="bk-genre"${tagTitle}>${esc(n.genre || '未分类')}${tagText ? ' · ' + esc(tagText) : ''}</div>
       <div class="bk-desc">${esc(n.logline || '还没有写简介')}</div>
       <div class="bk-line">
         <span>${n.chapterCount} 章 · ${fmtWords(n.words)} 字${todayOf(n.id) ? ` · <em class="bk-today">今日 ${fmtWords(todayOf(n.id))} 字</em>` : ''}</span>
@@ -822,7 +825,7 @@ function backupImportPayload(data) {
     title: typeof data.title === 'string' && data.title.trim() ? data.title.trim() : '恢复的作品',
     author: typeof data.author === 'string' ? data.author : '',
     genre: typeof data.genre === 'string' ? data.genre : '',
-    tags: Array.isArray(data.tags) ? data.tags.filter((tag) => typeof tag === 'string') : [],
+    tags: parseNovelTags(data.tags),
     meta: data.meta && typeof data.meta === 'object' && !Array.isArray(data.meta) ? data.meta : {},
     bible: data.bible && typeof data.bible === 'object' && !Array.isArray(data.bible) ? data.bible : {},
     outline: data.outline && typeof data.outline === 'object' && !Array.isArray(data.outline) ? data.outline : {},
@@ -887,6 +890,9 @@ function openNewNovelModal() {
       <label class="field-label">类型<input id="nvGenre" class="input" placeholder="玄幻 / 都市 / 悬疑…" /></label>
       <label class="field-label">作者名<input id="nvAuthor" class="input" /></label>
     </div>
+    <label class="field-label">标签<span class="field-hint">空格或逗号分隔 · 最多 ${NOVEL_TAG_LIMIT} 个</span>
+      <input id="nvTags" class="input" placeholder="无限流 群像 复仇" autocomplete="off" />
+    </label>
     <label class="field-label">一句话故事<span class="field-hint">可后补</span></label>
     <input id="nvLogline" class="input" placeholder="一个少年背着一把不能出鞘的剑，去杀他师傅。" />
     <label class="field-label">目标平台</label>
@@ -905,6 +911,7 @@ function openNewNovelModal() {
         title: box.querySelector('#nvTitle').value.trim() || '未命名作品',
         genre: box.querySelector('#nvGenre').value.trim(),
         author: box.querySelector('#nvAuthor').value.trim(),
+        tags: parseNovelTags(box.querySelector('#nvTags').value),
       });
       novel.meta.logline = box.querySelector('#nvLogline').value.trim();
       novel.meta.platform = box.querySelector('#nvPlatform').value;
@@ -7508,7 +7515,18 @@ function saveNovelPartNow() {
 
 function saveNovelPart(part, msg) {
   if (!S.novel) return;
-  pendingNovelSave = { id: S.novel.id, part, msg };
+  const id = S.novel.id;
+  // 防抖窗口里可能先后改了不同字段（标签 → 简介）。按字段合并，别让后一次把前一次覆盖掉；
+  // 同一个字段再次修改时仍以最新值为准。
+  if (pendingNovelSave?.id === id && part) {
+    pendingNovelSave = {
+      id,
+      part: { ...pendingNovelSave.part, ...part },
+      msg: msg || pendingNovelSave.msg,
+    };
+  } else {
+    pendingNovelSave = { id, part, msg };
+  }
   clearTimeout(novelSaveTimer);
   novelSaveTimer = setTimeout(saveNovelPartNow, 700);
 }
@@ -7839,7 +7857,7 @@ function renderBible() {
 /* ---- 大纲 ---- */
 function renderOutlineTab(host, n) {
   host.innerHTML = `
-    <div class="bible-block">
+    <div class="bible-block outline-basics">
       <h2>全书总纲
         <span style="flex:1"></span>
         <button class="btn btn-sm" id="aiOutline">AI 生成大纲</button>
@@ -7853,6 +7871,9 @@ function renderOutlineTab(host, n) {
         ${novelField('类型', 'genre', n, { ph: '仙侠 / 都市 / 悬疑' })}
         ${field('目标平台 / 调性', 'platform', n.meta)}
       </div>
+      <label class="field-label">标签<span class="field-hint">空格或逗号分隔 · 书架可直接搜 · 最多 ${NOVEL_TAG_LIMIT} 个</span>
+        <input class="input" id="novelTags" value="${esc(parseNovelTags(n.tags).join('，'))}" placeholder="无限流 群像 复仇" autocomplete="off" />
+      </label>
       ${field('一句话故事', 'logline', n.meta, { ph: '一个少年背着一把不能出鞘的剑，去杀他师傅。' })}
       <div class="grid2">
         ${field('作者联系方式', 'contact', n.meta, { ph: '邮箱 / QQ / 微信' })}
@@ -7868,21 +7889,31 @@ function renderOutlineTab(host, n) {
         <span class="dim small" id="outlineMsg"></span>
       </div>
     </div>
-    <div class="bible-block">
+    <div class="bible-block outline-volumes">
       <h2>分卷与章纲</h2>
       ${bibleSearchBar('outline', '搜索章纲：卷名 / 章节名 / 场景 / 事件 / 人物 / 钩子')}
       <div id="volList"></div>
     </div>`;
 
   bindFields(host, n.meta, () => saveNovelPart({ meta: n.meta }), []);
-  // 书名 / 作者 / 类型 是作品本身的字段（不在 meta 里）：改完顺手刷新顶栏
+  // 书名 / 作者 / 类型 / 标签 是作品本身的字段（不在 meta 里）：改完顺手刷新顶栏
   $$('[data-novel]', host).forEach((el) => el.addEventListener('input', () => {
     const key = el.dataset.novel;
     n[key] = el.value;
     if (key === 'title') renderTopbarActions();
-    // 三个字段一起发：saveNovelPart 是防抖的，连着改两处时后一次会把前一次吞掉
-    saveNovelPart({ title: n.title, author: n.author, genre: n.genre });
+    // 这些字段一起发：saveNovelPart 是防抖的，连着改两处时后一次会把前一次吞掉
+    saveNovelPart({ title: n.title, author: n.author, genre: n.genre, tags: parseNovelTags(n.tags) });
   }));
+  const tagsInput = host.querySelector('#novelTags');
+  tagsInput.addEventListener('input', () => {
+    n.tags = parseNovelTags(tagsInput.value);
+    saveNovelPart({ title: n.title, author: n.author, genre: n.genre, tags: n.tags });
+  });
+  // 失焦时把输入框整理成统一写法：去掉多余分隔符、重复项，只留前 20 个
+  tagsInput.addEventListener('blur', () => {
+    n.tags = parseNovelTags(n.tags);
+    tagsInput.value = n.tags.join('，');
+  });
   host.querySelector('[data-key="notes"]').addEventListener('input', () => saveNovelPart({ outline: n.outline }));
 
   const vl = $('#volList', host);
