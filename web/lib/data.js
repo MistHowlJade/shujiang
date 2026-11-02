@@ -604,6 +604,45 @@ export function filterNovelsBySearch(novels, query) {
   return (Array.isArray(novels) ? novels : []).filter((novel) => novelMatchesSearch(novel, query));
 }
 
+/** 版本快照类型：列表徽标与搜索共用。 */
+export const SNAP_KINDS = {
+  auto: '自动',
+  manual: '手动',
+  'before-delete': '删除前',
+  'before-restore': '恢复前',
+  'before-replace': '替换前',
+  'before-shrink': '大幅删减前',
+};
+
+/** 版本搜索文本：说明 + 类型（补上「快照」后缀） + 日期。
+ *  日期由调用方格式化后传入，避免这个模块依赖时间格式。 */
+export function snapshotSearchText(snapshot, dateText = '') {
+  const kind = SNAP_KINDS[snapshot?.kind] || '';
+  return [
+    snapshot?.label,
+    kind ? `${kind}快照` : '快照',
+    dateText,
+  ].map((value) => String(value ?? '')).join('\n');
+}
+
+/** 单个版本是否命中搜索：空格分隔多词按「都包含」，忽略大小写、空白与间隔符。 */
+export function snapshotMatchesSearch(snapshot, query, dateText = '') {
+  const terms = String(query || '')
+    .trim()
+    .split(/\s+/)
+    .map(normalizeMentionText)
+    .filter(Boolean);
+  if (!terms.length) return true;
+  const text = normalizeMentionText(snapshotSearchText(snapshot, dateText));
+  return terms.every((term) => text.includes(term));
+}
+
+/** 版本历史搜索：保留原顺序；dateOf 补充格式化后的日期文本。 */
+export function filterSnapshotsBySearch(snapshots, query, dateOf = () => '') {
+  return (Array.isArray(snapshots) ? snapshots : [])
+    .filter((snapshot) => snapshotMatchesSearch(snapshot, query, dateOf(snapshot)));
+}
+
 /** 章节搜索的键盘光标：在结果里走一步，越界时绕回另一端。
  *  current 为 -1 表示还没选过：向下从第一条开始，向上从最后一条开始。
  *  空结果返回 -1，调用方据此不响应方向键。 */

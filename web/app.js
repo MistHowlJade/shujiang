@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, SNAP_KINDS, filterSnapshotsBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -10412,14 +10412,6 @@ function exportBook() {
 /* ============================================================
  * 10.5 版本历史（快照 / 恢复）
  * ============================================================ */
-const SNAP_KIND = {
-  auto: '自动',
-  manual: '手动',
-  'before-delete': '删除前',
-  'before-restore': '恢复前',
-  'before-replace': '替换前',
-  'before-shrink': '大幅删减前',
-};
 
 async function snapshotNow(label) {
   if (!S.novel) return null;
@@ -10489,13 +10481,13 @@ function diffParagraphs(oldText, newText) {
   return ops;
 }
 
-async function openSnapshotDiff(snap) {
+async function openSnapshotDiff(snap, query = '') {
   const ch = currentChapter();
   if (!ch) return toast('先选择一章', 'err');
   if (!S.novel || !snap) return;
   const novelId = S.novel.id;
   const chapterId = ch.id;
-  const label = `${fmtDate(snap.ts)} · ${SNAP_KIND[snap.kind] || '快照'}`;
+  const label = `${fmtDate(snap.ts)} · ${SNAP_KINDS[snap.kind] || '快照'}`;
   const box = showModal(`<h3>版本对比 · ${esc(ch.title || '未命名')}</h3>
     <p class="modal-sub">当前正文 ↔ ${esc(label)}。红色是旧版里被删掉的段落，绿色是现在新增的段落；对比只读，不会改动任何内容。</p>
     <div class="diff-bar">
@@ -10507,7 +10499,7 @@ async function openSnapshotDiff(snap) {
       <button class="btn btn-text" id="diffBack">返回版本历史</button>
       <button class="btn" id="diffClose">关闭</button>
     </div>`, (b) => {
-    b.querySelector('#diffBack').onclick = () => openHistory();
+    b.querySelector('#diffBack').onclick = () => openHistory(query);
     b.querySelector('#diffClose').onclick = closeModal;
   }, { wide: true });
 
@@ -10551,7 +10543,7 @@ async function openSnapshotDiff(snap) {
   apply();
 }
 
-async function openHistory() {
+async function openHistory(presetWord = '') {
   if (!S.novel) return toast('先打开作品', 'err');
   await saveChapterNow().catch(() => {});
   const novelId = S.novel.id;
@@ -10561,26 +10553,57 @@ async function openHistory() {
       <button class="btn btn-primary btn-sm" id="histNow">${ico('clock')}立即备份当前版本</button>
       <span class="hist-count" id="histCount"></span>
     </div>
+    <div class="find-bar">
+      <input class="input" id="histSearch" placeholder="搜索版本说明 / 类型 / 日期" title="支持说明、类型和日期；Esc 清空" autocomplete="off" />
+      <button class="icon-btn sm" id="histSearchClear" title="清除搜索" aria-label="清除搜索" hidden><svg class="ico"><use href="#i-x" /></svg></button>
+    </div>
     <div class="hist-list" id="histList"><div class="hist-empty">读取中…</div></div>
     <div class="modal-foot"><button class="btn btn-text" id="histClose">关闭</button></div>`,
   (box) => {
     const listEl = box.querySelector('#histList');
     const countEl = box.querySelector('#histCount');
+    const qEl = box.querySelector('#histSearch');
+    const clearEl = box.querySelector('#histSearchClear');
+    let all = [];
+    if (presetWord) qEl.value = presetWord;
+    let lastQuery = qEl.value.trim();
+    clearEl.hidden = !qEl.value.trim();
     box.querySelector('#histClose').onclick = closeModal;
 
-    const render = (list) => {
-      countEl.textContent = list.length ? `已保存 ${list.length} 个版本` : '';
+    const dateText = (s) => `${fmtDate(s.ts)} ${fmtAgo(s.ts)}`;
+
+    const render = () => {
+      const q = qEl.value.trim();
+      const queryChanged = q !== lastQuery;
+      lastQuery = q;
+      // 换搜索词要回到第一条命中；同一查询的刷新（比如刚备份）保持原位。
+      const paint = (html) => {
+        const keep = listEl.scrollTop;
+        listEl.innerHTML = html;
+        listEl.scrollTop = queryChanged ? 0 : keep;
+      };
+      const list = filterSnapshotsBySearch(all, q, dateText);
+      clearEl.hidden = !q;
+      if (!all.length) {
+        countEl.textContent = '';
+        paint(`<div class="hist-empty">还没有版本记录。<br>继续写作会自动留下快照，也可以点上面的「立即备份」。</div>`);
+        return;
+      }
+      countEl.textContent = q
+        ? `找到 ${list.length} / ${all.length} 个版本`
+        : `已保存 ${all.length} 个版本`;
       if (!list.length) {
-        listEl.innerHTML = `<div class="hist-empty">还没有版本记录。<br>继续写作会自动留下快照，也可以点上面的「立即备份」。</div>`;
+        paint(`<div class="hist-empty">没有找到匹配「${esc(q)}」的版本。<br><button type="button" class="btn btn-sm" id="histNoMatchClear">清空搜索</button></div>`);
+        listEl.querySelector('#histNoMatchClear')?.addEventListener('click', () => clearSearch());
         return;
       }
       const byTs = new Map(list.map((s) => [String(s.ts), s]));
-      listEl.innerHTML = list.map((s) => `
+      paint(list.map((s) => `
         <div class="hist-row">
           <div class="hist-info">
             <div class="hist-when">
               <b>${esc(fmtAgo(s.ts))}</b>
-              <span class="hist-kind k-${esc(s.kind)}">${esc(SNAP_KIND[s.kind] || '快照')}</span>
+              <span class="hist-kind k-${esc(s.kind)}">${esc(SNAP_KINDS[s.kind] || '快照')}</span>
             </div>
             <div class="hist-meta">${s.label ? `${esc(s.label)} · ` : ''}${esc(fmtDate(s.ts))} · ${s.chapters} 章 · ${fmtWords(s.words)} 字 · ${Math.max(1, Math.round(s.size / 1024))} KB</div>
           </div>
@@ -10588,11 +10611,11 @@ async function openHistory() {
             <button class="btn btn-sm btn-text hist-diff" data-ts="${s.ts}" title="对比当前章与这一版的正文">${ico('eye')}对比</button>
             <button class="btn btn-sm hist-restore" data-ts="${s.ts}">${ico('rotate')}恢复</button>
           </div>
-        </div>`).join('');
+        </div>`).join(''));
       listEl.querySelectorAll('.hist-diff').forEach((btn) => {
         btn.onclick = () => {
           const snap = byTs.get(btn.dataset.ts);
-          if (snap) openSnapshotDiff(snap);
+          if (snap) openSnapshotDiff(snap, qEl.value.trim());
         };
       });
       listEl.querySelectorAll('.hist-restore').forEach((btn) => {
@@ -10614,14 +10637,33 @@ async function openHistory() {
       });
     };
 
+    const clearSearch = (focus = true) => {
+      qEl.value = '';
+      render();
+      if (focus) qEl.focus();
+    };
+
     const load = async () => {
       try {
         const j = await api.get(`/api/novels/${novelId}/snapshots`);
-        render(j.snapshots || []);
+        all = j.snapshots || [];
+        render();
       } catch (err) {
+        all = [];
+        countEl.textContent = '';
         listEl.innerHTML = `<div class="hist-empty">读取失败：${esc(err.message)}</div>`;
       }
     };
+
+    qEl.addEventListener('input', render);
+    qEl.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !qEl.value) return;
+      e.preventDefault();
+      e.stopPropagation();   // 只清空搜索，别把整个版本历史一起关掉
+      clearSearch();
+    });
+    clearEl.addEventListener('click', () => clearSearch());
+    qEl.focus();
 
     box.querySelector('#histNow').onclick = async (e) => {
       const btn = e.currentTarget;

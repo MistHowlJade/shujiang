@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, filterSnapshotsBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1421,6 +1421,37 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('书架搜索：多词缺一不命中', ids('科幻 权谋').length === 0, JSON.stringify(ids('科幻 权谋')));
   check('书架搜索：保持原顺序', ids('科幻').join(',') === 'n1,n3', JSON.stringify(ids('科幻')));
   check('书架搜索：空列表不报错', filterNovelsBySearch(null, 'x').length === 0 && filterNovelsBySearch([], '').length === 0);
+}
+
+// ---------------------------------------------------------------
+// 版本历史搜索：说明 / 类型 / 日期，多词取交集
+{
+  const snaps = [
+    { ts: 1, kind: 'manual', label: '开篇定稿' },
+    { ts: 2, kind: 'before-replace', label: 'AI 替换「灯塔」前' },
+    { ts: 3, kind: 'auto', label: '' },
+    { ts: 4, kind: 'before-delete', label: '删除章节前：归航' },
+    { ts: 5, kind: 'weird', label: '' },
+  ];
+  const dates = {
+    1: '2026-11-02 09:10', 2: '2026-11-02 09:20', 3: '2026-10-31 22:00',
+    4: '2026-11-01 08:00', 5: '2026-09-01 08:00',
+  };
+  const dateOf = (s) => dates[s.ts] || '';
+  const ts = (q) => filterSnapshotsBySearch(snaps, q, dateOf).map((s) => s.ts);
+
+  check('版本搜索：空查询返回全部', ts('').join(',') === '1,2,3,4,5', JSON.stringify(ts('')));
+  check('版本搜索：按说明匹配', ts('开篇').join(',') === '1', JSON.stringify(ts('开篇')));
+  check('版本搜索：按类型匹配', ts('手动').join(',') === '1', JSON.stringify(ts('手动')));
+  check('版本搜索：类型补上快照后缀', ts('自动快照').join(',') === '3', JSON.stringify(ts('自动快照')));
+  check('版本搜索：按日期匹配', ts('2026-11-02').join(',') === '1,2', JSON.stringify(ts('2026-11-02')));
+  check('版本搜索：多词跨说明和日期', ts('替换 11-02').join(',') === '2', JSON.stringify(ts('替换 11-02')));
+  check('版本搜索：多词缺一不命中', ts('手动 归航').length === 0, JSON.stringify(ts('手动 归航')));
+  check('版本搜索：忽略大小写', ts('ai').join(',') === '2', JSON.stringify(ts('ai')));
+  check('版本搜索：忽略空白与间隔符', ts('AI替换').join(',') === '2', JSON.stringify(ts('AI替换')));
+  check('版本搜索：保持原顺序', ts('快照').join(',') === '1,2,3,4,5', JSON.stringify(ts('快照')));
+  check('版本搜索：未知类型仍可搜到', ts('快照').includes(5), JSON.stringify(ts('快照')));
+  check('版本搜索：空列表不报错', filterSnapshotsBySearch(null, 'x').length === 0 && filterSnapshotsBySearch([], '').length === 0);
 }
 
 // ---------------------------------------------------------------

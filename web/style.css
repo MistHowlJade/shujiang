@@ -2094,6 +2094,7 @@ kbd {
   max-height: 46vh; overflow: auto; margin: 0 -4px; padding: 2px 4px;
 }
 .hist-empty { padding: 28px 12px; text-align: center; color: var(--text-3); font-size: 12.5px; line-height: 1.9; }
+.hist-empty .btn { margin-top: 10px; }
 .hist-row {
   display: flex; align-items: center; gap: 10px; padding: 9px 11px;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
