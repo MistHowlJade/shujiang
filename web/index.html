@@ -25,6 +25,7 @@
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
   <symbol id="i-chev-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
   <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-unfold" viewBox="0 0 24 24"><path d="m8 9 4-4 4 4"/><path d="m8 15 4 4 4-4"/></symbol>
   <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5 13.9 9l5.6 1.9-5.6 1.9L12 18.4l-1.9-5.6L4.5 11 10.1 9z"/><path d="M18.5 4v3M17 5.5h3"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 5 5L19.5 7"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
@@ -159,6 +160,7 @@
               <input id="chapterSearch" class="chapter-search-input" type="text" placeholder="搜索章节：标题 / 章号" aria-label="搜索章节标题或章号" title="搜索章节标题或章号；↑ / ↓ 选择结果，回车跳转，Esc 清空" autocomplete="off" spellcheck="false" />
               <span class="chapter-search-count" id="chapterSearchCount"></span>
               <button class="icon-btn sm chapter-search-clear" id="chapterSearchClear" title="清除搜索" aria-label="清除搜索" hidden><svg class="ico"><use href="#i-x" /></svg></button>
+              <button class="icon-btn sm vol-expand-btn" id="volExpandBtn" title="展开全部卷" aria-label="展开全部卷" hidden><svg class="ico"><use href="#i-unfold" /></svg></button>
             </div>
             <ul class="chapter-list" id="chapterList"></ul>
           </aside>

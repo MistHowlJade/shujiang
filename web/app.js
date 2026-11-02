@@ -1639,6 +1639,34 @@ function toggleVol(vid) {
   renderStudio();
 }
 
+/** 当前书里实际出现的卷分组（含未分卷 ''），用于全局展开 / 收起 */
+function volumeGroupIds() {
+  return [...new Set(effVolumeIds())];
+}
+
+/** 章节栏的全局按钮：只在「至少两个卷分组」且没有搜索 / 筛选时出现。
+ *  搜索 / 筛选会把列表压平成命中章节，这时卷折叠没有意义。 */
+function updateVolExpandButton() {
+  const btn = $('#volExpandBtn');
+  if (!btn) return;
+  const vids = S.novel && !S.stageFilter && !S.chapterSearch.trim() ? volumeGroupIds() : [];
+  const show = vids.length >= 2;
+  btn.hidden = !show;
+  if (!show) return;
+  const label = vids.every((vid) => isVolOpen(vid)) ? '收起全部卷' : '展开全部卷';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+}
+
+/** 全部展开 / 全部收起：只要还有一卷收着就全开，已经全开则全收 */
+function toggleAllVolumes() {
+  const vids = volumeGroupIds();
+  if (vids.length < 2) return;
+  const open = !vids.every((vid) => isVolOpen(vid));
+  vids.forEach((vid) => volToggled.set(vid, open));
+  renderStudio();
+}
+
 /** 建一个分卷分组容器，返回往里放章节的 <ul> */
 function volGroupEl(ul, vid, group) {
   const v = volumeById(vid);
@@ -2980,6 +3008,7 @@ function renderChapterList(n, stageLabels) {
   const ul = $('#chapterList');
   const keepScroll = ul.scrollTop;
   S.chapterCursor = '';   // 列表重建后，旧的键盘光标不一定还对得上
+  updateVolExpandButton();
   ul.innerHTML = '';
 
   const rows = buildChapterRows(n, stageLabels);
@@ -3411,6 +3440,7 @@ function renderStudio({ list = true } = {}) {
     $('#chapterSearchCount').textContent = '';
     $('#chapterSearchClear').hidden = true;
     S.chapterCursor = '';
+    updateVolExpandButton();
     $('#chStage').value = 'draft';
     $('#chStage').className = 'stage-select';
     $('#footInfo').textContent = '';
@@ -4034,6 +4064,7 @@ $('#stageFilter').addEventListener('change', () => {
   S.stageFilter = $('#stageFilter').value;
   renderStudio();
 });
+$('#volExpandBtn').addEventListener('click', toggleAllVolumes);
 // 搜索只改左侧列表，不必整块重画编辑器；长篇连续输入时更跟手
 const refreshChapterList = () => { if (S.novel) renderChapterList(S.novel); };
 const visibleChapterRows = () => (S.vl.rows || []).filter((row) => row.kind === 'chapter');
