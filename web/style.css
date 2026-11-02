@@ -796,6 +796,7 @@ kbd {
 .kb-head h3 { margin: 0; }
 .kb-sub { margin: 4px 0 0; color: var(--text-3); font-size: 11.5px; line-height: 1.6; }
 .kb-tip { flex: 0 0 auto; padding-top: 2px; color: var(--text-4); font-size: 10.5px; line-height: 1.6; }
+.kb-find-bar { margin: 0 0 10px; }
 .kb-overview { margin-bottom: 12px; }
 .kb-bar {
   display: flex; height: 6px; overflow: hidden;
@@ -841,7 +842,7 @@ kbd {
 
 /* 看板虚拟滚动 */
 .kb-list.virtual { position: relative; padding: 0; overflow: auto; }
-.kb-list.virtual > .kb-vl-spacer { display: block; pointer-events: none; }
+.kb-list.virtual > .kb-vl-spacer { display: block; flex: none; pointer-events: none; }
 .kb-list.virtual > .kb-vl-viewport { position: absolute; top: 0; left: 8px; right: 8px; }
 .kb-list.virtual > .kb-vl-viewport > .kb-card { margin-bottom: 6px; }
 

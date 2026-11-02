@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1401,6 +1401,23 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('章节搜索光标：向下越界回到第一条', stepSearchCursor(4, 1, 5) === 0, String(stepSearchCursor(4, 1, 5)));
   check('章节搜索光标：向上越界回到最后一条', stepSearchCursor(0, -1, 5) === 4, String(stepSearchCursor(0, -1, 5)));
   check('章节搜索光标：只有一条时原地不动', stepSearchCursor(0, 1, 1) === 0 && stepSearchCursor(0, -1, 1) === 0);
+}
+
+// ---------------------------------------------------------------
+// 章节看板搜索：标题 / 章号 / 卷名，多词取交集
+{
+  const ch = { title: 'Gate of Stars' };
+  const vol = '第 2 卷 · 少年游';
+  check('看板搜索：空查询命中', chapterBoardMatchesSearch(ch, 4, vol, '') && chapterBoardMatchesSearch(ch, 4, vol, '   '));
+  check('看板搜索：按标题匹配', chapterBoardMatchesSearch(ch, 4, vol, 'GATE'));
+  check('看板搜索：按章号匹配', chapterBoardMatchesSearch(ch, 4, vol, '第5章'));
+  check('看板搜索：按卷名匹配', chapterBoardMatchesSearch(ch, 4, vol, '少年游'));
+  check('看板搜索：按卷号匹配', chapterBoardMatchesSearch(ch, 4, vol, '第2卷'));
+  check('看板搜索：多词跨字段都包含', chapterBoardMatchesSearch(ch, 4, vol, 'stars 少年游'));
+  check('看板搜索：多词缺一不命中', !chapterBoardMatchesSearch(ch, 4, vol, 'stars 不存在'));
+  check('看板搜索：无匹配', !chapterBoardMatchesSearch(ch, 4, vol, '没有这个'));
+  check('看板搜索：空卷名不影响标题', chapterBoardMatchesSearch(ch, 4, '', '第5章') && !chapterBoardMatchesSearch(ch, 4, '', '少年游'));
+  check('看板搜索：空章节不报错', chapterBoardMatchesSearch(null, -1, '', '') && !chapterBoardMatchesSearch(null, -1, '', 'x'));
 }
 
 // ---------------------------------------------------------------

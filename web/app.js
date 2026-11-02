@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -2411,6 +2411,11 @@ function openChapterBoard() {
       </div>
       <span class="kb-tip">拖到其他列改状态 · 点卡片跳到章节</span>
     </div>
+    <div class="find-bar kb-find-bar">
+      <input class="input" id="kbSearch" placeholder="搜索章节名 / 章号 / 卷名" title="支持章节名、章号和卷名；Esc 清空" autocomplete="off" aria-label="搜索章节" />
+      <button class="icon-btn sm" id="kbSearchClear" title="清除搜索" aria-label="清除搜索" hidden><svg class="ico"><use href="#i-x" /></svg></button>
+      <span class="hist-count" id="kbFindCount" hidden></span>
+    </div>
     <div class="kb-overview">
       <div class="kb-bar" id="kbBar" aria-hidden="true"></div>
       <div class="kb-legend" id="kbLegend"></div>
@@ -2424,6 +2429,11 @@ function openChapterBoard() {
     const sub = box.querySelector('#kbSub');
     const bar = box.querySelector('#kbBar');
     const legend = box.querySelector('#kbLegend');
+    const searchEl = box.querySelector('#kbSearch');
+    const searchClear = box.querySelector('#kbSearchClear');
+    const findCount = box.querySelector('#kbFindCount');
+    const volIds = effVolumeIds();
+    let searchText = '';
     let dragging = false;
     let dragEndedAt = 0;
 
@@ -2433,12 +2443,12 @@ function openChapterBoard() {
       selectChapter(id);
     };
 
-    /** 构建某一列的卡片数据 */
+    /** 构建某一列的卡片数据：先按状态分列，再叠加看板搜索 */
     function buildBoardRows(stage) {
       return n.chapters
-        .map((c, i) => ({ c, i }))
-        .filter(({ c }) => stageOf(c) === stage)
-        .map(({ c, i }) => ({
+        .map((c, i) => ({ c, i, vol: volumeTitle(volIds[i] || '') }))
+        .filter(({ c, i, vol }) => stageOf(c) === stage && chapterBoardMatchesSearch(c, i, vol, searchText))
+        .map(({ c, i, vol }) => ({
           id: c.id,
           index: i,
           title: c.title || '未命名',
@@ -2447,7 +2457,7 @@ function openChapterBoard() {
           pct: progressOf(c),
           revs: openRevisionCount(c),
           memory: c.memory,
-          vol: volumeTitle(effVolumeIds()[i] || ''),
+          vol,
           isCurrent: c.id === S.chapterId,
           stage: stageOf(c),
         }));
@@ -2571,24 +2581,42 @@ function openChapterBoard() {
 
     const VIRTUAL_THRESHOLD = 80;  // 单列超过 80 张卡片启用虚拟滚动
 
-    const render = () => {
+    const render = ({ resetScroll = false } = {}) => {
       const scrolls = {};
-      $$('.kb-list', board).forEach((el) => { scrolls[el.dataset.stage] = el.scrollTop; });
-      const counts = stageCountsOf(n);
-      const totalWords = n.chapters.reduce((sum, c) => sum + wordsOf(c), 0);
-      const targeted = n.chapters.filter((c) => targetOf(c) > 0);
-      const achieved = targeted.filter((c) => wordsOf(c) >= targetOf(c)).length;
+      if (!resetScroll) $$('.kb-list', board).forEach((el) => { scrolls[el.dataset.stage] = el.scrollTop; });
+      const rowsByStage = {};
+      let matched = 0;
+      for (const stage of BOARD_STAGES) {
+        const rows = buildBoardRows(stage);
+        rowsByStage[stage] = rows;
+        matched += rows.length;
+      }
+      const counts = {
+        draft: rowsByStage.draft.length,
+        revising: rowsByStage.revising.length,
+        done: rowsByStage.done.length,
+      };
+      const matchedRows = BOARD_STAGES.flatMap((stage) => rowsByStage[stage]);
+      const totalWords = matchedRows.reduce((sum, r) => sum + r.words, 0);
+      const targeted = matchedRows.filter((r) => r.target > 0);
+      const achieved = targeted.filter((r) => r.words >= r.target).length;
       const goalNote = targeted.length ? ` · 目标 ${achieved}/${targeted.length} 章达标` : '';
-      sub.textContent = `共 ${n.chapters.length} 章 · ${fmtWords(totalWords)} 字 · 定稿 ${counts.done}/${n.chapters.length}${goalNote}`;
+      sub.textContent = searchText
+        ? (matched ? `筛选结果 · ${fmtWords(totalWords)} 字 · 定稿 ${counts.done}/${matched}${goalNote}` : '筛选结果 · 没有匹配的章节')
+        : `共 ${n.chapters.length} 章 · ${fmtWords(totalWords)} 字 · 定稿 ${counts.done}/${n.chapters.length}${goalNote}`;
+      searchClear.hidden = !searchText;
+      findCount.hidden = !searchText;
+      findCount.textContent = searchText ? `找到 ${matched} / ${n.chapters.length} 章` : '';
+      const barTotal = matched || 1;
       bar.innerHTML = BOARD_STAGES.map((stage) => {
-        const pct = (counts[stage] / n.chapters.length) * 100;
+        const pct = (counts[stage] / barTotal) * 100;
         return pct ? `<span class="kb-seg ${stage}" style="width:${pct}%"></span>` : '';
       }).join('');
       legend.innerHTML = BOARD_STAGES.map((stage) => `
         <span class="kb-legend-item"><i class="kb-dot ${stage}"></i>${STAGE_LABEL[stage]} <b>${counts[stage]}</b></span>`).join('');
 
       board.innerHTML = BOARD_STAGES.map((stage) => {
-        const rows = buildBoardRows(stage);
+        const rows = rowsByStage[stage];
         const words = rows.reduce((sum, r) => sum + r.words, 0);
         const useVirtual = rows.length >= VIRTUAL_THRESHOLD;
         if (useVirtual) {
@@ -2616,9 +2644,7 @@ function openChapterBoard() {
             <span class="kb-col-count">${rows.length}</span>
             <span class="kb-col-words">${rows.length ? `${fmtWords(words)} 字` : ''}</span>
           </div>
-          <div class="kb-list${useVirtual ? ' virtual' : ''}" data-stage="${stage}">
-            ${rows.length ? '' : `<div class="kb-empty">${BOARD_EMPTY[stage]}<br>把卡片拖到这里</div>`}
-          </div>
+          <div class="kb-list${useVirtual ? ' virtual' : ''}" data-stage="${stage}"></div>
         </section>`;
       }).join('');
 
@@ -2677,14 +2703,18 @@ function openChapterBoard() {
         } else {
           // 普通渲染模式
           listEl.classList.remove('virtual');
-          const rows = buildBoardRows(stage);
-          const words = rows.reduce((sum, r) => sum + r.words, 0);
-          const cards = rows.map((r) => makeKbCard(r));
-          listEl.innerHTML = '';
-          cards.forEach((card) => {
-            listEl.appendChild(card);
-            bindCardEvents(card);
-          });
+          const rows = rowsByStage[stage];
+          if (!rows.length) {
+            const empty = searchText ? '没有匹配的章节' : `${BOARD_EMPTY[stage]}<br>把卡片拖到这里`;
+            listEl.innerHTML = `<div class="kb-empty">${empty}</div>`;
+          } else {
+            const cards = rows.map((r) => makeKbCard(r));
+            listEl.innerHTML = '';
+            cards.forEach((card) => {
+              listEl.appendChild(card);
+              bindCardEvents(card);
+            });
+          }
         }
         if (scrolls[stage]) listEl.scrollTop = scrolls[stage];
       });
@@ -2712,7 +2742,27 @@ function openChapterBoard() {
       });
     };
 
+    const clearSearch = (focus = true) => {
+      searchEl.value = '';
+      searchText = '';
+      render({ resetScroll: true });
+      if (focus) searchEl.focus({ preventScroll: true });
+    };
+
+    searchEl.addEventListener('input', () => {
+      searchText = searchEl.value.trim();
+      render({ resetScroll: true });
+    });
+    searchEl.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !searchEl.value) return;
+      e.preventDefault();
+      e.stopPropagation();   // 只清空搜索，别把看板一起关掉
+      clearSearch();
+    });
+    searchClear.addEventListener('click', () => clearSearch());
+
     render();
+    searchEl.focus({ preventScroll: true });
     box.querySelector('#kbClose').onclick = closeModal;
   }, { wide: true });
 }

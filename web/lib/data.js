@@ -576,6 +576,27 @@ export function filterChaptersBySearch(chapters, query) {
     .filter(({ chapter, index }) => chapterMatchesSearch(chapter, index, query));
 }
 
+/** 章节看板搜索文本：章号 + 章节标题 + 卷名。看板按状态分列，这里只负责文本命中。 */
+export function chapterBoardSearchText(chapter, index = -1, volume = '') {
+  return [chapterSearchText(chapter, index), volume]
+    .flat(Infinity)
+    .map((value) => String(value ?? ''))
+    .join('\n');
+}
+
+/** 单章是否命中看板搜索：标题 / 章号 / 卷名，空格分隔多词按「都包含」。
+ *  空查询视为命中，方便与状态列叠加。 */
+export function chapterBoardMatchesSearch(chapter, index, volume, query) {
+  const terms = String(query || '')
+    .trim()
+    .split(/\s+/)
+    .map(normalizeMentionText)
+    .filter(Boolean);
+  if (!terms.length) return true;
+  const text = normalizeMentionText(chapterBoardSearchText(chapter, index, volume));
+  return terms.every((term) => text.includes(term));
+}
+
 /** 书架搜索文本：书名 + 类型 + 标签。 */
 export function novelSearchText(novel) {
   const tags = Array.isArray(novel?.tags)
