@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, editorPositionOf, mergeEditorPosition, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -16,6 +16,7 @@ import { importBibleMarkdown } from './lib/markdown.js';
 const READER_PROGRESS_KEY = 'shu.reader.progress.v1';
 const READER_SIZE_KEY = 'shu.reader.size.v1';
 const SHELF_SORT_KEY = 'shu.shelf.sort.v1';
+const EDITOR_POS_KEY = 'shu.editor.pos.v1';
 
 /* 章节字数缓存：切章 / 改状态 / 刷进度时不再反复重扫全书 */
 const wordsOf = createWordCounter();
@@ -55,6 +56,59 @@ function clearReaderProgress(novelId) {
     if (Object.keys(map).length) localStorage.setItem(READER_PROGRESS_KEY, JSON.stringify(map));
     else localStorage.removeItem(READER_PROGRESS_KEY);
   } catch {}
+}
+
+/* 写作位置：切章前把上一章的光标和滚动比例收起来，切回来再放回去 */
+const EDITOR_TRACK = { novelId: '', chapterId: '' };
+
+function editorPosMap() {
+  try {
+    const raw = localStorage.getItem(EDITOR_POS_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    return map && typeof map === 'object' && !Array.isArray(map) ? map : {};
+  } catch {
+    return {};
+  }
+}
+
+function getEditorPosition(novelId, chapterId) {
+  return editorPositionOf(editorPosMap(), novelId, chapterId);
+}
+
+/** 当前编辑器（或刚切走的那一章）的写作位置；滚动按比例存，换字号 / 窗口宽度后也不至于偏太远 */
+function rememberEditorPosition() {
+  const ta = $('#chContent');
+  if (!ta || !EDITOR_TRACK.novelId || !EDITOR_TRACK.chapterId) return;
+  const max = ta.scrollHeight - ta.clientHeight;
+  saveEditorPosition(EDITOR_TRACK.novelId, EDITOR_TRACK.chapterId, {
+    s: ta.selectionStart ?? 0,
+    e: ta.selectionEnd ?? 0,
+    ratio: max > 0 ? ta.scrollTop / max : 0,
+  });
+}
+
+function saveEditorPosition(novelId, chapterId, data) {
+  if (!novelId || !chapterId) return;
+  try {
+    const next = mergeEditorPosition(editorPosMap(), novelId, chapterId, data);
+    localStorage.setItem(EDITOR_POS_KEY, JSON.stringify(next));
+  } catch {}
+}
+
+/** 切回一章时恢复光标和滚动；没记过就回到开头，避免沿用上一章的滚动位置 */
+function restoreEditorPosition(novelId, chapterId, ta) {
+  const pos = getEditorPosition(novelId, chapterId);
+  if (!pos) {
+    ta.scrollTop = 0;
+    try { ta.setSelectionRange(0, 0); } catch { /* 忽略 */ }
+    return;
+  }
+  const len = ta.value.length;
+  const s = Math.min(pos.s, len);
+  const e = Math.min(pos.e, len);
+  try { ta.setSelectionRange(s, e); } catch { /* 忽略 */ }
+  const max = ta.scrollHeight - ta.clientHeight;
+  ta.scrollTop = max > 0 ? max * pos.ratio : 0;
 }
 
 function readerFontSize() {
@@ -3453,6 +3507,9 @@ function renderStudio({ list = true } = {}) {
   };
 
   if (!S.novel) {
+    rememberEditorPosition();
+    EDITOR_TRACK.novelId = '';
+    EDITOR_TRACK.chapterId = '';
     $('#chapterList').innerHTML = '<li class="chapter-empty">还没有打开作品<br>回「书架」选择或新建一部</li>';
     $('#chTitle').value = ''; $('#chContent').value = '';
     renderWordChip();
@@ -3512,6 +3569,10 @@ function renderStudio({ list = true } = {}) {
   else syncChapterSelection();
 
   const ch = currentChapter();
+  const nextNovelId = n.id;
+  const nextChapterId = ch?.id || '';
+  const chapterSwitched = nextNovelId !== EDITOR_TRACK.novelId || nextChapterId !== EDITOR_TRACK.chapterId;
+  if (chapterSwitched) rememberEditorPosition();
   setEmpty(!ch, '这部作品还没有章节', '新建第一章，再让右侧助手按章纲生成正文。', true);
   const stage = ch ? stageOf(ch) : 'draft';
   $('#chStage').value = stage;
@@ -3520,6 +3581,9 @@ function renderStudio({ list = true } = {}) {
   const taEl = $('#chContent');
   const nextContent = ch?.content || '';
   if (taEl.value !== nextContent) { taEl.value = nextContent; resetCounted(ch); }   // 值没变就别赋值，免得光标被弹到末尾
+  if (chapterSwitched && nextChapterId) restoreEditorPosition(nextNovelId, nextChapterId, taEl);
+  EDITOR_TRACK.novelId = nextNovelId;
+  EDITOR_TRACK.chapterId = nextChapterId;
   renderWordChip();
   histSync();
   $('#genWords').value = n.meta.targetWordsPerChapter || 3000;
@@ -3657,6 +3721,7 @@ function flushSave({ beacon = false } = {}) {
 }
 
 window.addEventListener('beforeunload', (e) => {
+  rememberEditorPosition();
   if (!S.unsaved.size && !S.saveErr) return;
   flushSave({ beacon: true });
   // 还没落盘、或上一次保存本来就失败（服务多半还没起来）→ 拦一下
@@ -3666,7 +3731,8 @@ window.addEventListener('beforeunload', (e) => {
   }
 });
 // 切标签页只是「离开视线」，页面还活着 —— 走普通 PUT，失败时仍由重试接着管
-document.addEventListener('visibilitychange', () => { if (document.hidden) flushSave().catch(() => {}); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { rememberEditorPosition(); flushSave().catch(() => {}); } });
+window.addEventListener('pagehide', rememberEditorPosition);
 
 /** 任意一章有改动（不只是当前章）都走这里：加入待存集合并排队落盘 */
 function markChapterDirty(ch) {
@@ -11148,6 +11214,8 @@ function jumpToHit(chapterId, start, len) {
     if (!ta) return;
     ta.focus();
     ta.setSelectionRange(start, Math.min(start + len, ta.value.length));
+    // 切章恢复的是上次写作位置，命中可能不在当前视野里；滚到命中处
+    ta.scrollTop = Math.max(0, editorCaretTop(ta, start) - ta.clientHeight * 0.32);
   }, 60);
 }
 
@@ -11167,6 +11235,7 @@ async function jumpToGlobalHit(novelId, chapterId, start, len) {
       if (!ta) return;
       ta.focus();
       ta.setSelectionRange(start, Math.min(start + len, ta.value.length));
+      ta.scrollTop = Math.max(0, editorCaretTop(ta, start) - ta.clientHeight * 0.32);
     }, 80);
   } catch (err) {
     toast(`打开失败：${err.message || '未知错误'}`, 'err');

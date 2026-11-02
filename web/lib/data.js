@@ -714,6 +714,66 @@ export function mergeReaderProgress(entry, data, { now = Date.now(), limit = REA
   };
 }
 
+/* ---------- 写作位置：每章的光标 / 选区与滚动比例 ---------- */
+
+/** 每部作品最多记住多少章的写作位置，避免 localStorage 无限膨胀。
+ *  和阅读进度一样留 600 章，超出时先丢最久没切回去的章节。 */
+export const EDITOR_POSITION_LIMIT = 600;
+
+/** 把一章的写作位置整理成统一结构；坏数据返回 null。
+ *  光标位置向下取整并夹到非负，选区终点不早于起点，滚动比例夹在 0–1。 */
+export function normalizeEditorPosition(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+  const num = (value, fallback = 0) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : fallback;
+  };
+  const s = num(entry.s);
+  const e = Math.max(s, num(entry.e, s));
+  const ratio = Number(entry.ratio);
+  return {
+    s,
+    e,
+    ratio: Number.isFinite(ratio) ? Math.min(1, Math.max(0, ratio)) : 0,
+    updatedAt: Number(entry.updatedAt) || 0,
+  };
+}
+
+/** 从写作位置表里取某部作品某一章的位置；没记过返回 null（和「停在开头」分开）。 */
+export function editorPositionOf(map, novelId, chapterId) {
+  if (!map || typeof map !== 'object' || Array.isArray(map) || !novelId || !chapterId) return null;
+  const own = map[String(novelId)];
+  if (!own || typeof own !== 'object' || Array.isArray(own)) return null;
+  return normalizeEditorPosition(own[String(chapterId)]);
+}
+
+/** 写入一章的写作位置，返回新的位置表（不改原对象）。
+ *  每部作品超过 limit 时按最后写入时间从旧到新淘汰，刚写入的章节永远保留。 */
+export function mergeEditorPosition(map, novelId, chapterId, data, { now = Date.now(), limit = EDITOR_POSITION_LIMIT } = {}) {
+  const base = map && typeof map === 'object' && !Array.isArray(map) ? map : {};
+  const out = { ...base };
+  if (!novelId || !chapterId) return out;
+  const novelKey = String(novelId);
+  const chapterKey = String(chapterId);
+  const rawOwn = base[novelKey];
+  const own = rawOwn && typeof rawOwn === 'object' && !Array.isArray(rawOwn) ? { ...rawOwn } : {};
+  own[chapterKey] = normalizeEditorPosition({
+    ...(data && typeof data === 'object' ? data : {}),
+    updatedAt: Number(now) || Date.now(),
+  });
+  const max = Math.max(1, Math.floor(Number(limit) || EDITOR_POSITION_LIMIT));
+  const ids = Object.keys(own);
+  if (ids.length > max) {
+    ids
+      .filter((id) => id !== chapterKey)
+      .sort((a, b) => (own[a]?.updatedAt || 0) - (own[b]?.updatedAt || 0))
+      .slice(0, ids.length - max)
+      .forEach((id) => { delete own[id]; });
+  }
+  out[novelKey] = own;
+  return out;
+}
+
 /** 书架搜索文本：书名 + 类型 + 标签。 */
 export function novelSearchText(novel) {
   const tags = Array.isArray(novel?.tags)

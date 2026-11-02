@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1510,6 +1510,45 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
     const p = mergeReaderProgress(normalizeReaderProgress({ chapterId: 'c1', chapterNo: 7, ratio: 0.1 }), { chapterId: 'c2', ratio: 0.2 });
     return p.chapterNo === 7 && p.chapterId === 'c2';
   })());
+}
+
+// ---------------------------------------------------------------
+// 写作位置：每章光标 / 选区 / 滚动比例与上限淘汰
+{
+  check('写作位置：空数据返回 null', normalizeEditorPosition(null) === null && normalizeEditorPosition([]) === null && normalizeEditorPosition('x') === null);
+  check('写作位置：光标与比例夹到合法范围', (() => {
+    const p = normalizeEditorPosition({ s: -5, e: -1, ratio: 1.4, updatedAt: 'x' });
+    return p.s === 0 && p.e === 0 && p.ratio === 1 && p.updatedAt === 0;
+  })());
+  check('写作位置：终点不早于起点，坏比例当 0', (() => {
+    const p = normalizeEditorPosition({ s: '3.9', e: 2, ratio: 'abc' });
+    return p.s === 3 && p.e === 3 && p.ratio === 0;
+  })());
+  check('写作位置：没记过的章返回 null', (() => {
+    const map = { n1: { c1: { s: 1, e: 2, ratio: 0.5 } } };
+    return editorPositionOf(map, 'n1', 'c2') === null && editorPositionOf(map, 'n2', 'c1') === null && editorPositionOf(map, 'n1', 'c1')?.ratio === 0.5;
+  })());
+  check('写作位置：坏表结构不报错', editorPositionOf({ n1: null, n2: [] }, 'n1', 'c1') === null && editorPositionOf(null, 'n1', 'c1') === null);
+
+  const map1 = mergeEditorPosition({ n2: { c9: { s: 0, e: 0, ratio: 0.1, updatedAt: 1 } } }, 'n1', 'c1', { s: 12, e: 18, ratio: 0.4 }, { now: 100 });
+  check('写作位置：写入新章并保留其他作品', map1.n1.c1.s === 12 && map1.n1.c1.e === 18 && map1.n1.c1.ratio === 0.4 && map1.n1.c1.updatedAt === 100 && map1.n2.c9.ratio === 0.1);
+  const map2 = mergeEditorPosition(map1, 'n1', 'c2', { s: 5, e: 5, ratio: 0.8 }, { now: 200 });
+  check('写作位置：同一作品保留多章', map2.n1.c1.ratio === 0.4 && map2.n1.c2.ratio === 0.8);
+  check('写作位置：写入不改原表', map1.n1.c2 === undefined && map2 !== map1);
+
+  check('写作位置：超过上限先淘汰最久没写的', (() => {
+    let map = null;
+    for (let i = 1; i <= 4; i++) map = mergeEditorPosition(map, 'n1', `c${i}`, { s: i, e: i, ratio: i / 10 }, { now: i, limit: 3 });
+    return Object.keys(map.n1).sort().join(',') === 'c2,c3,c4' && map.n1.c2.ratio === 0.2 && map.n1.c4.ratio === 0.4;
+  })());
+  check('写作位置：上限按作品分别计算', (() => {
+    let map = mergeEditorPosition(null, 'n1', 'c1', { s: 0, e: 0, ratio: 0.1 }, { now: 1, limit: 1 });
+    map = mergeEditorPosition(map, 'n2', 'c1', { s: 0, e: 0, ratio: 0.2 }, { now: 2, limit: 1 });
+    map = mergeEditorPosition(map, 'n1', 'c2', { s: 0, e: 0, ratio: 0.3 }, { now: 3, limit: 1 });
+    return Object.keys(map.n1).join(',') === 'c2' && map.n2.c1.ratio === 0.2;
+  })());
+  check('写作位置：上限非法时回退默认值', mergeEditorPosition(null, 'n1', 'c1', { s: 0, e: 0, ratio: 0.3 }, { limit: 0 })?.n1?.c1?.ratio === 0.3);
+  check('写作位置：默认上限是 600', EDITOR_POSITION_LIMIT === 600);
 }
 
 // ---------------------------------------------------------------
