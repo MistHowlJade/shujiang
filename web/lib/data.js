@@ -643,6 +643,31 @@ export function filterSnapshotsBySearch(snapshots, query, dateOf = () => '') {
     .filter((snapshot) => snapshotMatchesSearch(snapshot, query, dateOf(snapshot)));
 }
 
+/** 回收站搜索文本：书名 + 作者 + 类型 + 删除日期。
+ *  日期同样由调用方格式化，未知时间也按界面显示的文字参与搜索。 */
+export function trashSearchText(item, dateText = '') {
+  return [item?.title, item?.author, item?.genre, dateText]
+    .map((value) => String(value ?? '')).join('\n');
+}
+
+/** 单条回收站记录是否命中搜索：空格分隔多词按「都包含」，忽略大小写、空白与间隔符。 */
+export function trashMatchesSearch(item, query, dateText = '') {
+  const terms = String(query || '')
+    .trim()
+    .split(/\s+/)
+    .map(normalizeMentionText)
+    .filter(Boolean);
+  if (!terms.length) return true;
+  const text = normalizeMentionText(trashSearchText(item, dateText));
+  return terms.every((term) => text.includes(term));
+}
+
+/** 回收站搜索：保留原顺序；dateOf 补充格式化后的删除时间。 */
+export function filterTrashBySearch(items, query, dateOf = () => '') {
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => trashMatchesSearch(item, query, dateOf(item)));
+}
+
 /** 章节搜索的键盘光标：在结果里走一步，越界时绕回另一端。
  *  current 为 -1 表示还没选过：向下从第一条开始，向上从最后一条开始。
  *  空结果返回 -1，调用方据此不响应方向键。 */

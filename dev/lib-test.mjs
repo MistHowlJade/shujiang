@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, filterSnapshotsBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1452,6 +1452,35 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('版本搜索：保持原顺序', ts('快照').join(',') === '1,2,3,4,5', JSON.stringify(ts('快照')));
   check('版本搜索：未知类型仍可搜到', ts('快照').includes(5), JSON.stringify(ts('快照')));
   check('版本搜索：空列表不报错', filterSnapshotsBySearch(null, 'x').length === 0 && filterSnapshotsBySearch([], '').length === 0);
+}
+
+// ---------------------------------------------------------------
+// 回收站搜索：书名 / 作者 / 类型 / 删除日期，多词取交集
+{
+  const trash = [
+    { trashId: 't1', title: '星海孤舟', author: '林川', genre: '科幻', deletedAt: 1 },
+    { trashId: 't2', title: '雪落长安', author: '周禾', genre: '历史', deletedAt: 2 },
+    { trashId: 't3', title: 'Gate of Stars', author: 'Alex', genre: '科幻', deletedAt: 3 },
+    { trashId: 't4', title: '未命名作品', author: '', genre: '', deletedAt: 0 },
+  ];
+  const dates = {
+    1: '2026-11-02 09:00', 2: '2026-10-31 22:00', 3: '2026-11-01 08:00', 0: '未知时间',
+  };
+  const dateOf = (x) => dates[x.deletedAt] || '';
+  const ids = (q) => filterTrashBySearch(trash, q, dateOf).map((x) => x.trashId);
+
+  check('回收站搜索：空查询返回全部', ids('').join(',') === 't1,t2,t3,t4', JSON.stringify(ids('')));
+  check('回收站搜索：按书名匹配', ids('星海').join(',') === 't1', JSON.stringify(ids('星海')));
+  check('回收站搜索：按作者匹配', ids('林川').join(',') === 't1', JSON.stringify(ids('林川')));
+  check('回收站搜索：按类型匹配', ids('历史').join(',') === 't2', JSON.stringify(ids('历史')));
+  check('回收站搜索：按删除日期匹配', ids('2026-10-31').join(',') === 't2', JSON.stringify(ids('2026-10-31')));
+  check('回收站搜索：多词跨书名和作者', ids('星海 林川').join(',') === 't1', JSON.stringify(ids('星海 林川')));
+  check('回收站搜索：多词缺一不命中', ids('星海 周禾').length === 0, JSON.stringify(ids('星海 周禾')));
+  check('回收站搜索：忽略大小写', ids('GATE').join(',') === 't3', JSON.stringify(ids('GATE')));
+  check('回收站搜索：忽略空白与间隔符', ids('GateofStars').join(',') === 't3', JSON.stringify(ids('GateofStars')));
+  check('回收站搜索：未知删除时间也能搜到', ids('未知').join(',') === 't4', JSON.stringify(ids('未知')));
+  check('回收站搜索：保持原顺序', ids('2026').join(',') === 't1,t2,t3', JSON.stringify(ids('2026')));
+  check('回收站搜索：空列表不报错', filterTrashBySearch(null, 'x').length === 0 && filterTrashBySearch([], '').length === 0);
 }
 
 // ---------------------------------------------------------------

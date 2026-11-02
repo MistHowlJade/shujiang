@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, SNAP_KINDS, filterSnapshotsBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -537,6 +537,11 @@ async function refreshTrashCount() {
 function openTrash() {
   showModal(`<h3>回收站</h3>
     <p class="modal-sub">删除的作品会先放在这里；恢复后原样回到书架，版本备份也还在。彻底删除才会清理正文、设定和备份。</p>
+    <div class="find-bar">
+      <input class="input" id="trashSearch" placeholder="搜索书名 / 作者 / 类型 / 删除日期" title="支持书名、作者、类型和删除日期；Esc 清空" autocomplete="off" />
+      <button class="icon-btn sm" id="trashSearchClear" title="清除搜索" aria-label="清除搜索" hidden><svg class="ico"><use href="#i-x" /></svg></button>
+      <span class="hist-count" id="trashResultCount"></span>
+    </div>
     <div class="trash-list" id="trashList"><div class="find-empty">读取中…</div></div>
     <div class="modal-foot">
       <button class="btn btn-text trash-clear" id="trashClear" disabled>清空回收站</button>
@@ -545,32 +550,62 @@ function openTrash() {
   (box) => {
     const listEl = box.querySelector('#trashList');
     const clearBtn = box.querySelector('#trashClear');
+    const countEl = box.querySelector('#trashResultCount');
+    const qEl = box.querySelector('#trashSearch');
+    const qClear = box.querySelector('#trashSearchClear');
     let items = [];
+    let lastQuery = '';
     box.querySelector('#trashClose').onclick = closeModal;
 
+    const dateText = (item) => (item.deletedAt ? fmtDate(item.deletedAt) : '未知时间');
+
     const render = () => {
-      if (!items.length) {
-        listEl.innerHTML = `<div class="trash-empty">${ico('trash')}<b>回收站是空的</b>删除的作品会先放在这里，之后可以恢复。</div>`;
-        clearBtn.disabled = true;
-      } else {
-        clearBtn.disabled = false;
-        listEl.innerHTML = items.map((item) => {
-          const meta = [item.author, item.genre].filter(Boolean).map((v) => esc(v)).join(' · ');
-          return `<div class="trash-item">
-            <div class="trash-cover" style="--cover:${coverOf(item.title)}">${ico('book-open')}</div>
-            <div class="trash-main">
-              <b class="trash-title">《${esc(item.title)}》</b>
-              <span class="trash-meta">${meta || '未分类'} · ${item.chapterCount} 章 · ${fmtWords(item.words)} 字</span>
-              <span class="trash-meta">删除于 ${esc(item.deletedAt ? fmtDate(item.deletedAt) : '未知时间')}</span>
-            </div>
-            <div class="trash-actions">
-              <button class="btn btn-sm" data-act="restore" data-id="${esc(item.trashId)}">${ico('undo')}恢复</button>
-              <button class="btn btn-sm btn-danger-ghost" data-act="purge" data-id="${esc(item.trashId)}">${ico('trash')}彻底删除</button>
-            </div>
-          </div>`;
-        }).join('');
-      }
+      const q = qEl.value.trim();
+      const queryChanged = q !== lastQuery;
+      lastQuery = q;
+      const visible = filterTrashBySearch(items, q, dateText);
+      qClear.hidden = !q;
+      clearBtn.disabled = !items.length;
       setTrashBadge(items.length);
+      countEl.textContent = items.length
+        ? (q ? `找到 ${visible.length} / ${items.length} 部作品` : `共 ${items.length} 部作品`)
+        : '';
+      // 换搜索词回到第一条；恢复 / 彻底删除后的刷新保持原位。
+      const paint = (html) => {
+        const keep = listEl.scrollTop;
+        listEl.innerHTML = html;
+        listEl.scrollTop = queryChanged ? 0 : keep;
+      };
+      if (!items.length) {
+        paint(`<div class="trash-empty">${ico('trash')}<b>回收站是空的</b>删除的作品会先放在这里，之后可以恢复。</div>`);
+        return;
+      }
+      if (!visible.length) {
+        paint(`<div class="trash-empty">没有找到匹配「${esc(q)}」的作品。<br><button type="button" class="btn btn-sm" id="trashNoMatchClear">清空搜索</button></div>`);
+        listEl.querySelector('#trashNoMatchClear')?.addEventListener('click', () => clearSearch());
+        return;
+      }
+      paint(visible.map((item) => {
+        const meta = [item.author, item.genre].filter(Boolean).map((v) => esc(v)).join(' · ');
+        return `<div class="trash-item">
+          <div class="trash-cover" style="--cover:${coverOf(item.title)}">${ico('book-open')}</div>
+          <div class="trash-main">
+            <b class="trash-title">《${esc(item.title)}》</b>
+            <span class="trash-meta">${meta || '未分类'} · ${item.chapterCount} 章 · ${fmtWords(item.words)} 字</span>
+            <span class="trash-meta">删除于 ${esc(dateText(item))}</span>
+          </div>
+          <div class="trash-actions">
+            <button class="btn btn-sm" data-act="restore" data-id="${esc(item.trashId)}">${ico('undo')}恢复</button>
+            <button class="btn btn-sm btn-danger-ghost" data-act="purge" data-id="${esc(item.trashId)}">${ico('trash')}彻底删除</button>
+          </div>
+        </div>`;
+      }).join(''));
+    };
+
+    const clearSearch = (focus = true) => {
+      qEl.value = '';
+      render();
+      if (focus) qEl.focus();
     };
 
     const load = async () => {
@@ -579,6 +614,9 @@ function openTrash() {
         items = data.items || [];
         render();
       } catch (err) {
+        items = [];
+        countEl.textContent = '';
+        qClear.hidden = !qEl.value.trim();
         listEl.innerHTML = `<div class="find-empty">读取失败：${esc(err.message || '未知错误')}</div>`;
         clearBtn.disabled = true;
       }
@@ -620,12 +658,24 @@ function openTrash() {
       else doPurge(item, btn);
     });
 
+    qEl.addEventListener('input', render);
+    qEl.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !qEl.value) return;
+      e.preventDefault();
+      e.stopPropagation();   // 只清空搜索，别把回收站一起关掉
+      clearSearch();
+    });
+    qClear.addEventListener('click', () => clearSearch());
+    qEl.focus();
+
     clearBtn.onclick = async () => {
       if (!items.length) return;
       if (!confirm(`清空回收站？\n将彻底删除 ${items.length} 部作品及其版本备份，无法恢复。`)) return;
       clearBtn.disabled = true;
       try {
         await api.del('/api/trash');
+        qEl.value = '';
+        lastQuery = '';
         await load();
         renderShelf();
         toast('回收站已清空');

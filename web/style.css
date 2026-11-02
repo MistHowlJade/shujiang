@@ -711,6 +711,7 @@ kbd {
 .trash-clear:hover { color: #fff; background: var(--danger-solid); }
 .trash-empty { padding: 34px 16px; text-align: center; color: var(--text-3); font-size: 12.5px; line-height: 1.9; }
 .trash-empty .ico { width: 22px; height: 22px; margin-bottom: 6px; color: var(--text-4); }
+.trash-empty .btn { margin-top: 10px; }
 .trash-empty b { display: block; margin-bottom: 3px; color: var(--text-2); font-size: 13px; }
 
 /* 片段导出/导入 */
