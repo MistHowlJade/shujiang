@@ -520,8 +520,7 @@ function renderShelf() {
     div.dataset.id = n.id;
     div.style.setProperty('--cover', coverOf(n.title));
     div.innerHTML = `
-      <button class="bk-del" title="移到回收站">${ico('trash')}</button>
-      <h3>${esc(n.title)}</h3>
+      <h3><button type="button" class="bk-open" title="打开《${esc(n.title)}》">${esc(n.title)}</button></h3>
       <div class="bk-genre"><span class="bk-genre-name">${esc(n.genre || '未分类')}</span>${tagHtml}${moreHtml}</div>
       <div class="bk-desc">${esc(n.logline || '还没有写简介')}</div>
       ${hasProgress ? `<button type="button" class="bk-reading" title="${esc(readTitle)}" aria-label="${esc(readTitle)}">
@@ -537,7 +536,9 @@ function renderShelf() {
         <div class="bk-goal-bar"><i style="width:${goal.pct}%"></i></div>
         <span class="bk-goal-text">${goal.done ? '已达成目标' : `目标 ${fmtGoal(goal.target)} 字`}</span>
         <span class="bk-goal-pct">${goal.pct}%</span>
-      </div>` : ''}`;
+      </div>` : ''}
+      <button class="bk-del" title="移到回收站" aria-label="将《${esc(n.title)}》移到回收站">${ico('trash')}</button>`;
+
     div.addEventListener('click', (e) => {
       const moreBtn = e.target.closest('.bk-tag-more');
       if (moreBtn) {

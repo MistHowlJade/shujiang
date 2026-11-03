@@ -635,8 +635,16 @@ kbd {
 .book h3 {
   margin: 5px 0 0; font-size: 14.5px; font-weight: 600;
   font-family: var(--font-write); letter-spacing: .2px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.book .bk-open {
+  appearance: none; display: block; width: 100%; padding: 0; border: 0;
+  background: transparent; color: inherit; font: inherit; letter-spacing: inherit;
+  text-align: left; cursor: pointer; border-radius: var(--r-xs);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.book .bk-open:hover { color: var(--accent-hover); }
+.book .bk-open:focus-visible { outline: none; color: var(--accent-hover); box-shadow: 0 0 0 3px var(--accent-bg), 0 0 0 1px var(--accent); }
 .book .bk-genre {
   margin-top: 5px; font-size: 11px; color: var(--accent-hover);
   display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0;
@@ -692,7 +700,7 @@ kbd {
   border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-3);
   transition: all var(--dur) var(--ease);
 }
-.book:hover .bk-del { opacity: 1; }
+.book:hover .bk-del, .book .bk-del:focus-visible { opacity: 1; }
 .book .bk-del:hover { background: var(--danger-bg); color: var(--danger); }
 .book .bk-del .ico { width: 14px; height: 14px; }
 
