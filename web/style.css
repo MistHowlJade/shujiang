@@ -2894,6 +2894,9 @@ button.hm-cell:focus-visible { outline: 1px solid var(--accent); outline-offset:
 .reader-toc-dot.done { background: var(--success); }
 .reader-toc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reader-toc-words { flex: 0 0 auto; color: var(--text-4); font-size: 10px; font-variant-numeric: tabular-nums; }
+.reader-toc-read { flex: 0 0 auto; color: var(--accent-hover); font-size: 10px; font-variant-numeric: tabular-nums; }
+.reader-toc-read.done { color: var(--success); }
+.reader-toc-item.current .reader-toc-read { font-weight: 600; }
 .reader-toc-empty { padding: 30px 12px; text-align: center; color: var(--text-3); font-size: 12px; line-height: 1.9; }
 .reader-toc-empty span { color: var(--text-4); font-size: 11px; }
 

@@ -700,6 +700,15 @@ export function readerPositionOf(progress, chapterId) {
   return Number.isFinite(ratio) ? clampReaderRatio(ratio) : null;
 }
 
+/** 阅读目录里的单章标记：未读过或读到 0% 返回 null，读到 98% 以上算读完。
+ *  返回值里的 label 直接给目录显示，pct 用于标题提示。 */
+export function readerChapterRead(ratio) {
+  if (ratio === null || ratio === undefined) return null;
+  const pct = Math.round(clampReaderRatio(ratio) * 100);
+  if (pct <= 0) return null;
+  return { pct, done: pct >= 98, label: pct >= 98 ? '已读' : `${pct}%` };
+}
+
 /** 全书阅读进度：按「第几章 + 章内比例」估算，四舍五入到 0–100。
  *  章节总数未知时返回 null。阅读器滚动时直接调这个，避免反复整理整份进度。 */
 export function readerPercentOf(chapterNo, ratio, chapterCount) {

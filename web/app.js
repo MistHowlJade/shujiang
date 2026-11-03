@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, readerChapterRead, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -4683,6 +4683,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
 
   const renderToc = ({ revealCurrent = false } = {}) => {
     const groups = tocGroups();
+    const progress = getReaderProgress(S.novel.id);
     const matched = groups.reduce((sum, group) => sum + group.chapters.length, 0);
     tocCount.textContent = tocQuery ? `找到 ${matched} / ${chapters.length} 章` : `共 ${chapters.length} 章`;
     tocClear.hidden = !tocQuery;
@@ -4704,11 +4705,13 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
       const rows = open ? group.chapters.map(({ chapter, index }) => {
         const cur = chapter.id === chapters[idx]?.id;
         const stage = stageOf(chapter);
+        const read = readerChapterRead(readerPositionOf(progress, chapter.id));
         return `<button type="button" class="reader-toc-item${cur ? ' current' : ''}${chapter.id === tocCursor ? ' cursor' : ''}" role="option" aria-selected="${cur}"${cur ? ' aria-current="true"' : ''} tabindex="-1" data-id="${esc(chapter.id)}" data-i="${index}">
           <span class="reader-toc-no">${index + 1}</span>
           <i class="reader-toc-dot ${stage}" title="${STAGE_LABEL[stage]}" aria-hidden="true"></i>
           <span class="reader-toc-name" title="${esc(chapter.title || '未命名')}">${esc(chapter.title || '未命名')}</span>
           <span class="reader-toc-words">${fmtWords(wordsOf(chapter))}</span>
+          ${read ? `<span class="reader-toc-read${read.done ? ' done' : ''}" title="${read.done ? '本章已读完' : `本章读到 ${read.pct}%`}">${read.done ? '已读' : `<span class="sr-only">本章读到 </span>${read.label}`}</span>` : ''}
         </button>`;
       }).join('') : '';
       return `<div class="reader-toc-group${open ? '' : ' closed'}">

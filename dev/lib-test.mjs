@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, readerChapterRead, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1504,6 +1504,22 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
     const p = mergeReaderProgress(null, { chapterId: 'c3', chapterNo: 3, ratio: 0 }, { now: 1 });
     return readerPositionOf(p, 'c3') === 0 && readerPositionOf(p, 'c4') === null;
   })());
+
+  check('目录阅读标记：没读过或 0% 不显示', readerChapterRead(null) === null
+    && readerChapterRead(undefined) === null
+    && readerChapterRead(0) === null
+    && readerChapterRead(0.004) === null);
+  check('目录阅读标记：四舍五入到百分比', readerChapterRead(0.006)?.pct === 1
+    && readerChapterRead(0.4)?.pct === 40
+    && readerChapterRead(0.4)?.label === '40%'
+    && readerChapterRead(0.4)?.done === false);
+  check('目录阅读标记：98% 以上算读完', readerChapterRead(0.975)?.done === true
+    && readerChapterRead(0.975)?.label === '已读'
+    && readerChapterRead(1)?.pct === 100
+    && readerChapterRead(1)?.done === true);
+  check('目录阅读标记：越界比例夹取', readerChapterRead(-2) === null
+    && readerChapterRead(3)?.pct === 100
+    && readerChapterRead(3)?.label === '已读');
 
   check('阅读进度：坏 positions 不污染', (() => {
     const p = normalizeReaderProgress({
