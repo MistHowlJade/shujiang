@@ -923,6 +923,28 @@ export function sortNovels(novels, sort = 'updated', { readAt = {} } = {}) {
   }
 }
 
+/** 命令面板的「继续阅读」：只取读过且有进度的作品，按最后阅读时间倒序，最多 limit 部。 */
+export function buildContinueReadingEntries(novels, progressById, limit = 5) {
+  const max = Math.max(1, Math.floor(Number(limit) || 5));
+  const out = [];
+  for (const novel of Array.isArray(novels) ? novels : []) {
+    if (!novel?.id) continue;
+    const prog = normalizeReaderProgress(progressById?.[novel.id]);
+    if (!prog || !(prog.updatedAt > 0)) continue;
+    out.push({
+      id: String(novel.id),
+      title: String(novel.title || '未命名'),
+      chapterNo: prog.chapterNo,
+      chapterTitle: prog.chapterTitle,
+      pct: readerBookPercent(prog, novel.chapterCount),
+      readAt: prog.updatedAt,
+    });
+  }
+  return out
+    .sort((a, b) => b.readAt - a.readAt || shelfTitleCmp(a, b))
+    .slice(0, max);
+}
+
 /** 版本快照类型：列表徽标与搜索共用。 */
 export const SNAP_KINDS = {
   auto: '自动',

@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, readerBookPercent, readerChapterLabel, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1547,6 +1547,39 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
     && readerChapterLabel({ chapterId: 'c2', chapterNo: 2 }) === '第 2 章'
     && readerChapterLabel(null) === '');
   check('阅读进度：中文数字章名不重复', readerChapterLabel({ chapterId: 'c1', chapterNo: 1, chapterTitle: '  第十二章 归来  ' }) === '第十二章 归来');
+}
+
+// ---------------------------------------------------------------
+// 命令面板续读：只列读过的作品，按最近阅读排
+{
+  const novels = [
+    { id: 'a', title: '甲', chapterCount: 4 },
+    { id: 'b', title: '乙', chapterCount: 2 },
+    { id: 'c', title: '丙', chapterCount: 3 },
+    { id: 'd', title: '丁', chapterCount: 0 },
+    { id: 'e', title: '戊', chapterCount: 2 },
+  ];
+  const progress = {
+    a: { chapterId: 'ca2', chapterNo: 2, chapterTitle: '旧信', ratio: 0.5, updatedAt: 100 },
+    b: { chapterId: 'cb1', chapterNo: 1, ratio: 0.25, updatedAt: 300 },
+    c: { chapterId: 'cc3', chapterNo: 3, ratio: 1, updatedAt: 200 },
+    d: { chapterId: 'cd1', chapterNo: 1, ratio: 0.5, updatedAt: 400 },
+    e: { chapterId: 'ce1', chapterNo: 1, ratio: 0.2, updatedAt: 0 },
+  };
+  const entries = buildContinueReadingEntries(novels, progress);
+  check('命令面板续读：只列读过且有时间的作品', entries.map((x) => x.id).join(',') === 'd,b,c,a', JSON.stringify(entries.map((x) => x.id)));
+  check('命令面板续读：按最后阅读时间倒序', entries[0].id === 'd' && entries[1].id === 'b' && entries[3].id === 'a');
+  check('命令面板续读：带上章节与百分比', entries.find((x) => x.id === 'b')?.chapterNo === 1
+    && entries.find((x) => x.id === 'b')?.pct === 13
+    && entries.find((x) => x.id === 'a')?.pct === 38);
+  check('命令面板续读：章节数未知时百分比为空', entries[0].pct === null && entries[0].title === '丁');
+  check('命令面板续读：保留章节标题', entries.find((x) => x.id === 'a')?.chapterTitle === '旧信');
+  check('命令面板续读：可以限制条数，0 回落默认值', buildContinueReadingEntries(novels, progress, 2).map((x) => x.id).join(',') === 'd,b'
+    && buildContinueReadingEntries(novels, progress, 0).length === 4);
+  check('命令面板续读：空数据与坏进度不报错', buildContinueReadingEntries([], progress).length === 0
+    && buildContinueReadingEntries(novels, null).length === 0
+    && buildContinueReadingEntries(null, progress).length === 0);
+  check('命令面板续读：不改原数组顺序', novels.map((x) => x.id).join(',') === 'a,b,c,d,e');
 }
 
 // ---------------------------------------------------------------
