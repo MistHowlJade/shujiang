@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, readerBookPercent, readerChapterLabel, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1526,6 +1526,27 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
     const p = mergeReaderProgress(normalizeReaderProgress({ chapterId: 'c1', chapterNo: 7, ratio: 0.1 }), { chapterId: 'c2', ratio: 0.2 });
     return p.chapterNo === 7 && p.chapterId === 'c2';
   })());
+
+  check('阅读进度：书架百分比按章号与章内比例', readerBookPercent({ chapterId: 'c3', chapterNo: 3, ratio: 0.5 }, 10) === 25);
+  check('阅读进度：首章开头是 0%', readerBookPercent({ chapterId: 'c1', chapterNo: 1, ratio: 0 }, 4) === 0);
+  check('阅读进度：末章读完是 100%', readerBookPercent({ chapterId: 'c4', chapterNo: 4, ratio: 1 }, 4) === 100);
+  check('阅读进度：章号越界夹到首尾', readerBookPercent({ chapterId: 'c9', chapterNo: 9, ratio: 0.5 }, 2) === 75
+    && readerBookPercent({ chapterId: 'c0', chapterNo: 0, ratio: 0 }, 4) === 0);
+  check('阅读进度：坏章数或没读过返回 null', readerBookPercent(null, 4) === null
+    && readerBookPercent({}, 4) === null
+    && readerBookPercent({ chapterId: 'c1', chapterNo: 1 }, 0) === null
+    && readerBookPercent({ chapterId: 'c1', chapterNo: 1 }, -3) === null
+    && readerBookPercent({ chapterId: 'c1', chapterNo: 1 }, 'x') === null);
+  check('阅读进度：百分比四舍五入到整数', readerBookPercent({ chapterId: 'c1', chapterNo: 1, ratio: 0.5 }, 3) === 17);
+  check('阅读进度：坏比例当 0、超范围夹到 1', readerBookPercent({ chapterId: 'c2', chapterNo: 2, ratio: 'oops' }, 4) === 25
+    && readerBookPercent({ chapterId: 'c1', chapterNo: 1, ratio: 9 }, 2) === 50);
+  check('阅读进度：章节数可以传字符串', readerBookPercent({ chapterId: 'c2', chapterNo: '2', ratio: '0.25' }, '8') === 16);
+
+  check('阅读进度：提示里的章节称呼', readerChapterLabel({ chapterId: 'c2', chapterNo: 2, chapterTitle: '第 2 章 旧信' }) === '第 2 章 旧信'
+    && readerChapterLabel({ chapterId: 'c2', chapterNo: 2, chapterTitle: '旧信' }) === '第 2 章「旧信」'
+    && readerChapterLabel({ chapterId: 'c2', chapterNo: 2 }) === '第 2 章'
+    && readerChapterLabel(null) === '');
+  check('阅读进度：中文数字章名不重复', readerChapterLabel({ chapterId: 'c1', chapterNo: 1, chapterTitle: '  第十二章 归来  ' }) === '第十二章 归来');
 }
 
 // ---------------------------------------------------------------

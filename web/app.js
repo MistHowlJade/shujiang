@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, readerBookPercent, readerChapterLabel, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -510,16 +510,25 @@ function renderShelf() {
     const moreHtml = tagView.canToggle
       ? `<button type="button" class="bk-tag-more" aria-expanded="${tagView.expanded}" title="${esc(moreTitle)}">${tagView.expanded ? '收起' : `+${tagView.more}`}</button>`
       : '';
+    const readPct = hasProgress ? readerBookPercent(prog, n.chapterCount) : null;
+    const readName = hasProgress ? readerChapterLabel(prog) : '';
+    const readTitle = hasProgress
+      ? `继续阅读：${readName}${readPct === null ? '' : ` · 全书约 ${readPct}%`}${prog.updatedAt ? ` · ${fmtAgo(prog.updatedAt)}` : ''}`
+      : '';
     const div = document.createElement('div');
     div.className = 'book';
     div.dataset.id = n.id;
     div.style.setProperty('--cover', coverOf(n.title));
     div.innerHTML = `
       <button class="bk-del" title="移到回收站">${ico('trash')}</button>
-      ${hasProgress ? `<button class="bk-read" title="继续阅读（第 ${prog.chapterNo} 章）">${ico('book-open')}</button>` : ''}
       <h3>${esc(n.title)}</h3>
       <div class="bk-genre"><span class="bk-genre-name">${esc(n.genre || '未分类')}</span>${tagHtml}${moreHtml}</div>
       <div class="bk-desc">${esc(n.logline || '还没有写简介')}</div>
+      ${hasProgress ? `<button type="button" class="bk-reading" title="${esc(readTitle)}" aria-label="${esc(readTitle)}">
+        <span class="bk-reading-label">${ico('book-open')}继续阅读</span>
+        <span class="bk-reading-meta">第 ${prog.chapterNo} 章${readPct === null ? '' : ` · ${readPct}%`}</span>
+        ${readPct === null ? '' : `<span class="bk-reading-bar" aria-hidden="true"><i style="width:${readPct}%"></i></span>`}
+      </button>` : ''}
       <div class="bk-line">
         <span>${n.chapterCount} 章 · ${fmtWords(n.words)} 字${todayOf(n.id) ? ` · <em class="bk-today">今日 ${fmtWords(todayOf(n.id))} 字</em>` : ''}</span>
         <span>${esc(fmtDate(n.updatedAt).slice(5, 10))}</span>
@@ -542,11 +551,11 @@ function renderShelf() {
         toggleShelfTag(tagBtn.dataset.tag);
         return;
       }
-      if (e.target.closest('.bk-del') || e.target.closest('.bk-read')) return;
+      if (e.target.closest('.bk-del') || e.target.closest('.bk-reading')) return;
       openNovel(n.id);
     });
     if (hasProgress) {
-      div.querySelector('.bk-read').addEventListener('click', (e) => {
+      div.querySelector('.bk-reading').addEventListener('click', (e) => {
         e.stopPropagation();
         continueReading(n.id);
       });

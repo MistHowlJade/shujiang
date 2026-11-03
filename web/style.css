@@ -696,15 +696,28 @@ kbd {
 .book .bk-del:hover { background: var(--danger-bg); color: var(--danger); }
 .book .bk-del .ico { width: 14px; height: 14px; }
 
-.book .bk-read {
-  position: absolute; top: 9px; right: 41px; width: 26px; height: 26px;
-  display: grid; place-items: center; cursor: pointer; opacity: 0;
-  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--accent);
-  transition: all var(--dur) var(--ease);
+/* 书架卡片上的阅读进度：点整行直接继续阅读 */
+.book .bk-reading {
+  appearance: none; width: 100%; margin-top: 10px; padding: 7px 9px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  font-family: inherit; font-size: 10.5px; line-height: 1.5; text-align: left;
+  color: var(--text-3); cursor: pointer;
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease),
+              border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-.book:hover .bk-read { opacity: 1; }
-.book .bk-read:hover { background: var(--accent-bg); color: var(--accent-hover); }
-.book .bk-read .ico { width: 14px; height: 14px; }
+.book .bk-reading:hover { color: var(--text-1); border-color: var(--accent-line); background: var(--accent-bg); }
+.book .bk-reading:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.book .bk-reading-label { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); font-weight: 500; }
+.book .bk-reading:hover .bk-reading-label { color: var(--accent-hover); }
+.book .bk-reading .ico { width: 12px; height: 12px; color: var(--accent); }
+.book .bk-reading-meta { margin-left: auto; color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.book .bk-reading-bar {
+  flex: 0 0 100%; height: 2px; border-radius: var(--r-full);
+  background: var(--border-2); overflow: hidden;
+}
+.book .bk-reading-bar i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
 
 /* 回收站 */
 .trash-list { display: flex; flex-direction: column; gap: 8px; max-height: 48vh; overflow: auto; padding: 2px; }

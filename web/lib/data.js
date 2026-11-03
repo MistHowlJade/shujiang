@@ -700,6 +700,29 @@ export function readerPositionOf(progress, chapterId) {
   return Number.isFinite(ratio) ? clampReaderRatio(ratio) : null;
 }
 
+/** 书架卡片上的全书阅读进度：按「第几章 + 章内比例」估算，四舍五入到 0–100。
+ *  章节总数未知或进度不合法时返回 null，卡片就只显示读到第几章。 */
+export function readerBookPercent(progress, chapterCount) {
+  const total = Math.floor(Number(chapterCount));
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const prog = normalizeReaderProgress(progress);
+  if (!prog) return null;
+  const chapterNo = Math.min(total, Math.max(1, prog.chapterNo));
+  const pct = ((chapterNo - 1 + prog.ratio) / total) * 100;
+  return Math.max(0, Math.min(100, Math.round(pct)));
+}
+
+/** 书架阅读提示里的章节称呼：标题自带「第 N 章」时就不再重复一遍。 */
+export function readerChapterLabel(progress) {
+  const prog = normalizeReaderProgress(progress);
+  if (!prog) return '';
+  const title = prog.chapterTitle.trim();
+  if (!title) return `第 ${prog.chapterNo} 章`;
+  return /^第\s*[0-9一二三四五六七八九十百千万零〇两]+\s*章/.test(title)
+    ? title
+    : `第 ${prog.chapterNo} 章「${title}」`;
+}
+
 /** 写入一章的阅读位置：同时更新「继续阅读」指向的最后章节和该章自己的位置。
  *  超过 limit 时按最后阅读时间从旧到新淘汰，刚写入的章节永远保留。 */
 export function mergeReaderProgress(entry, data, { now = Date.now(), limit = READER_POSITION_LIMIT } = {}) {
