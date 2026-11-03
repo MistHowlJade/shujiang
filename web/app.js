@@ -4492,6 +4492,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
         <div class="reader-toc-head">
           <h2 id="readerTocTitle">目录</h2>
           <span class="reader-toc-count" id="readerTocCount"></span>
+          <button type="button" class="reader-toc-filter" id="readerTocHideDone" aria-pressed="false" hidden>隐藏已读</button>
           <button type="button" class="icon-btn sm" id="readerTocExpand" title="展开全部卷" aria-label="展开全部卷" hidden><svg class="ico"><use href="#i-unfold" /></svg></button>
           <button type="button" class="icon-btn sm" id="readerTocClose" title="关闭目录（Esc）" aria-label="关闭目录"><svg class="ico"><use href="#i-x" /></svg></button>
         </div>
@@ -4512,6 +4513,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
   const tocSearch = $r('#readerTocSearch');
   const tocClear = $r('#readerTocClear');
   const tocCount = $r('#readerTocCount');
+  const tocFilter = $r('#readerTocHideDone');
   const tocExpand = $r('#readerTocExpand');
   const tocList = $r('#readerTocList');
   const prev = $r('#readerPrev');
@@ -4522,6 +4524,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
   const plus = $r('#readerPlus');
   let tocOpen = false;
   let tocQuery = '';
+  let tocHideDone = false;
   let tocCursor = '';
   let tocClosed = null;       // 手动收起的卷键；null 表示还没按当前章初始化
 
@@ -4682,11 +4685,30 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
   };
 
   const renderToc = ({ revealCurrent = false } = {}) => {
-    const groups = tocGroups();
+    let groups = tocGroups();
     const progress = getReaderProgress(S.novel.id);
+    const currentId = chapters[idx]?.id;
+    const readById = new Map(chapters.map((ch) => [ch.id, readerChapterRead(readerPositionOf(progress, ch.id))]));
+    const doneCount = chapters.filter((ch) => readById.get(ch.id)?.done).length;
+    if (!doneCount) tocHideDone = false;
+    if (tocHideDone) {
+      // 当前章即使是「已读」也留着，免得打开目录找不到自己读到哪
+      groups = groups.map((group) => ({
+        ...group,
+        chapters: group.chapters.filter(({ chapter }) => chapter.id === currentId || !readById.get(chapter.id)?.done),
+      })).filter((group) => group.chapters.length);
+    }
     const matched = groups.reduce((sum, group) => sum + group.chapters.length, 0);
-    tocCount.textContent = tocQuery ? `找到 ${matched} / ${chapters.length} 章` : `共 ${chapters.length} 章`;
+    const visibleCount = tocHideDone ? matched : chapters.length;
+    tocCount.textContent = tocQuery
+      ? `找到 ${matched} / ${chapters.length} 章`
+      : tocHideDone ? `显示 ${visibleCount} / ${chapters.length} 章` : `共 ${chapters.length} 章`;
     tocClear.hidden = !tocQuery;
+    tocFilter.hidden = doneCount === 0;
+    tocFilter.setAttribute('aria-pressed', String(tocHideDone));
+    tocFilter.textContent = tocHideDone ? '显示全部' : '隐藏已读';
+    tocFilter.title = tocHideDone ? '显示全部章节' : `隐藏 ${doneCount} 章已读`;
+    tocFilter.setAttribute('aria-label', tocHideDone ? '显示全部章节' : `隐藏已读章节，共 ${doneCount} 章`);
     const canExpandAll = !tocQuery && groups.length >= 2;
     tocExpand.hidden = !canExpandAll;
     if (canExpandAll) {
@@ -4696,16 +4718,18 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
       tocExpand.setAttribute('aria-label', label);
     }
     if (!groups.length) {
-      tocList.innerHTML = '<div class="reader-toc-empty">没有匹配的章节<br><span>换个章节名、章号或卷名试试</span></div>';
+      tocList.innerHTML = tocQuery
+        ? '<div class="reader-toc-empty">没有匹配的章节<br><span>换个章节名、章号或卷名试试</span></div>'
+        : '<div class="reader-toc-empty">没有可显示的章节<br><span>点上方「显示全部」查看已读章节</span></div>';
       return;
     }
     tocList.innerHTML = groups.map((group) => {
       const key = readerTocGroupKey(group);
       const open = !tocIsClosed(group);
       const rows = open ? group.chapters.map(({ chapter, index }) => {
-        const cur = chapter.id === chapters[idx]?.id;
+        const cur = chapter.id === currentId;
         const stage = stageOf(chapter);
-        const read = readerChapterRead(readerPositionOf(progress, chapter.id));
+        const read = readById.get(chapter.id);
         return `<button type="button" class="reader-toc-item${cur ? ' current' : ''}${chapter.id === tocCursor ? ' cursor' : ''}" role="option" aria-selected="${cur}"${cur ? ' aria-current="true"' : ''} tabindex="-1" data-id="${esc(chapter.id)}" data-i="${index}">
           <span class="reader-toc-no">${index + 1}</span>
           <i class="reader-toc-dot ${stage}" title="${STAGE_LABEL[stage]}" aria-hidden="true"></i>
@@ -4831,6 +4855,12 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
   $r('#readerTocClose').addEventListener('click', () => closeToc());
   tocClear.addEventListener('click', clearTocSearch);
   tocExpand.addEventListener('click', toggleAllTocGroups);
+  tocFilter.addEventListener('click', () => {
+    const keep = tocList.scrollTop;
+    tocHideDone = !tocHideDone;
+    renderToc();
+    tocList.scrollTop = keep;
+  });
   tocMask.addEventListener('click', (e) => { if (e.target === tocMask) closeToc(); });
   tocList.addEventListener('click', (e) => {
     const head = e.target.closest('.reader-toc-vol');
