@@ -700,16 +700,22 @@ export function readerPositionOf(progress, chapterId) {
   return Number.isFinite(ratio) ? clampReaderRatio(ratio) : null;
 }
 
-/** 书架卡片上的全书阅读进度：按「第几章 + 章内比例」估算，四舍五入到 0–100。
- *  章节总数未知或进度不合法时返回 null，卡片就只显示读到第几章。 */
-export function readerBookPercent(progress, chapterCount) {
+/** 全书阅读进度：按「第几章 + 章内比例」估算，四舍五入到 0–100。
+ *  章节总数未知时返回 null。阅读器滚动时直接调这个，避免反复整理整份进度。 */
+export function readerPercentOf(chapterNo, ratio, chapterCount) {
   const total = Math.floor(Number(chapterCount));
   if (!Number.isFinite(total) || total <= 0) return null;
+  const no = Math.min(total, Math.max(1, Math.floor(Number(chapterNo)) || 1));
+  const pct = ((no - 1 + clampReaderRatio(ratio)) / total) * 100;
+  return Math.max(0, Math.min(100, Math.round(pct)));
+}
+
+/** 书架卡片上的全书阅读进度：从阅读进度里取出章号和章内比例再算。
+ *  章节总数未知或进度不合法时返回 null，卡片就只显示读到第几章。 */
+export function readerBookPercent(progress, chapterCount) {
   const prog = normalizeReaderProgress(progress);
   if (!prog) return null;
-  const chapterNo = Math.min(total, Math.max(1, prog.chapterNo));
-  const pct = ((chapterNo - 1 + prog.ratio) / total) * 100;
-  return Math.max(0, Math.min(100, Math.round(pct)));
+  return readerPercentOf(prog.chapterNo, prog.ratio, chapterCount);
 }
 
 /** 书架阅读提示里的章节称呼：标题自带「第 N 章」时就不再重复一遍。 */

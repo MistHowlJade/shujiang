@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -4459,7 +4459,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
   mask.innerHTML = `
     <header class="reader-top">
       <div class="reader-brand">${ico('book')}<span>${esc(S.novel.title)}</span></div>
-      <div class="reader-progress" id="readerProgress" title="阅读进度">
+      <div class="reader-progress" id="readerProgress" role="progressbar" aria-label="全书阅读进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" title="全书阅读进度">
         <span class="reader-progress-bar" id="readerProgressBar"></span>
       </div>
       <div class="reader-tools">
@@ -4561,12 +4561,28 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
     return maxScroll > 0 ? Math.min(1, Math.max(0, scroll.scrollTop / maxScroll)) : 0;
   };
 
+  /** 顶部进度条按全书算：章号 + 章内位置，和书架卡片 / 命令面板保持同一口径 */
   const updateProgressBar = () => {
     const progressBar = $r('#readerProgressBar');
     if (!progressBar) return;
-    const maxScroll = scroll.scrollHeight - scroll.clientHeight;
-    const pct = maxScroll > 0 ? Math.min(100, Math.max(0, (scroll.scrollTop / maxScroll) * 100)) : 0;
-    progressBar.style.width = `${pct}%`;
+    const pct = readerPercentOf(idx + 1, currentRatio(), chapters.length);
+    const shown = pct === null ? 0 : pct;
+    progressBar.style.width = `${shown}%`;
+    const wrap = $r('#readerProgress');
+    if (wrap) {
+      const label = pct === null ? '全书阅读进度' : `全书阅读进度 ${pct}%`;
+      if (wrap.title !== label) wrap.title = label;
+      if (wrap.getAttribute('aria-valuenow') !== String(shown)) wrap.setAttribute('aria-valuenow', String(shown));
+    }
+    const pos = $r('#readerPos');
+    if (pos) {
+      const text = `${idx + 1} / ${chapters.length}${pct === null ? '' : ` · ${pct}%`}`;
+      if (pos.textContent !== text) pos.textContent = text;
+      const title = pct === null
+        ? `第 ${idx + 1} / ${chapters.length} 章`
+        : `第 ${idx + 1} / ${chapters.length} 章 · 全书约 ${pct}%`;
+      if (pos.title !== title) pos.title = title;
+    }
   };
 
   const saveProgress = () => {
@@ -4598,7 +4614,6 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
     const html = paragraphHtml(ch.content);
     $r('#readerContent').innerHTML = html || '<p class="reader-empty">本章还没有正文。</p>';
     $r('#readerEnd').hidden = !html;
-    $r('#readerPos').textContent = `${idx + 1} / ${chapters.length}`;
     prev.disabled = prev2.disabled = idx <= 0;
     next.disabled = next2.disabled = idx >= chapters.length - 1;
     // 恢复该章上次的滚动位置（每章独立，不再只记住最后读的一章）
