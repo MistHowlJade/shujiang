@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -11777,10 +11777,16 @@ function cmdkSource() {
       run: () => openNovel(n.id),
     });
   });
-  (S.novel?.chapters || []).slice(0, 120).forEach((c, i) => out.push({
-    g: '章节', label: c.title || '未命名章节', icon: 'pen', hint: `第 ${i + 1} 章`,
-    run: () => { setView('studio'); selectChapter(c.id); },
-  }));
+  if (S.novel) {
+    const volumeLabels = effVolumeIds().map((id) => volumeTitle(id));
+    buildChapterPaletteEntries(S.novel.chapters, volumeLabels).forEach((entry) => {
+      const chapter = S.novel.chapters[entry.index];
+      out.push({
+        g: '章节', label: entry.label, icon: 'pen', hint: entry.hint, keywords: entry.keywords,
+        run: () => { setView('studio'); selectChapter(chapter.id); },
+      });
+    });
+  }
   return out.filter((x) => typeof x.run === 'function');
 }
 

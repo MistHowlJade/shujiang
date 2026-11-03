@@ -576,6 +576,20 @@ export function filterChaptersBySearch(chapters, query) {
     .filter(({ chapter, index }) => chapterMatchesSearch(chapter, index, query));
 }
 
+/** 命令面板的章节条目：全书所有章节都进索引，不截断。
+ *  label 用于显示和标题匹配，hint 显示章号与卷名，keywords 供搜索使用。 */
+export function buildChapterPaletteEntries(chapters, volumeLabels = []) {
+  return (Array.isArray(chapters) ? chapters : []).map((chapter, index) => {
+    const volume = String(volumeLabels?.[index] || '').trim();
+    return {
+      index,
+      label: String(chapter?.title || '').trim() || '未命名章节',
+      hint: [`第 ${index + 1} 章`, volume].filter(Boolean).join(' · '),
+      keywords: [chapterSearchText(chapter, index), volume].filter(Boolean).join('\n'),
+    };
+  });
+}
+
 /** 章节看板搜索文本：章号 + 章节标题 + 卷名。看板按状态分列，这里只负责文本命中。 */
 export function chapterBoardSearchText(chapter, index = -1, volume = '') {
   return [chapterSearchText(chapter, index), volume]

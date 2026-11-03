@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1401,6 +1401,22 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('章节搜索光标：向下越界回到第一条', stepSearchCursor(4, 1, 5) === 0, String(stepSearchCursor(4, 1, 5)));
   check('章节搜索光标：向上越界回到最后一条', stepSearchCursor(0, -1, 5) === 4, String(stepSearchCursor(0, -1, 5)));
   check('章节搜索光标：只有一条时原地不动', stepSearchCursor(0, 1, 1) === 0 && stepSearchCursor(0, -1, 1) === 0);
+}
+
+// ---------------------------------------------------------------
+// 命令面板章节索引：全书都要进，不能只索引前 120 章
+{
+  const long = Array.from({ length: 130 }, (_, i) => ({ title: `第${i + 1}节` }));
+  const entries = buildChapterPaletteEntries(long, []);
+  check('命令面板章节：全书 130 章都进索引', entries.length === 130, String(entries.length));
+  check('命令面板章节：第 130 章还在', entries[129].label === '第130节' && entries[129].hint === '第 130 章', JSON.stringify(entries[129]));
+  check('命令面板章节：保留原下标', entries[42].index === 42, String(entries[42].index));
+  check('命令面板章节：缺标题有兜底', buildChapterPaletteEntries([{}])[0].label === '未命名章节');
+  const withVol = buildChapterPaletteEntries([{ title: 'x' }, { title: 'y' }], ['', '末卷']);
+  check('命令面板章节：卷名进提示', withVol[1].hint === '第 2 章 · 末卷', withVol[1].hint);
+  check('命令面板章节：卷名进检索词', withVol[1].keywords.includes('末卷'));
+  check('命令面板章节：章号与标题都在检索词里', withVol[0].keywords.includes('第 1 章') && withVol[0].keywords.includes('x'));
+  check('命令面板章节：空列表不报错', buildChapterPaletteEntries(null, []).length === 0 && buildChapterPaletteEntries([], ['卷']).length === 0);
 }
 
 // ---------------------------------------------------------------
