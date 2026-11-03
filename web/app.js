@@ -11743,6 +11743,15 @@ document.addEventListener('keydown', (e) => {
  * 11.5 命令面板（Ctrl/⌘ + K）
  * ============================================================ */
 const cmdk = { items: [], list: [], idx: 0 };
+let cmdkPrevFocus = null;
+let cmdkStatusText = '';
+
+function setCmdkStatus(text) {
+  if (cmdkStatusText === text) return;
+  cmdkStatusText = text;
+  const el = $('#cmdkStatus');
+  if (el) el.textContent = text;
+}
 
 function cmdkSource() {
   const out = [];
@@ -11867,20 +11876,31 @@ function cmdkQuery(q) {
 
 function cmdkRender() {
   const ul = $('#cmdkList');
+  const input = $('#cmdkInput');
   if (!cmdk.list.length) {
-    ul.innerHTML = '<li class="cmdk-none">没有匹配的命令</li>';
+    ul.innerHTML = '<li class="cmdk-none" role="presentation">没有匹配的命令</li>';
+    input.removeAttribute('aria-activedescendant');
+    setCmdkStatus('没有匹配的命令');
     return;
   }
   let lastG = '';
   ul.innerHTML = cmdk.list.map((it, i) => {
-    const head = it.g !== lastG ? `<li class="cmdk-group">${esc(it.g)}</li>` : '';
+    const on = i === cmdk.idx;
+    const head = it.g !== lastG ? `<li class="cmdk-group" role="presentation">${esc(it.g)}</li>` : '';
     lastG = it.g;
-    return `${head}<li class="cmdk-item${i === cmdk.idx ? ' on' : ''}" data-i="${i}">
+    const label = `${it.g}，${it.label}${it.hint ? `，${it.hint}` : ''}`;
+    return `${head}<li class="cmdk-item${on ? ' on' : ''}" id="cmdkOpt-${i}" role="option" aria-selected="${on}" aria-label="${esc(label)}" data-i="${i}">
       ${ico(it.icon)}<span class="cmdk-label">${esc(it.label)}</span>
       ${it.hint ? `<span class="cmdk-hint">${esc(it.hint)}</span>` : ''}</li>`;
   }).join('');
   const on = ul.querySelector('.cmdk-item.on');
-  if (on) on.scrollIntoView({ block: 'nearest' });
+  if (on) {
+    on.scrollIntoView({ block: 'nearest' });
+    input.setAttribute('aria-activedescendant', on.id);
+  } else {
+    input.removeAttribute('aria-activedescendant');
+  }
+  setCmdkStatus(`${cmdk.list.length} 个结果`);
 }
 
 function cmdkMove(step) {
@@ -11896,17 +11916,37 @@ function cmdkRun(i) {
 }
 
 function openCmdk() {
+  const mask = $('#cmdkMask');
+  if (!mask.hidden) { $('#cmdkInput').focus(); return; }
+  cmdkPrevFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+    ? document.activeElement
+    : null;
   cmdk.items = cmdkSource();
   cmdk.idx = 0;
   cmdk.list = cmdkQuery('');
-  $('#cmdkMask').hidden = false;
-  $('#cmdkInput').value = '';
+  mask.hidden = false;
+  const input = $('#cmdkInput');
+  input.value = '';
+  input.setAttribute('aria-expanded', 'true');
+  cmdkStatusText = '';
   cmdkRender();
-  $('#cmdkInput').focus();
+  input.focus();
 }
-function closeCmdk() {
-  $('#cmdkMask').hidden = true;
+function closeCmdk({ restoreFocus = true } = {}) {
+  const mask = $('#cmdkMask');
+  if (mask.hidden) return;
+  mask.hidden = true;
+  const input = $('#cmdkInput');
+  input.setAttribute('aria-expanded', 'false');
+  input.removeAttribute('aria-activedescendant');
   $('#cmdkList').innerHTML = '';
+  $('#cmdkStatus').textContent = '';
+  cmdkStatusText = '';
+  const prev = cmdkPrevFocus;
+  cmdkPrevFocus = null;
+  if (restoreFocus && prev && prev.isConnected && !prev.closest('[hidden]') && prev.getClientRects().length) {
+    prev.focus({ preventScroll: true });
+  }
 }
 
 $('#cmdkInput').addEventListener('input', (e) => { cmdk.idx = 0; cmdk.list = cmdkQuery(e.target.value); cmdkRender(); });
@@ -11915,6 +11955,19 @@ $('#cmdkInput').addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowUp') { e.preventDefault(); cmdkMove(-1); }
   else if (e.key === 'Enter') { e.preventDefault(); cmdkRun(); }
   else if (e.key === 'Escape') { e.preventDefault(); closeCmdk(); }
+});
+// 焦点留在面板里：目前只有搜索框可聚焦，Tab 也不该跑到背后的编辑器
+$('#cmdkMask').addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  const focusables = $$('a[href], button, input, select, textarea, [tabindex]', $('#cmdkMask'))
+    .filter((el) => el.tabIndex >= 0 && !el.disabled && !el.hidden && el.getClientRects().length);
+  if (!focusables.length) return;
+  // 只有一个输入框时，Tab / Shift+Tab 都留在原地；也别让可滚动的结果列表截走焦点
+  if (focusables.length === 1) { e.preventDefault(); focusables[0].focus(); return; }
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 });
 $('#cmdkList').addEventListener('mousemove', (e) => {
   const li = e.target.closest('.cmdk-item');
