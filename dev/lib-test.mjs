@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1597,6 +1597,20 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('书架标签：重复词一次清掉', toggleSearchTerm('科幻 科幻 权谋', '科幻') === '权谋');
   check('书架标签：空标签不改变查询', toggleSearchTerm(' 科幻  ', '  ') === '科幻' && toggleSearchTerm('', '') === '');
   check('书架标签：普通文本查询也能叠加标签', toggleSearchTerm('雪夜', '权谋') === '雪夜 权谋');
+}
+
+// ---------------------------------------------------------------
+// 书架标签展开：默认前 3 个，点 +N 看全部
+{
+  const tags = ['星海', '权谋', 'AI', '太空歌剧', '冷门'];
+  const folded = shelfTagView(tags);
+  check('书架标签展开：收起时只显示前 3 个', folded.shown.length === 3 && folded.more === 2 && !folded.expanded, JSON.stringify(folded));
+  check('书架标签展开：收起时说明藏了哪几个', folded.hidden.join(',') === '太空歌剧,冷门', JSON.stringify(folded.hidden));
+  check('书架标签展开：展开后全部显示', (() => { const v = shelfTagView(tags, true); return v.shown.length === 5 && v.more === 0 && v.expanded; })());
+  check('书架标签展开：短标签不出现展开按钮', (() => { const v = shelfTagView(tags.slice(0, 3)); return v.shown.length === 3 && v.more === 0 && !v.canToggle; })());
+  check('书架标签展开：短标签传展开也不标记', shelfTagView(tags.slice(0, 2), true).expanded === false);
+  check('书架标签展开：可以自定义预览数量', shelfTagView(tags, false, 2).shown.length === 2 && shelfTagView(tags, false, 2).more === 3);
+  check('书架标签展开：空数据不报错', (() => { const a = shelfTagView(null); const b = shelfTagView([]); return !a.canToggle && !b.canToggle && a.shown.length === 0 && b.hidden.length === 0; })());
 }
 
 // ---------------------------------------------------------------

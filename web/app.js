@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -16,6 +16,8 @@ import { importBibleMarkdown } from './lib/markdown.js';
 const READER_PROGRESS_KEY = 'shu.reader.progress.v1';
 const READER_SIZE_KEY = 'shu.reader.size.v1';
 const SHELF_SORT_KEY = 'shu.shelf.sort.v1';
+/** 已经展开全部标签的书架卡片（作品 id）；只在本次页面会话里记，不改磁盘。 */
+const expandedShelfTags = new Set();
 const EDITOR_POS_KEY = 'shu.editor.pos.v1';
 
 /* 章节字数缓存：切章 / 改状态 / 刷进度时不再反复重扫全书 */
@@ -493,17 +495,20 @@ function renderShelf() {
       : '';
     const tags = parseNovelTags(n.tags);
     const qKeys = new Set(q ? q.split(/\s+/).map(normalizeMentionText).filter(Boolean) : []);
-    const shownTags = tags.slice(0, 3);
-    const moreTags = tags.slice(3);
-    const tagHtml = shownTags.map((tag) => {
+    const tagView = shelfTagView(tags, expandedShelfTags.has(n.id));
+    const tagHtml = tagView.shown.map((tag) => {
       const on = qKeys.has(normalizeMentionText(tag));
       return `<button type="button" class="tag bk-tag${on ? ' tag-info' : ''}" data-tag="${esc(tag)}" aria-pressed="${on}" title="${on ? '取消筛选' : '按标签筛选'}：${esc(tag)}">${esc(tag)}</button>`;
     }).join('');
-    const moreHtml = moreTags.length
-      ? `<span class="bk-tag-more" title="${esc(moreTags.join('，'))}">+${moreTags.length}</span>`
+    const moreTitle = tagView.expanded
+      ? '收起多余标签'
+      : `展开其余 ${tagView.more} 个标签：${tagView.hidden.join('，')}`;
+    const moreHtml = tagView.canToggle
+      ? `<button type="button" class="bk-tag-more" aria-expanded="${tagView.expanded}" title="${esc(moreTitle)}">${tagView.expanded ? '收起' : `+${tagView.more}`}</button>`
       : '';
     const div = document.createElement('div');
     div.className = 'book';
+    div.dataset.id = n.id;
     div.style.setProperty('--cover', coverOf(n.title));
     div.innerHTML = `
       <button class="bk-del" title="移到回收站">${ico('trash')}</button>
@@ -521,6 +526,12 @@ function renderShelf() {
         <span class="bk-goal-pct">${goal.pct}%</span>
       </div>` : ''}`;
     div.addEventListener('click', (e) => {
+      const moreBtn = e.target.closest('.bk-tag-more');
+      if (moreBtn) {
+        e.stopPropagation();
+        toggleShelfTagExpansion(n.id);
+        return;
+      }
       const tagBtn = e.target.closest('.bk-tag');
       if (tagBtn) {
         e.stopPropagation();
@@ -587,6 +598,15 @@ function toggleShelfTag(tag) {
   renderShelf();
   input.focus();
   try { input.setSelectionRange(next.length, next.length); } catch {}
+}
+
+/** 展开 / 收起卡片上的全部标签；重绘后把焦点还给同一个按钮。 */
+function toggleShelfTagExpansion(id) {
+  if (expandedShelfTags.has(id)) expandedShelfTags.delete(id);
+  else expandedShelfTags.add(id);
+  renderShelf();
+  const card = [...document.querySelectorAll('#shelfGrid .book')].find((el) => el.dataset.id === id);
+  card?.querySelector('.bk-tag-more')?.focus();
 }
 
 const renderShelfDebounced = debounce(renderShelf, 150);

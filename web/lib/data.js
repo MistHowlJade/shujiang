@@ -835,6 +835,18 @@ export function novelMatchesSearch(novel, query) {
   return terms.every((term) => text.includes(term));
 }
 
+/** 书架卡片的标签展示：默认只摆前 limit 个，展开后全部放出。
+ *  返回要渲染的 shown、被收起的 hidden、收起数量 more，以及能不能展开。 */
+export function shelfTagView(tags, expanded = false, limit = 3) {
+  const list = Array.isArray(tags) ? tags : [];
+  const cap = Math.max(0, Math.floor(Number(limit) || 0));
+  const canToggle = list.length > cap;
+  const open = Boolean(expanded && canToggle);
+  const shown = open || !canToggle ? list : list.slice(0, cap);
+  const hidden = open || !canToggle ? [] : list.slice(cap);
+  return { shown, hidden, more: hidden.length, canToggle, expanded: open };
+}
+
 /** 书架搜索：返回原顺序的命中作品。 */
 export function filterNovelsBySearch(novels, query) {
   return (Array.isArray(novels) ? novels : []).filter((novel) => novelMatchesSearch(novel, query));
