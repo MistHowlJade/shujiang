@@ -867,6 +867,7 @@ export function toggleSearchTerm(query, term) {
 /** 书架排序：键名会存进 localStorage，保持稳定，别随手改。 */
 export const SHELF_SORT_OPTIONS = [
   { key: 'updated', label: '最近更新' },
+  { key: 'read', label: '最近阅读' },
   { key: 'created', label: '最近创建' },
   { key: 'title', label: '书名' },
   { key: 'words-desc', label: '字数从多到少' },
@@ -878,10 +879,14 @@ const shelfTitleCmp = (a, b) => shelfTitleCollator.compare(String(a?.title || ''
 const shelfTimeCmp = (field) => (a, b) => (Number(b?.[field]) || 0) - (Number(a?.[field]) || 0) || shelfTitleCmp(a, b);
 const shelfWords = (n) => Number(n?.words) || 0;
 
-/** 书架排序：返回新数组，不改原数组；时间类都是新到旧，书名按拼音与数字自然序。 */
-export function sortNovels(novels, sort = 'updated') {
+/** 书架排序：返回新数组，不改原数组；时间类都是新到旧，书名按拼音与数字自然序。
+ *  readAt 是 { 作品 id: 最后阅读时间 }；没读过的按最近更新排在后面。 */
+export function sortNovels(novels, sort = 'updated', { readAt = {} } = {}) {
   const list = [...(Array.isArray(novels) ? novels : [])];
+  const readTime = (n) => Number(readAt?.[n?.id]) || 0;
   switch (sort) {
+    case 'read':
+      return list.sort((a, b) => readTime(b) - readTime(a) || shelfTimeCmp('updatedAt')(a, b));
     case 'created':
       return list.sort(shelfTimeCmp('createdAt'));
     case 'title':

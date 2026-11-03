@@ -1645,6 +1645,9 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   const ids = (key) => sortNovels(books, key).map((n) => n.id);
 
   check('书架排序：默认按最近更新', ids('updated').join(',') === 'b2,beta,alpha,b10', JSON.stringify(ids('updated')));
+  check('书架排序：最近阅读优先', sortNovels(books, 'read', { readAt: { b10: 500, beta: 600 } }).map((n) => n.id).join(',') === 'beta,b10,b2,alpha');
+  check('书架排序：没读过的按最近更新', sortNovels(books, 'read').map((n) => n.id).join(',') === ids('updated').join(','));
+  check('书架排序：坏阅读时间当没读过', sortNovels(books, 'read', { readAt: { b2: 'oops' } }).map((n) => n.id).join(',') === ids('updated').join(','));
   check('书架排序：按最近创建', ids('created').join(',') === 'b10,alpha,beta,b2', JSON.stringify(ids('created')));
   check('书架排序：书名自然序', ids('title').join(',') === 'alpha,beta,b2,b10', JSON.stringify(ids('title')));
   check('书架排序：字数从多到少', ids('words-desc').join(',') === 'b10,alpha,beta,b2', JSON.stringify(ids('words-desc')));
@@ -1656,7 +1659,7 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   ], 'title').map((n) => n.id).join(',') === 'c1,c2,c10');
   check('书架排序：空列表不报错', sortNovels(null).length === 0 && sortNovels([], 'words-asc').length === 0);
   check('书架排序：选项键值齐全',
-    SHELF_SORT_OPTIONS.map((o) => o.key).join(',') === 'updated,created,title,words-desc,words-asc'
+    SHELF_SORT_OPTIONS.map((o) => o.key).join(',') === 'updated,read,created,title,words-desc,words-asc'
       && SHELF_SORT_OPTIONS.every((o) => o.label));
 }
 

@@ -322,7 +322,7 @@ const S = {
   dirty: false,
   stats: null,
   statsAt: 0,
-  shelfSort: shelfSortPreference(),   // 书架排序：最近更新 / 最近创建 / 书名 / 字数
+  shelfSort: shelfSortPreference(),   // 书架排序：最近更新 / 最近阅读 / 最近创建 / 书名 / 字数
   unsaved: new Set(),   // 还没写进磁盘的章节 id —— 按章追踪，切章后也不会忘
   savingId: null,
   saveErr: null,
@@ -457,7 +457,11 @@ function coverOf(title) {
 function renderShelf() {
   const input = $('#shelfSearch');
   const q = (input.value || '').trim();
-  const list = sortNovels(filterNovelsBySearch(S.novels, q), S.shelfSort);
+  const storedProgress = readerProgressMap();
+  const progressById = new Map((S.novels || []).map((n) => [n.id, normalizeReaderProgress(storedProgress[n.id])]));
+  const readAt = {};
+  progressById.forEach((prog, id) => { if (prog?.updatedAt > 0) readAt[id] = prog.updatedAt; });
+  const list = sortNovels(filterNovelsBySearch(S.novels, q), S.shelfSort, { readAt });
   const sortOption = SHELF_SORT_OPTIONS.find((option) => option.key === S.shelfSort) || SHELF_SORT_OPTIONS[0];
   const sortBtn = $('#shelfSortBtn');
   if (sortBtn) {
@@ -482,7 +486,7 @@ function renderShelf() {
   $('#shelfEmpty').hidden = S.novels.length > 0;
 
   for (const n of list) {
-    const prog = getReaderProgress(n.id);
+    const prog = progressById.get(n.id);
     const hasProgress = !!prog;
     const goal = bookGoalOf(n);
     const est = finishEstimate(goal, S.stats);
