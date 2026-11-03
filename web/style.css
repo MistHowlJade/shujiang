@@ -637,7 +637,24 @@ kbd {
   font-family: var(--font-write); letter-spacing: .2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.book .bk-genre { margin-top: 5px; font-size: 11px; color: var(--accent-hover); }
+.book .bk-genre {
+  margin-top: 5px; font-size: 11px; color: var(--accent-hover);
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0;
+}
+.book .bk-genre-name { flex: 0 0 auto; }
+.book .bk-tag {
+  appearance: none; font-family: inherit; line-height: 1.5; cursor: pointer;
+  max-width: 88px; padding: 0 6px; font-size: 10px;
+  background: transparent; color: var(--text-3); border-color: var(--border);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease),
+              border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.book .bk-tag:hover { color: var(--text-1); border-color: var(--border-2); background: var(--surface-3); }
+.book .bk-tag:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.book .bk-tag.tag-info { color: var(--accent-hover); border-color: var(--accent-line); background: var(--accent-bg); }
+.book .bk-tag.tag-info:hover { color: var(--accent-hover); border-color: var(--accent); }
+.book .bk-tag-more { flex: 0 0 auto; font-size: 10px; color: var(--text-3); }
 .book .bk-desc {
   margin-top: 10px; min-height: 37px; font-size: 12px; line-height: 1.6; color: var(--text-3);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -2368,8 +2385,9 @@ body.sprint-open .toast-wrap { bottom: 302px; }
 .cmdk-item .ico { width: 15px; height: 15px; color: var(--text-3); }
 .cmdk-item .cmdk-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cmdk-item .cmdk-hint {
-  flex: 0 0 auto; font-size: 11px; color: var(--text-3);
+  flex: 0 0 auto; max-width: 52%; font-size: 11px; color: var(--text-3);
   font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .cmdk-item.on { background: var(--accent-bg); color: var(--text-1); }
 .cmdk-item.on .ico { color: var(--accent-hover); }

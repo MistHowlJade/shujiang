@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1569,6 +1569,18 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
     const tags = parseNovelTags(Array.from({ length: 30 }, (_, i) => `t${i + 1}`));
     return NOVEL_TAG_LIMIT === 20 && tags.length === 20 && tags[0] === 't1' && tags[19] === 't20';
   })());
+}
+
+// ---------------------------------------------------------------
+// 书架标签筛选：点击切换搜索词
+{
+  check('书架标签：空查询点击标签直接筛选', toggleSearchTerm('', '科幻') === '科幻');
+  check('书架标签：点击标签追加到多词查询', toggleSearchTerm('星海 太空', '权谋') === '星海 太空 权谋');
+  check('书架标签：再次点击移除并保留其他词', toggleSearchTerm('星海 权谋 太空', '权谋') === '星海 太空');
+  check('书架标签：忽略大小写与首尾空白', toggleSearchTerm('  AI  ', ' ai ') === '' && toggleSearchTerm('星海 AI', ' ai ') === '星海');
+  check('书架标签：重复词一次清掉', toggleSearchTerm('科幻 科幻 权谋', '科幻') === '权谋');
+  check('书架标签：空标签不改变查询', toggleSearchTerm(' 科幻  ', '  ') === '科幻' && toggleSearchTerm('', '') === '');
+  check('书架标签：普通文本查询也能叠加标签', toggleSearchTerm('雪夜', '权谋') === '雪夜 权谋');
 }
 
 // ---------------------------------------------------------------

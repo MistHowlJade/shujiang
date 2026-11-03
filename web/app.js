@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -492,8 +492,16 @@ function renderShelf() {
           : ` · 还差 ${fmtWords(goal.left)} 字`)
       : '';
     const tags = parseNovelTags(n.tags);
-    const tagText = tags.length > 3 ? `${tags.slice(0, 3).join(' ')} +${tags.length - 3}` : tags.join(' ');
-    const tagTitle = tags.length ? ` title="${esc(tags.join('，'))}"` : '';
+    const qKeys = new Set(q ? q.split(/\s+/).map(normalizeMentionText).filter(Boolean) : []);
+    const shownTags = tags.slice(0, 3);
+    const moreTags = tags.slice(3);
+    const tagHtml = shownTags.map((tag) => {
+      const on = qKeys.has(normalizeMentionText(tag));
+      return `<button type="button" class="tag bk-tag${on ? ' tag-info' : ''}" data-tag="${esc(tag)}" aria-pressed="${on}" title="${on ? '取消筛选' : '按标签筛选'}：${esc(tag)}">${esc(tag)}</button>`;
+    }).join('');
+    const moreHtml = moreTags.length
+      ? `<span class="bk-tag-more" title="${esc(moreTags.join('，'))}">+${moreTags.length}</span>`
+      : '';
     const div = document.createElement('div');
     div.className = 'book';
     div.style.setProperty('--cover', coverOf(n.title));
@@ -501,7 +509,7 @@ function renderShelf() {
       <button class="bk-del" title="移到回收站">${ico('trash')}</button>
       ${hasProgress ? `<button class="bk-read" title="继续阅读（第 ${prog.chapterNo} 章）">${ico('book-open')}</button>` : ''}
       <h3>${esc(n.title)}</h3>
-      <div class="bk-genre"${tagTitle}>${esc(n.genre || '未分类')}${tagText ? ' · ' + esc(tagText) : ''}</div>
+      <div class="bk-genre"><span class="bk-genre-name">${esc(n.genre || '未分类')}</span>${tagHtml}${moreHtml}</div>
       <div class="bk-desc">${esc(n.logline || '还没有写简介')}</div>
       <div class="bk-line">
         <span>${n.chapterCount} 章 · ${fmtWords(n.words)} 字${todayOf(n.id) ? ` · <em class="bk-today">今日 ${fmtWords(todayOf(n.id))} 字</em>` : ''}</span>
@@ -513,6 +521,12 @@ function renderShelf() {
         <span class="bk-goal-pct">${goal.pct}%</span>
       </div>` : ''}`;
     div.addEventListener('click', (e) => {
+      const tagBtn = e.target.closest('.bk-tag');
+      if (tagBtn) {
+        e.stopPropagation();
+        toggleShelfTag(tagBtn.dataset.tag);
+        return;
+      }
       if (e.target.closest('.bk-del') || e.target.closest('.bk-read')) return;
       openNovel(n.id);
     });
@@ -562,6 +576,17 @@ function clearShelfSearch(focus = true) {
   $('#shelfSearchClear').hidden = true;
   renderShelf();
   if (focus) input.focus();
+}
+
+/** 点击卡片上的标签：把该标签加进搜索框，已有则移除。 */
+function toggleShelfTag(tag) {
+  const input = $('#shelfSearch');
+  const next = toggleSearchTerm(input.value, tag);
+  input.value = next;
+  $('#shelfSearchClear').hidden = !next;
+  renderShelf();
+  input.focus();
+  try { input.setSelectionRange(next.length, next.length); } catch {}
 }
 
 const renderShelfDebounced = debounce(renderShelf, 150);
@@ -11739,10 +11764,19 @@ function cmdkSource() {
   go('设定库', 'layers', 'bible');
   go('设置', 'settings', 'settings');
 
-  (S.novels || []).forEach((n) => out.push({
-    g: '作品', label: n.title, icon: 'book', hint: `${n.chapterCount} 章`,
-    run: () => openNovel(n.id),
-  }));
+  (S.novels || []).forEach((n) => {
+    const tags = parseNovelTags(n.tags);
+    const hint = [
+      `${n.chapterCount} 章`,
+      n.genre || '',
+      tags.length ? tags.slice(0, 2).join(' / ') + (tags.length > 2 ? ` +${tags.length - 2}` : '') : '',
+    ].filter(Boolean).join(' · ');
+    out.push({
+      g: '作品', label: n.title, icon: 'book', hint,
+      keywords: novelSearchText(n),
+      run: () => openNovel(n.id),
+    });
+  });
   (S.novel?.chapters || []).slice(0, 120).forEach((c, i) => out.push({
     g: '章节', label: c.title || '未命名章节', icon: 'pen', hint: `第 ${i + 1} 章`,
     run: () => { setView('studio'); selectChapter(c.id); },
@@ -11751,15 +11785,18 @@ function cmdkSource() {
 }
 
 function cmdkQuery(q) {
-  q = String(q || '').trim().toLowerCase();
-  if (!q) return cmdk.items.slice(0, 40);
+  const raw = String(q || '').trim();
+  if (!raw) return cmdk.items.slice(0, 40);
+  const needle = raw.toLowerCase();
+  const terms = raw.split(/\s+/).map(normalizeMentionText).filter(Boolean);
   const hit = [];
   cmdk.items.forEach((it) => {
     const l = it.label.toLowerCase();
     let s = -1;
-    if (l.startsWith(q)) s = 0;
-    else if (l.includes(q)) s = 1;
-    else if (`${it.g} ${it.hint || ''}`.toLowerCase().includes(q)) s = 2;
+    if (l.startsWith(needle)) s = 0;
+    else if (l.includes(needle)) s = 1;
+    else if (`${it.g} ${it.hint || ''}`.toLowerCase().includes(needle)) s = 2;
+    else if (terms.length && terms.every((term) => normalizeMentionText(it.keywords || '').includes(term))) s = 3;
     if (s >= 0) hit.push({ it, s });
   });
   return hit.sort((a, b) => a.s - b.s).slice(0, 40).map((x) => x.it);

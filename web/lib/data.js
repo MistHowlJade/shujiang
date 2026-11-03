@@ -826,6 +826,18 @@ export function filterNovelsBySearch(novels, query) {
   return (Array.isArray(novels) ? novels : []).filter((novel) => novelMatchesSearch(novel, query));
 }
 
+/** 点击书架标签时切换搜索词：查询里没有就追加，已有就移除（重复项一次清掉）。
+ *  比较时沿用搜索的归一化规则，大小写和空白不同也视为同一个词。 */
+export function toggleSearchTerm(query, term) {
+  const clean = String(term ?? '').trim();
+  const terms = String(query ?? '').trim().split(/\s+/).filter(Boolean);
+  const key = normalizeMentionText(clean);
+  if (!clean || !key) return terms.join(' ');
+  const kept = terms.filter((value) => normalizeMentionText(value) !== key);
+  if (kept.length === terms.length) kept.push(clean);
+  return kept.join(' ');
+}
+
 /** 书架排序：键名会存进 localStorage，保持稳定，别随手改。 */
 export const SHELF_SORT_OPTIONS = [
   { key: 'updated', label: '最近更新' },
