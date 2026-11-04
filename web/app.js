@@ -985,6 +985,924 @@ function openNewNovelModal() {
 $('#newNovelBtn').addEventListener('click', openNewNovelModal);
 $('#emptyNewBtn').addEventListener('click', openNewNovelModal);
 
+/* ============================================================
+ * 4.5 一键开书：一句话 → 书名 / 人物 / 大纲 / 第一章
+ * ============================================================
+ * 只做「从零到能写」这一段：不替作者改稿，也不替作者定稿。
+ * 每一步都把结果直接写进作品文件，中途停止 / 某一步失败时，
+ * 已经生成的内容仍然留在书架里。
+ */
+const QUICK_START_STEPS = [
+  { key: 'create', label: '建好作品', hint: '先搭一本书的骨架' },
+  { key: 'title', label: '起书名', hint: '从想法里挑一个记得住的名字' },
+  { key: 'characters', label: '设计人物', hint: '主角、对手和关键配角' },
+  { key: 'outline', label: '铺全书大纲', hint: '分卷与章纲，后面写作都靠它' },
+  { key: 'chapter', label: '建好第一章', hint: '把第一章的章纲挂上' },
+  { key: 'prose', label: '写第一章正文', hint: '一份能读、能改的初稿' },
+];
+
+const QUICK_START_SCALES = [
+  { key: 'small', title: '先试 3 章', desc: '1 卷 · 先看合不合口味', volumes: 1, perVolume: 3 },
+  { key: 'medium', title: '推荐 16 章', desc: '2 卷 · 每卷 8 章', volumes: 2, perVolume: 8 },
+  { key: 'large', title: '更完整 24 章', desc: '3 卷 · 每卷 8 章', volumes: 3, perVolume: 8 },
+];
+
+/** 服务商是否已经有密钥（页面拿到的 apiKey 永远是空的，只能看 apiKeySet） */
+function providerHasKey(provider) {
+  return !!provider && (provider.apiKeySet || !!String(provider.apiKey || '').trim());
+}
+
+/**
+ * 找出当前真正能用的服务商和模型；缺一个都先去补，别让请求发出去才报错。
+ * 只看「明确选过」的模型，不拿列表里第一个凑合：
+ * 列表里第一个可能是向量 / 画图模型，用它开书只会得到一堆看不懂的错误。
+ */
+function quickStartModel() {
+  const cfg = S.config || {};
+  const usable = (cfg.providers || []).filter(providerHasKey);
+  if (!usable.length) return null;
+  const model = String((cfg.roleModels && cfg.roleModels.write) || cfg.model || '').trim();
+  if (!model) return null;
+  // 哪个服务商的列表里有这个模型，就用哪个；都没有就按当前服务商 / 第一个来
+  const holder = usable.find((p) => (p.models || []).some((m) => String(m).trim() === model));
+  const provider = holder || usable.find((p) => p.id === cfg.activeProviderId) || usable[0];
+  return { providerId: provider.id, model, providerName: provider.name || provider.baseUrl || '当前服务商' };
+}
+
+/** 模型名去重，保留服务商返回的顺序 */
+function quickStartModelList(list) {
+  const seen = new Set();
+  const out = [];
+  for (const item of list || []) {
+    const name = String(item || '').trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
+function openQuickStartModal() {
+  if (!quickStartModel()) return openQuickStartSetup();
+
+  let activeRun = null;
+  showModal(`
+    <h3>一键开书</h3>
+    <p class="modal-sub">写下一句话想法，AI 会先生成书名和人物，再铺全书大纲，最后把第一章写出来。你随时可以停下来改。</p>
+    <label class="field-label">一句话想法<span class="field-hint">必填 · 越具体越好</span></label>
+    <input id="qsIdea" class="input" maxlength="200" autocomplete="off" placeholder="例如：一个少年背着一把不能出鞘的剑，去杀他师傅。" />
+    <div class="qs-ideas" id="qsIdeas">
+      <span>没想好？点一个试试</span>
+      <button type="button" data-idea="一个少年背着一把不能出鞘的剑，去杀教他剑法的师傅。">剑与师门</button>
+      <button type="button" data-idea="失业青年继承了一家只在深夜营业的旧书店，来的客人都不是活人。">深夜书店</button>
+      <button type="button" data-idea="每天醒来都会收到一封明天的自己写的信，信里预告了一场谋杀。">明天的信</button>
+    </div>
+    <p class="qs-error" id="qsError" hidden>先写一句想法，一句话就够。</p>
+    <label class="field-label">类型<span class="field-hint">可留空，让模型判断</span></label>
+    <input id="qsGenre" class="input" maxlength="24" autocomplete="off" placeholder="玄幻 / 都市 / 悬疑…" />
+    <label class="field-label">篇幅<span class="field-hint">只写第一章，其余章纲留给之后慢慢写</span></label>
+    <div class="qs-scale" id="qsScale" role="group" aria-label="开书篇幅">
+      ${QUICK_START_SCALES.map((s, i) => `<button type="button" class="qs-scale-btn${i === 1 ? ' on' : ''}" data-scale="${s.key}" aria-pressed="${i === 1}"><b>${s.title}</b><span>${s.desc}</span></button>`).join('')}
+    </div>
+    <div class="tip qs-tip">${ico('spark')}<span>会用「${esc(quickStartModel().providerName)}」的 <code>${esc(quickStartModel().model)}</code> 调用 4 次模型，通常一两分钟，费用由你的服务商结算。</span></div>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="qsCancel">取消</button>
+      <button class="btn btn-primary" id="qsStart">${ico('spark')}开始生成</button>
+    </div>`, (box) => {
+    let scaleKey = 'medium';
+    const ideaEl = box.querySelector('#qsIdea');
+    const errorEl = box.querySelector('#qsError');
+    const startBtn = box.querySelector('#qsStart');
+    ideaEl.focus();
+    ideaEl.addEventListener('input', () => { errorEl.hidden = true; });
+    ideaEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); start(); }
+    });
+    box.querySelectorAll('#qsIdeas [data-idea]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        ideaEl.value = btn.dataset.idea || '';
+        errorEl.hidden = true;
+        ideaEl.focus();
+      });
+    });
+    box.querySelectorAll('.qs-scale-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        scaleKey = btn.dataset.scale;
+        box.querySelectorAll('.qs-scale-btn').forEach((b) => {
+          const on = b === btn;
+          b.classList.toggle('on', on);
+          b.setAttribute('aria-pressed', String(on));
+        });
+      });
+    });
+    box.querySelector('#qsCancel').onclick = closeModal;
+
+    const start = () => {
+      const idea = ideaEl.value.trim();
+      if (!idea) {
+        errorEl.hidden = false;
+        ideaEl.focus();
+        return;
+      }
+      const scale = QUICK_START_SCALES.find((s) => s.key === scaleKey) || QUICK_START_SCALES[1];
+      const run = {
+        idea,
+        genre: box.querySelector('#qsGenre').value.trim(),
+        scale,
+        warnings: [],
+        title: '',
+        novelId: '',
+        chapterId: '',
+        chapterTitle: '',
+        characters: 0,
+        outline: null,
+        outlineChapters: 0,
+        words: 0,
+        stopped: false,
+        closed: false,
+        running: true,
+        controller: new AbortController(),
+      };
+      activeRun = run;
+      startBtn.disabled = true;
+      renderQuickStartRun(box, run);
+    };
+    startBtn.onclick = start;
+  }, {
+    // 生成中直接关掉弹窗：停掉请求，已写盘的内容保留
+    onClose: () => {
+      if (!activeRun) return;
+      activeRun.closed = true;
+      activeRun.controller?.abort();
+    },
+  });
+}
+
+/**
+ * 一键开书前的模型准备。
+ * 不把用户直接丢进设置页，而是按当前配置判断缺哪一步：
+ *   没有服务商 → 选一家常用服务商，当场填 Key
+ *   有服务商没 Key → 当场填 Key
+ *   有 Key 没模型 → 自动拉模型列表，选一个；拉不到就手动填
+ * 选好后保存配置，直接回到开书表单。
+ */
+async function openQuickStartSetup() {
+  if (!S.config) {
+    try {
+      S.config = await api.get('/api/config');
+    } catch (err) {
+      showModal(`
+        <h3>读不到模型设置</h3>
+        <p class="modal-sub">${esc(quickStartErrorText(err))}</p>
+        <div class="modal-foot"><button class="btn btn-primary" id="qsCfgRetry">重试</button></div>`, (box) => {
+        box.querySelector('#qsCfgRetry').onclick = () => { closeModal(); openQuickStartSetup(); };
+      });
+      return;
+    }
+  }
+  // 配置可能在别处已经改好，能开书就别再拦一道
+  if (quickStartModel()) return openQuickStartModal();
+
+  let closed = false;
+  const box = showModal('', null, { onClose: () => { closed = true; } });
+  const cfg = () => S.config || {};
+  const providers = () => (cfg().providers || []).filter(Boolean);
+  const providerById = (id) => providers().find((p) => p.id === id) || null;
+  const close = () => closeModal();
+  const goSettings = () => { closeModal(); setView('settings'); };
+  const presetOf = (provider) => PRESETS.find((x) => x.baseUrl && provider?.baseUrl
+    && x.baseUrl.replace(/\/+$/, '') === String(provider.baseUrl).replace(/\/+$/, ''));
+
+  function preferredModel(provider, models) {
+    if (!models.length) return '';
+    const c = cfg();
+    const wanted = [c.roleModels?.write, c.model, ...(presetOf(provider)?.models || [])]
+      .map((x) => String(x || '').trim())
+      .filter(Boolean);
+    const hit = wanted.find((m) => models.includes(m));
+    if (hit) return hit;
+    // 尽量避开向量 / 语音 / 画图 / 补全模型，优先挑常见的聊天模型
+    const nonChat = /embed|whisper|tts|dall-?e|image|audio|moderation|rerank|vision|babbage|davinci|ada|curie|similarity|text-search|codex/i;
+    const chatLike = /(^|[^a-z0-9])(chat|instruct|gpt|claude|gemini|qwen|deepseek|glm|moonshot|kimi|doubao|llama|mistral|mixtral|ernie|hunyuan|writer|reasoner)([^a-z0-9]|$)/i;
+    const slow = /reason|thinking|(^|[^a-z0-9])o[13]([^a-z0-9]|$)/i;
+    // 先挑能聊天、又不是慢速推理的模型；开书不需要想太久
+    return models.find((m) => chatLike.test(m) && !nonChat.test(m) && !slow.test(m))
+      || models.find((m) => chatLike.test(m) && !nonChat.test(m))
+      || models.find((m) => !nonChat.test(m))
+      || models[0];
+  }
+
+  function renderIntro() {
+    if (closed) return;
+    const quick = PRESETS.filter((p) => !/Ollama/i.test(p.name));
+    box.innerHTML = `
+      <h3>一键开书还差一步：接入模型</h3>
+      <p class="modal-sub">一键开书要请一个 AI 模型来写书名、人物、大纲和第一章。接一次，以后都能用。</p>
+      <div class="qs-setup-steps">
+        <div class="qs-setup-step"><b>1</b><div><strong>选一家服务商</strong><em>国内常用 DeepSeek；已经有别家的 Key 也可以直接用。</em></div></div>
+        <div class="qs-setup-step"><b>2</b><div><strong>粘贴 API Key</strong><em>在服务商后台创建一个 Key，复制过来。这里不需要注册账号。</em></div></div>
+        <div class="qs-setup-step"><b>3</b><div><strong>选一个模型</strong><em>连上后会自动列出可用模型，点一个就能回来开书。</em></div></div>
+      </div>
+      <label class="field-label">从常用服务商开始<span class="field-hint">已有 Key 的话，下一步粘贴即可</span></label>
+      <div class="qs-preset-grid">
+        ${quick.map((p) => `<button type="button" class="qs-preset" data-preset="${PRESETS.indexOf(p)}"><b>${esc(p.name)}</b><span>${esc((p.models || [])[0] || '自定义模型')}</span></button>`).join('')}
+        <button type="button" class="qs-preset" data-preset="custom"><b>其他服务商 / 中转站</b><span>自己填 Base URL 和模型名</span></button>
+      </div>
+      <div class="tip qs-tip">${ico('shield')}<span>密钥只写入本机的 <code>data/config.json</code>，不会上传到别处，也不会随作品导出。</span></div>
+      <div class="modal-foot">
+        <button class="btn btn-text" id="qsSetupCancel">取消</button>
+        <button class="btn btn-text" id="qsSetupSettings">打开设置</button>
+      </div>`;
+    box.querySelector('#qsSetupCancel').onclick = close;
+    box.querySelector('#qsSetupSettings').onclick = goSettings;
+    box.querySelectorAll('.qs-preset').forEach((btn) => {
+      btn.onclick = () => {
+        const key = btn.dataset.preset;
+        if (key === 'custom') return renderKey(null, { name: '新服务商', baseUrl: '', models: [] });
+        renderKey(null, PRESETS[Number(key)]);
+      };
+    });
+  }
+
+  function renderKey(providerId, preset = null) {
+    if (closed) return;
+    const provider = providerId ? providerById(providerId) : null;
+    if (providerId && !provider) return renderIntro();
+    const known = preset || (provider ? presetOf(provider) : null) || {};
+    const name = provider?.name || preset?.name || '新服务商';
+    const baseUrl = provider?.baseUrl || preset?.baseUrl || '';
+    const savedKey = providerHasKey(provider);
+    box.innerHTML = `
+      <h3>${savedKey ? `重新填写「${esc(name)}」的 API Key` : `接入「${esc(name)}」`}</h3>
+      <p class="modal-sub">模型需要用 API Key 验证身份。把服务商后台创建的 Key 粘进来，就能拿到可用模型列表。</p>
+      ${known.keyUrl ? `<a class="qs-ext-link" href="${esc(known.keyUrl)}" target="_blank" rel="noopener">打开 ${esc(name)} 的 API Key 页面 ↗</a>` : ''}
+      ${providers().length > 1 ? `
+        <label class="field-label">要给哪个服务商填 Key</label>
+        <select class="select" id="qsProviderPick">
+          ${providers().map((p) => `<option value="${esc(p.id)}" ${p.id === providerId ? 'selected' : ''}>${esc(p.name || '未命名服务商')}${p.baseUrl ? ` · ${esc(p.baseUrl)}` : ''}</option>`).join('')}
+        </select>` : ''}
+      <label class="field-label">Base URL<span class="field-hint">一般不用改，通常以 /v1 结尾</span></label>
+      <input id="qsBaseUrl" class="input" autocomplete="off" value="${esc(baseUrl)}" placeholder="https://api.deepseek.com/v1" />
+      <label class="field-label">API Key<span class="field-hint">${savedKey ? `已保存 ${esc(provider?.apiKeyMasked || '')}，留空不修改` : '只保存在本机'}</span></label>
+      <input id="qsKey" class="input" type="password" autocomplete="off" placeholder="${savedKey ? '留空继续使用已保存的 Key' : 'sk-...'}" />
+      <p class="qs-error" id="qsKeyError" hidden></p>
+      <div class="tip qs-tip">${ico('shield')}<span>Key 只写入本机的 <code>data/config.json</code>，不会上传到别处，也不会随作品导出。</span></div>
+      <div class="qs-setup-links"><button type="button" class="btn btn-text btn-sm" id="qsKeySettings">打开设置里管理服务商</button></div>
+      <div class="modal-foot qs-foot">
+        <button class="btn btn-text" id="qsKeyCancel">取消</button>
+        <button class="btn btn-primary" id="qsKeyConnect">连接并获取模型</button>
+      </div>`;
+    const baseEl = box.querySelector('#qsBaseUrl');
+    const keyEl = box.querySelector('#qsKey');
+    const errorEl = box.querySelector('#qsKeyError');
+    const pickEl = box.querySelector('#qsProviderPick');
+    const connectBtn = box.querySelector('#qsKeyConnect');
+    const showError = (text) => {
+      errorEl.hidden = false;
+      errorEl.textContent = text;
+    };
+    box.querySelector('#qsKeyCancel').onclick = close;
+    box.querySelector('#qsKeySettings').onclick = goSettings;
+    pickEl?.addEventListener('change', () => renderKey(pickEl.value));
+    keyEl.addEventListener('input', () => { errorEl.hidden = true; });
+    baseEl.addEventListener('input', () => { errorEl.hidden = true; });
+    keyEl.focus();
+
+    let effectiveId = providerId;
+    connectBtn.onclick = async () => {
+      const nextBase = baseEl.value.trim();
+      const nextKey = keyEl.value.trim();
+      if (!nextBase) {
+        showError('先填 Base URL。它通常长这样：https://api.deepseek.com/v1');
+        baseEl.focus();
+        return;
+      }
+      if (!nextKey && !providerHasKey(provider)) {
+        showError('先填 API Key，否则没法连接服务商。');
+        keyEl.focus();
+        return;
+      }
+      errorEl.hidden = true;
+      connectBtn.disabled = true;
+      const oldText = connectBtn.textContent;
+      connectBtn.textContent = '正在连接…';
+      let configSaved = false;
+      try {
+        if (!S.config) S.config = await api.get('/api/config');
+        const c = S.config;
+        if (!Array.isArray(c.providers)) c.providers = [];
+        let p = effectiveId ? c.providers.find((x) => x.id === effectiveId) : null;
+        if (!p) {
+          p = {
+            id: uid('p'),
+            name: preset?.name || '新服务商',
+            baseUrl: nextBase,
+            models: preset?.models ? [...preset.models] : [],
+            apiKey: nextKey,
+          };
+          c.providers.push(p);
+          effectiveId = p.id;
+        } else {
+          p.baseUrl = nextBase;
+          if (nextKey) p.apiKey = nextKey;
+        }
+        p.baseUrl = nextBase;
+        if (nextKey) p.apiKey = nextKey;
+        c.activeProviderId = p.id;
+        await api.send('/api/config', configForSave(c));
+        configSaved = true;
+        S.config = await api.get('/api/config');
+        if (closed) return;
+
+        const r = await api.send('/api/config/models', { providerId: effectiveId, baseUrl: nextBase });
+        if (closed) return;
+        if (!r.ok) {
+          renderModel(effectiveId, {
+            models: [],
+            fetched: true,
+            error: r.error || '服务商没有返回模型列表',
+            manual: true,
+          });
+          return;
+        }
+        const models = quickStartModelList(r.models);
+        if (models.length) {
+          const saved = providerById(effectiveId);
+          if (saved) {
+            saved.models = models;
+            try {
+              await api.send('/api/config', configForSave(S.config));
+              S.config = await api.get('/api/config');
+            } catch { /* 列表已经拿到了，存不下也不影响这次选择 */ }
+          }
+        }
+        if (closed) return;
+        renderModel(effectiveId, {
+          models,
+          fetched: true,
+          error: models.length ? '' : '服务商返回了空列表，可以直接填模型名。',
+          manual: !models.length,
+        });
+      } catch (err) {
+        if (closed) return;
+        const saved = effectiveId ? providerById(effectiveId) : null;
+        if (configSaved && saved) {
+          // Key 已经存下来了，只是拉列表失败：让用户手动填模型，不用重来
+          renderModel(effectiveId, {
+            models: quickStartModelList(saved.models),
+            fetched: true,
+            error: quickStartErrorText(err),
+            manual: true,
+          });
+          return;
+        }
+        showError(quickStartErrorText(err));
+        connectBtn.disabled = false;
+        connectBtn.textContent = oldText;
+      }
+    };
+  }
+
+  async function fetchModels(providerId) {
+    const provider = providerById(providerId);
+    if (!provider) return renderIntro();
+    renderModel(providerId, { loading: true, fetched: true });
+    try {
+      const r = await api.send('/api/config/models', { providerId, baseUrl: provider.baseUrl });
+      if (closed) return;
+      if (!r.ok) throw new Error(r.error || '服务商没有返回模型列表');
+      const models = quickStartModelList(r.models);
+      if (models.length) {
+        const saved = providerById(providerId);
+        if (saved) {
+          saved.models = models;
+          try {
+            await api.send('/api/config', configForSave(S.config));
+            S.config = await api.get('/api/config');
+          } catch { /* 列表已经拿到了，存不下也不影响这次选择 */ }
+        }
+      }
+      if (closed) return;
+      renderModel(providerId, {
+        models,
+        fetched: true,
+        error: models.length ? '' : '服务商返回了空列表，可以直接填模型名。',
+        manual: !models.length,
+      });
+    } catch (err) {
+      if (closed) return;
+      renderModel(providerId, {
+        models: quickStartModelList(providerById(providerId)?.models),
+        fetched: true,
+        error: quickStartErrorText(err),
+        manual: true,
+      });
+    }
+  }
+
+  function renderModel(providerId, opts = {}) {
+    if (closed) return;
+    const provider = providerById(providerId);
+    if (!provider) return renderIntro();
+    const models = quickStartModelList(opts.models ?? provider.models);
+    const loading = !!opts.loading;
+    const error = String(opts.error || '');
+    const manualOpen = !!opts.manual || (!loading && !models.length);
+    const picked = opts.picked || preferredModel(provider, models);
+    const manualPlaceholder = presetOf(provider)?.models?.[0] || '例如 deepseek-chat';
+    box.innerHTML = `
+      <h3>选一个模型，继续开书</h3>
+      <p class="modal-sub">服务商「${esc(provider.name || '未命名服务商')}」已经接上。<span class="qs-dim">${esc(provider.baseUrl || '')}</span></p>
+      ${loading ? `<div class="qs-fetch"><span class="qs-spinner"></span><span>正在获取可用模型…</span></div>` : ''}
+      ${error ? `<div class="qs-warns qs-warns-err"><b>没能自动获取模型列表</b><p>${esc(error)}</p><p>有些服务商不开放这个接口，这不影响使用；在服务商文档里找到模型 ID，填到下面就可以。</p></div>` : ''}
+      ${models.length ? `
+        <label class="field-label">模型<span class="field-hint">之后也能在设置里改</span></label>
+        <select class="select" id="qsModelSelect">
+          ${models.map((m) => `<option value="${esc(m)}" ${m === picked ? 'selected' : ''}>${esc(m)}</option>`).join('')}
+        </select>` : ''}
+      <div id="qsManual" ${manualOpen ? '' : 'hidden'}>
+        <label class="field-label">模型名称<span class="field-hint">填服务商文档里的模型 ID</span></label>
+        <input id="qsModelInput" class="input" autocomplete="off" placeholder="${esc(manualPlaceholder)}" value="${esc(opts.manualValue || picked || '')}" />
+      </div>
+      <p class="qs-error" id="qsModelError" hidden></p>
+      <div class="qs-setup-links">
+        ${models.length ? '<button type="button" class="btn btn-text btn-sm" id="qsManualToggle">列表里没有？手动填写</button>' : ''}
+        <button type="button" class="btn btn-text btn-sm" id="qsRefetch">重新获取模型列表</button>
+        <button type="button" class="btn btn-text btn-sm" id="qsModelSettings">打开设置</button>
+        <button type="button" class="btn btn-text btn-sm" id="qsModelKey">重新填写 Key</button>
+      </div>
+      <div class="modal-foot qs-foot">
+        <button class="btn btn-text" id="qsModelCancel">取消</button>
+        <button class="btn btn-primary" id="qsModelUse" ${loading ? 'disabled' : ''}>保存，继续开书</button>
+      </div>`;
+    const errorEl = box.querySelector('#qsModelError');
+    const manualEl = box.querySelector('#qsModelInput');
+    const manualWrap = box.querySelector('#qsManual');
+    const selectEl = box.querySelector('#qsModelSelect');
+    const useBtn = box.querySelector('#qsModelUse');
+    const showError = (text) => {
+      errorEl.hidden = false;
+      errorEl.textContent = text;
+    };
+    box.querySelector('#qsModelCancel').onclick = close;
+    box.querySelector('#qsModelSettings').onclick = goSettings;
+    box.querySelector('#qsModelKey').onclick = () => renderKey(providerId);
+    box.querySelector('#qsRefetch').onclick = () => fetchModels(providerId);
+    box.querySelector('#qsManualToggle')?.addEventListener('click', () => {
+      manualWrap.hidden = false;
+      // 手动框默认跟着下拉框走，避免改了下拉、保存的却还是旧模型
+      if (selectEl) manualEl.value = selectEl.value;
+      manualEl.focus();
+    });
+    manualEl.addEventListener('input', () => { errorEl.hidden = true; });
+    selectEl?.addEventListener('change', () => {
+      errorEl.hidden = true;
+      if (selectEl.value) manualWrap.hidden = true;
+    });
+    useBtn.onclick = async () => {
+      const manualValue = manualWrap.hidden ? '' : manualEl.value.trim();
+      const model = manualValue || String(selectEl?.value || '').trim();
+      if (!model) {
+        showError('先选一个模型，或填写模型名称。');
+        (manualWrap.hidden ? selectEl : manualEl)?.focus();
+        return;
+      }
+      if (closed) return;
+      errorEl.hidden = true;
+      useBtn.disabled = true;
+      const oldText = useBtn.textContent;
+      useBtn.textContent = '正在保存…';
+      try {
+        if (!S.config) S.config = await api.get('/api/config');
+        const c = S.config;
+        const p = (c.providers || []).find((x) => x.id === providerId);
+        if (!p) throw new Error('这个服务商已经不在配置里了，请重新打开设置。');
+        p.models = quickStartModelList([...(p.models || []), model]);
+        c.activeProviderId = p.id;
+        c.model = model;
+        c.roleModels = { ...(c.roleModels || {}), write: model };
+        await api.send('/api/config', configForSave(c));
+        S.config = await api.get('/api/config');
+        if (closed) return;
+        closeModal();
+        toast(`已选好模型 ${model}`, 'ok');
+        openQuickStartModal();
+      } catch (err) {
+        if (closed) return;
+        showError(quickStartErrorText(err));
+        useBtn.disabled = false;
+        useBtn.textContent = oldText;
+      }
+    };
+    if (!opts.fetched) fetchModels(providerId);
+  }
+
+  const all = providers();
+  const keyed = all.filter(providerHasKey);
+  const active = keyed.find((p) => p.id === cfg().activeProviderId) || keyed[0] || null;
+  if (!all.length) return renderIntro();
+  if (!active) {
+    const pick = all.find((p) => p.id === cfg().activeProviderId) || all[0];
+    return renderKey(pick.id);
+  }
+  const models = quickStartModelList(active.models);
+  return renderModel(active.id, { models, fetched: models.length > 0 });
+}
+
+function renderQuickStartRun(box, run) {
+  box.innerHTML = `
+    <h3>正在开书…</h3>
+    <p class="modal-sub" id="qsRunSub">正在准备…</p>
+    <ol class="qs-steps">
+      ${QUICK_START_STEPS.map((s) => `
+        <li class="qs-step" id="qsStep-${s.key}" data-state="pending">
+          <span class="qs-step-dot"></span>
+          <div class="qs-step-text"><b>${s.label}</b><em>${s.hint}</em></div>
+          <span class="qs-step-state">等待</span>
+        </li>`).join('')}
+    </ol>
+    <div class="qs-preview" id="qsPreview" hidden>
+      <div class="qs-preview-head"><span id="qsPreviewLabel">生成中</span><span id="qsPreviewCount"></span></div>
+      <pre id="qsPreviewText"></pre>
+    </div>
+    <div class="qs-note">开书会调用 4 次模型，通常一两分钟。内容会实时保存；中途停止也不会丢掉已经生成的部分。</div>
+    <div class="modal-foot qs-foot">
+      <button class="btn btn-text" id="qsClose" disabled>关闭</button>
+      <button class="btn btn-danger-ghost" id="qsStop">${ico('stop')}停止</button>
+    </div>`;
+  const stopBtn = box.querySelector('#qsStop');
+  stopBtn.onclick = () => {
+    if (!run.running) return;
+    run.stopped = true;
+    run.controller?.abort();
+    stopBtn.disabled = true;
+    stopBtn.textContent = '正在停止…';
+    quickStartSub(box, '正在停止，已经生成的内容会保留…');
+  };
+  box.querySelector('#qsClose').onclick = closeModal;
+  runQuickStart(box, run).catch((err) => {
+    run.running = false;
+    if (run.closed) return;
+    quickStartResult(box, run, 'error', quickStartErrorText(err));
+  });
+}
+
+async function runQuickStart(box, run) {
+  const ready = quickStartModel();
+  if (!ready) {
+    run.running = false;
+    if (!run.closed) openQuickStartSetup();
+    return;
+  }
+  const base = { providerId: ready.providerId, model: ready.model };
+  let prose = '';
+  try {
+    /* 1. 建作品 */
+    quickStartStep(box, 'create', 'running');
+    quickStartSub(box, '正在建作品…');
+    const { novel } = await api.send('/api/novels', { title: '未命名作品', genre: run.genre });
+    run.novelId = novel.id;
+    quickStartAssertRunning(run);
+    await api.put(`/api/novels/${novel.id}`, { meta: { logline: run.idea } });
+    quickStartStep(box, 'create', 'done', '作品已建好，设定会随时保存');
+    quickStartAssertRunning(run);
+
+    /* 2. 书名 */
+    try {
+      const text = await quickStartStream(run, box, 'title', '起书名', {
+        ...base,
+        task: 'titles',
+        novelId: novel.id,
+        payload: { instruction: `这本书的一句话故事是「${run.idea}」。请为它起 8 个书名候选，每个附一句理由，贴合网文平台的搜索习惯。` },
+      });
+      const title = quickStartPickTitle(text);
+      if (!title) {
+        quickStartStep(box, 'title', 'skip', '先叫《未命名作品》，之后可改');
+        run.warnings.push('书名没生成成功。作品暂时叫《未命名作品》，可以在「设定库 → 大纲」里改名。');
+      } else {
+        await api.put(`/api/novels/${novel.id}`, { title });
+        run.title = title;
+        quickStartStep(box, 'title', 'done', `《${title}》`);
+      }
+    } catch (err) {
+      if (quickStartIsStop(err, run)) throw err;
+      quickStartStep(box, 'title', 'error', '跳过，之后可在设定库改名');
+      run.warnings.push(`书名没生成成功：${quickStartErrorText(err)}。作品暂时叫《未命名作品》。`);
+    }
+    quickStartAssertRunning(run);
+
+    /* 3. 人物 */
+    try {
+      const text = await quickStartStream(run, box, 'characters', '设计人物', {
+        ...base,
+        task: 'characters',
+        novelId: novel.id,
+        payload: { instruction: `根据这句话故事「${run.idea}」，设计 6 位主要人物（含主角、对手、关键配角）。` },
+      });
+      const arr = parseJsonLoose(text);
+      const rawList = Array.isArray(arr) ? arr : (Array.isArray(arr?.characters) ? arr.characters : []);
+      const list = rawList
+        .filter((x) => x && typeof x === 'object' && String(x.name || '').trim())
+        .map((x) => ({
+          ...x,
+          id: uid('ch'),
+          name: String(x.name).trim(),
+          relations: Array.isArray(x.relations) ? x.relations : [],
+          keywords: Array.isArray(x.keywords) ? x.keywords : [],
+        }));
+      if (!list.length) throw new Error('模型返回的人物格式看不懂');
+      await api.put(`/api/novels/${novel.id}`, { bible: { characters: list } });
+      run.characters = list.length;
+      quickStartStep(box, 'characters', 'done', `${list.length} 位 · ${list.slice(0, 3).map((x) => x.name).join('、')}${list.length > 3 ? '…' : ''}`);
+    } catch (err) {
+      if (quickStartIsStop(err, run)) throw err;
+      quickStartStep(box, 'characters', 'error', '跳过，可在设定库补');
+      run.warnings.push(`人物没生成成功：${quickStartErrorText(err)}。之后可以在「设定库 → 人物」补。`);
+    }
+    quickStartAssertRunning(run);
+
+    /* 4. 全书大纲 */
+    try {
+      const text = await quickStartStream(run, box, 'outline', '铺全书大纲', {
+        ...base,
+        task: 'outline',
+        novelId: novel.id,
+        payload: {
+          templateKey: 'outline:aiFullOutline',
+          instruction: quickStartOutlineInstruction(run),
+        },
+      });
+      const parsed = parseOutlineMarkdown(text);
+      const total = parsed.reduce((s, v) => s + (v.chapters?.length || 0), 0);
+      if (!total) throw new Error('模型没有输出可用的分卷 / 章纲');
+      parsed.forEach((v) => { v.id = v.id || uid('v'); });
+      await api.put(`/api/novels/${novel.id}`, { outline: { volumes: parsed, notes: '' } });
+      run.outline = parsed;
+      run.outlineChapters = total;
+      quickStartStep(box, 'outline', 'done', `${parsed.length} 卷 · ${total} 章`);
+      const planned = run.scale.volumes * run.scale.perVolume;
+      if (total < planned) {
+        run.warnings.push(`模型只排了 ${total} 章（原计划 ${planned} 章）。先按现有大纲写第一章，之后可以在「设定库 → 大纲」继续补。`);
+      }
+    } catch (err) {
+      if (quickStartIsStop(err, run)) throw err;
+      quickStartStep(box, 'outline', 'error', '没能生成可用的分卷大纲');
+      throw new Error(`全书大纲没生成成功：${quickStartErrorText(err)}`);
+    }
+    quickStartAssertRunning(run);
+
+    /* 5. 建第一章 */
+    const first = quickStartFirstChapter(run.outline);
+    if (!first) throw new Error('大纲里没有可用的第一章');
+    quickStartStep(box, 'chapter', 'running');
+    quickStartSub(box, `正在建第一章「${first.chapter.title}」…`);
+    const made = await api.send(`/api/novels/${novel.id}/chapters`, {
+      title: first.chapter.title || '第一章',
+      summary: first.chapter.summary || '',
+      outline: quickStartChapterOutline(first.chapter),
+      outlineId: first.chapter.id,
+      volumeId: first.volume.id,
+      at: 0,
+    });
+    run.chapterId = made.chapter.id;
+    run.chapterTitle = made.chapter.title;
+    quickStartStep(box, 'chapter', 'done', `第 1 章 · ${made.chapter.title}`);
+    quickStartAssertRunning(run);
+
+    /* 6. 第一章正文 */
+    try {
+      prose = await quickStartStream(run, box, 'prose', '写第一章正文', {
+        ...base,
+        task: 'chapter',
+        novelId: novel.id,
+        chapterId: made.chapter.id,
+        payload: {
+          targetWords: 1600,
+          instruction: quickStartChapterInstruction(first.chapter),
+        },
+      }, (text) => { prose = text; });
+      if (!prose.trim()) throw new Error('模型没有返回正文');
+      await api.put(`/api/novels/${novel.id}/chapters/${made.chapter.id}`, { content: prose.trim() });
+      run.words = countWords(prose);
+      quickStartStep(box, 'prose', 'done', `${fmtWords(run.words)} 字`);
+      quickStartAssertRunning(run);
+    } catch (err) {
+      if (quickStartIsStop(err, run)) {
+        // 停止时已经写出来的半章也留下，别让作者白等
+        if (prose.trim().length >= 40) {
+          await api.put(`/api/novels/${novel.id}/chapters/${made.chapter.id}`, { content: prose.trim() }).catch(() => {});
+          run.words = countWords(prose);
+        }
+        throw err;
+      }
+      quickStartStep(box, 'prose', 'error', '可以先打开作品自己写');
+      run.warnings.push(`第一章正文没生成成功：${quickStartErrorText(err)}。章纲和空白章已经建好，可以直接开写。`);
+    }
+
+    run.running = false;
+    if (run.closed) return;
+    if (run.warnings.length) quickStartResult(box, run, 'success');
+    else await openQuickStartNovel(run);
+  } catch (err) {
+    run.running = false;
+    if (run.closed) return;
+    if (quickStartIsStop(err, run)) return quickStartResult(box, run, 'stopped');
+    quickStartResult(box, run, 'error', quickStartErrorText(err));
+  }
+}
+
+function quickStartOutlineInstruction(run) {
+  const total = run.scale.volumes * run.scale.perVolume;
+  return `你是一位资深网文策划。这本书的一句话故事是「${run.idea}」。${run.genre ? `题材是「${run.genre}」。` : ''}请设计 ${run.scale.volumes} 卷、每卷 ${run.scale.perVolume} 章，共约 ${total} 章的分卷大纲与章纲。
+
+要求：
+1. 每卷有卷名和 120-200 字的卷纲，写清主要冲突、人物弧光与收束点。
+2. 每章包含章节名、场景、出场人物、核心事件、章末钩子。
+3. 第一章要能直接开写：尽快交代主角、目标与第一个冲突，结尾留钩子。
+4. 只输出结构化 Markdown，不要解释、不要客套话。格式：
+## 第1卷 卷名
+> 卷纲…
+### 第1章 章节名
+- 场景：…
+- 出场人物：…
+- 核心事件：…
+- 章末钩子：…`;
+}
+
+function quickStartFirstChapter(volumes) {
+  for (const volume of volumes || []) {
+    const chapter = (volume.chapters || [])[0];
+    if (chapter) return { volume, chapter };
+  }
+  return null;
+}
+
+function quickStartChapterOutline(chapter) {
+  const out = {};
+  for (const key of ['scene', 'characters', 'summary', 'hook']) {
+    const value = String(chapter?.[key] || '').trim();
+    if (value) out[key] = value;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+function quickStartChapterInstruction(chapter) {
+  const clean = (value) => String(value || '').trim().replace(/[。；;]+$/, '');
+  const bits = ['这是全书第一章，请按章纲写出完整正文。'];
+  if (chapter.scene) bits.push(`场景：${clean(chapter.scene)}。`);
+  if (chapter.summary) bits.push(`核心事件：${clean(chapter.summary)}。`);
+  if (chapter.hook) bits.push(`结尾落在：${clean(chapter.hook)}。`);
+  bits.push('开头尽快进入冲突，不要用大段背景解释。');
+  return bits.join('');
+}
+
+function quickStartPickTitle(text) {
+  const raw = String(text || '');
+  const quoted = raw.match(/《([^》\n]{1,30})》/);
+  if (quoted) return quoted[1].trim();
+  const bold = [...raw.matchAll(/\*\*([^*\n]{1,30})\*\*/g)]
+    .map((m) => m[1].replace(/[《》]/g, '').trim())
+    .find((s) => s && !/书名|候选|章节|理由|推荐/.test(s));
+  return bold || '';
+}
+
+/** 跑一步 AI：统一处理步骤状态、实时预览和停止信号 */
+async function quickStartStream(run, box, stepKey, label, body, onDelta) {
+  quickStartStep(box, stepKey, 'running');
+  quickStartSub(box, `正在${label}…`);
+  quickStartPreviewStart(box, label);
+  let text = '';
+  try {
+    return await streamAI(body, {
+      signal: run.controller.signal,
+      onDelta: (delta) => {
+        text += delta;
+        quickStartPreviewPaint(box, text);
+        onDelta?.(text);
+      },
+    });
+  } finally {
+    quickStartPreviewEnd(box);
+  }
+}
+
+function quickStartStep(box, key, state, detail) {
+  const li = box.querySelector(`#qsStep-${key}`);
+  if (!li) return;
+  li.dataset.state = state;
+  const labels = { pending: '等待', running: '生成中', done: '完成', skip: '跳过', error: '失败' };
+  const stateEl = li.querySelector('.qs-step-state');
+  if (stateEl) stateEl.textContent = labels[state] || '';
+  const hint = li.querySelector('em');
+  if (hint && detail) hint.textContent = detail;
+}
+
+function quickStartSub(box, text) {
+  const el = box.querySelector('#qsRunSub');
+  if (el) el.textContent = text;
+}
+
+function quickStartPreviewStart(box, label) {
+  const wrap = box.querySelector('#qsPreview');
+  if (!wrap) return;
+  wrap.hidden = false;
+  const labelEl = box.querySelector('#qsPreviewLabel');
+  if (labelEl) labelEl.textContent = label;
+  const pre = box.querySelector('#qsPreviewText');
+  if (pre) { pre.textContent = ''; pre.scrollTop = 0; }
+  const count = box.querySelector('#qsPreviewCount');
+  if (count) count.textContent = '';
+}
+
+function quickStartPreviewPaint(box, text) {
+  const pre = box.querySelector('#qsPreviewText');
+  if (!pre) return;
+  // 长文只显示最近一段，避免弹窗被几万字撑住
+  pre.textContent = text.length > 8000 ? `…${text.slice(-8000)}` : text;
+  pre.scrollTop = pre.scrollHeight;
+  const count = box.querySelector('#qsPreviewCount');
+  if (count) count.textContent = `${countWords(text)} 字`;
+}
+
+function quickStartPreviewEnd(box) {
+  const wrap = box.querySelector('#qsPreview');
+  if (wrap) wrap.hidden = true;
+}
+
+function quickStartResult(box, run, kind, message = '') {
+  const title = run.title || (run.novelId ? '未命名作品' : '');
+  const facts = [];
+  if (title) facts.push(['书名', `《${title}》`]);
+  if (run.characters) facts.push(['人物', `${run.characters} 位`]);
+  if (run.outline) facts.push(['大纲', `${run.outline.length} 卷 · ${run.outlineChapters} 章`]);
+  if (run.chapterTitle) {
+    facts.push(['第一章', `${run.chapterTitle}${run.words ? ` · ${fmtWords(run.words)} 字` : ' · 还没写正文'}`]);
+  }
+  const head = kind === 'stopped' ? '已停止' : kind === 'error' ? '开书没走完' : '书已经开好了';
+  const sub = kind === 'stopped'
+    ? '已经生成并保存的内容都在书架里，可以随时接着写。'
+    : kind === 'error'
+      ? '已经建好的部分都留在书架里，没有丢。'
+      : '有几处模型没配合好，但书已经可以写了。';
+  const errHtml = kind === 'error' && message
+    ? `<div class="qs-warns qs-warns-err"><b>卡住的原因</b><p>${esc(message)}</p>${run.warnings.length ? '' : '<p>已经生成的内容已保存；可以打开作品继续写，或稍后重试。</p>'}</div>`
+    : '';
+  const warns = run.warnings.length
+    ? `<div class="qs-warns"><b>还需要你看一眼</b><ul>${run.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>`
+    : '';
+  box.innerHTML = `
+    <h3>${esc(head)}</h3>
+    <p class="modal-sub">${esc(sub)}</p>
+    ${facts.length ? `<dl class="qs-facts">${facts.map(([key, value]) => `<dt>${esc(key)}</dt><dd>${esc(value)}</dd>`).join('')}</dl>` : ''}
+    ${errHtml}
+    ${warns}
+    <div class="modal-foot">
+      ${run.novelId ? '<button class="btn btn-text" id="qsShelf">留在书架</button>' : '<button class="btn btn-text" id="qsDone">关闭</button>'}
+      ${run.novelId ? `<button class="btn btn-primary" id="qsOpen">${run.chapterId ? '打开作品，开始写' : '打开作品'}</button>` : ''}
+    </div>`;
+  box.querySelector('#qsDone')?.addEventListener('click', closeModal);
+  box.querySelector('#qsShelf')?.addEventListener('click', async () => {
+    closeModal();
+    await loadNovels().catch(() => {});
+    setView('shelf');
+  });
+  box.querySelector('#qsOpen')?.addEventListener('click', () => openQuickStartNovel(run));
+}
+
+async function openQuickStartNovel(run) {
+  closeModal();
+  if (!run.novelId) return;
+  try {
+    await loadNovels();
+    await openNovel(run.novelId, run.chapterId ? { chapterId: run.chapterId } : {});
+    if (S.novel?.id !== run.novelId) return;
+    const label = run.title ? `《${run.title}》` : '作品';
+    toast(run.words ? `${label}已开好，先读一遍第一章，再决定怎么改` : `${label}已开好，可以开始写第一章了`, 'ok');
+  } catch (err) {
+    toast(`打开作品失败：${err.message}`, 'err');
+  }
+}
+
+function quickStartAssertRunning(run) {
+  if (!run.stopped) return;
+  const err = new Error('已停止');
+  err.name = 'AbortError';
+  throw err;
+}
+
+function quickStartIsStop(err, run) {
+  return !!run.stopped || err?.name === 'AbortError';
+}
+
+function quickStartErrorText(err) {
+  const msg = String(err?.message || err || '未知错误').trim().replace(/\s+/g, ' ');
+  return msg.length > 180 ? `${msg.slice(0, 180)}…` : msg;
+}
+
+$('#quickStartBtn').addEventListener('click', openQuickStartModal);
+$('#emptyQuickStartBtn').addEventListener('click', openQuickStartModal);
+
+
 async function openNovel(id, opts = {}) {
   // 换作品前先把当前作品的改动落盘 —— 一旦换过去，旧作品的内存内容就被替换了，
   // 没落盘的部分谁也救不回来。落不下去时明确问一句，别默默丢。
@@ -9733,12 +10651,12 @@ function renderStyleTab(host, n) {
  * 10. 设置
  * ============================================================ */
 const PRESETS = [
-  { name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'] },
+  { name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'], keyUrl: 'https://platform.deepseek.com/api_keys' },
   { name: '阿里通义', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-max', 'qwen-long'] },
-  { name: '月之暗面 Kimi', baseUrl: 'https://api.moonshot.cn/v1', models: ['moonshot-v1-32k'] },
-  { name: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4-plus', 'glm-4-air'] },
+  { name: '月之暗面 Kimi', baseUrl: 'https://api.moonshot.cn/v1', models: ['moonshot-v1-32k'], keyUrl: 'https://platform.moonshot.cn/console/api-keys' },
+  { name: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4-plus', 'glm-4-air'], keyUrl: 'https://open.bigmodel.cn/usercenter/apikeys' },
   { name: '火山方舟（豆包）', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', models: ['doubao-pro-32k'] },
-  { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', models: ['gpt-4o', 'gpt-4o-mini'] },
+  { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', models: ['gpt-4o', 'gpt-4o-mini'], keyUrl: 'https://platform.openai.com/api-keys' },
   { name: 'Ollama 本地', baseUrl: 'http://127.0.0.1:11434/v1', models: ['qwen2.5:14b'] },
 ];
 
@@ -10261,6 +11179,19 @@ $('#addProviderBtn').addEventListener('click', () => {
   renderSettings();
 });
 
+/** 保存前去掉只读字段，别把 apiKeyMasked / apiKeySet 写回 config.json */
+function configForSave(cfg) {
+  return {
+    ...cfg,
+    providers: (cfg.providers || []).map((p) => {
+      const next = { ...p };
+      delete next.apiKeyMasked;
+      delete next.apiKeySet;
+      return next;
+    }),
+  };
+}
+
 async function saveConfig() {
   const cfg = S.config;
   cfg.temperature = Number($('#cfgTemp').value);
@@ -10278,7 +11209,7 @@ async function saveConfig() {
     S.novel.meta.contextBudget = budget;
     api.put(`/api/novels/${S.novel.id}`, { meta: S.novel.meta }).catch(() => {});
   }
-  await api.send('/api/config', cfg);
+  await api.send('/api/config', configForSave(cfg));
   S.config = await api.get('/api/config');
 }
 $('#saveCfgBtn').addEventListener('click', async () => {
@@ -11797,6 +12728,7 @@ function cmdkSource() {
     });
   });
   const op = (label, icon, run, hint) => out.push({ g: '操作', label, icon, run, hint });
+  op('一键开书', 'spark', () => { setView('shelf'); openQuickStartModal(); }, '一句话生成全书');
   op('新建作品', 'plus', () => openNewNovelModal(), 'N');
   op('回收站', 'trash', () => openTrash());
   op('全局检索', 'search', () => openGlobalSearch(), 'Ctrl+Shift+F');

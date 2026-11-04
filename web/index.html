@@ -116,15 +116,19 @@
             <button class="btn" id="globalSearchBtn" title="在所有作品的正文和章节标题中检索（Ctrl+Shift+F）"><svg class="ico"><use href="#i-search" /></svg><span>全局检索</span></button>
             <button class="btn" id="restoreBackupBtn" title="从书匠 JSON 备份恢复为一部新作品"><svg class="ico"><use href="#i-upload" /></svg>恢复备份</button>
             <input type="file" id="restoreBackupInput" accept=".json,application/json" hidden />
-            <button class="btn btn-primary" id="newNovelBtn"><svg class="ico"><use href="#i-plus" /></svg>新建作品</button>
+            <button class="btn" id="newNovelBtn"><svg class="ico"><use href="#i-plus" /></svg>新建作品</button>
+            <button class="btn btn-primary" id="quickStartBtn" title="写一句想法，自动生成书名、人物、大纲和第一章"><svg class="ico"><use href="#i-spark" /></svg>一键开书</button>
           </div>
         </div>
         <div class="shelf-grid" id="shelfGrid"></div>
         <div class="empty-state" id="shelfEmpty" hidden>
           <svg class="empty-ico"><use href="#i-book-open" /></svg>
           <h3>书架还空着</h3>
-          <p>新建一部作品，先写一句话故事，再让 AI 帮你把大纲铺开。</p>
-          <button class="btn btn-primary" id="emptyNewBtn"><svg class="ico"><use href="#i-plus" /></svg>新建作品</button>
+          <p>写一句想法，AI 帮你把书名、人物、大纲和第一章一起铺好。</p>
+          <div class="empty-actions">
+            <button class="btn btn-primary" id="emptyQuickStartBtn"><svg class="ico"><use href="#i-spark" /></svg>一键开书</button>
+            <button class="btn" id="emptyNewBtn"><svg class="ico"><use href="#i-plus" /></svg>手动新建</button>
+          </div>
         </div>
       </section>
 
