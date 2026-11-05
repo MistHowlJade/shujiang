@@ -223,18 +223,56 @@ async function callUpstream({ cfg, provider, model, messages, temperature, maxTo
   return { resp, modelName, url };
 }
 
+/** 把服务商回来的报错翻成人话；保留一点关键信息，别只扔英文报错 */
+function friendlyProviderError(message, status = 0) {
+  const raw = String(message || '').trim();
+  const text = `${status || ''} ${raw}`.toLowerCase();
+  const has = (re) => re.test(text);
+  if (has(/invalid.*api.*key|api.*key.*(invalid|incorrect|expired|missing)|invalid_request_error|unauthorized|authentication/i) || status === 401) {
+    return 'API Key 不对或已失效。请到设置里重新填写 Key，再试一次。';
+  }
+  if (has(/quota|insufficient|rate.?limit|too many requests|余额|额度|频率/i) || status === 429) {
+    return '额度不够，或请求太频繁。请检查服务商账户额度，稍后再试。';
+  }
+  if (has(/model.*(not found|does not exist|unknown|invalid|unsupported)|unsupported.*model|unknown model|not found.*model/i)
+    || (status === 404 && has(/model/))) {
+    return '服务商不认可这个模型。请到设置里换一个模型，或确认模型名。';
+  }
+  if (has(/forbidden|permission|no access|access denied/i) || status === 403) {
+    return 'API Key 没有使用这个模型的权限。请检查 Key 是否开通了该模型，或换个模型。';
+  }
+  if (status === 404 || has(/not found|404/i)) {
+    return '找不到这个地址或接口。请检查 Base URL 是否写对（比如有没有多一层 /v1）。';
+  }
+  if (status >= 500 || has(/bad gateway|service unavailable|gateway time-out|server error|internal error/i)) {
+    return '服务商暂时出错了。可以稍后再试，或换一个模型 / 服务商。';
+  }
+  if (has(/certificate|cert|ssl|tls|self.signed|unable to verify/i)) {
+    return 'HTTPS 证书校验失败。请确认 Base URL 是 https，且证书有效。';
+  }
+  if (has(/enotfound|eai_again|getaddrinfo|econnrefused|network|connect/i)) {
+    return '连不上服务商。请检查 Base URL、网络和代理设置。';
+  }
+  return raw;
+}
+
 async function upstreamErrorText(resp) {
+  const status = resp?.status || 0;
   try {
     const txt = (await resp.text()).trim();
     const j = tryJson(txt);
-    if (j) return j.error?.message || j.message || txt.slice(0, 600);
-    // 网关给的多半是 HTML 错误页，抽个标题出来就够，别把整页 HTML 糊到界面上
-    const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(txt);
-    const plain = (title ? title[1] : txt.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
-    if (plain) return plain.slice(0, 300);
-    return /^</.test(txt) ? '网关返回了一个网页（不是模型响应）' : txt.slice(0, 300);
+    let detail;
+    if (j) {
+      detail = j.error?.message || j.message || txt.slice(0, 600);
+    } else {
+      // 网关给的多半是 HTML 错误页，抽个标题出来就够，别把整页 HTML 糊到界面上
+      const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(txt);
+      const plain = (title ? title[1] : txt.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+      detail = plain || (/^</.test(txt) ? '网关返回了一个网页（不是模型响应）' : txt.slice(0, 300));
+    }
+    return friendlyProviderError(detail, status);
   } catch {
-    return `HTTP ${resp.status}`;
+    return friendlyProviderError(`HTTP ${status}`, status);
   }
 }
 
@@ -257,14 +295,16 @@ function networkErrorText(err) {
 }
 
 /** 上游一个字正文都没给时，尽量说清楚到底发生了什么 */
-function describeEmptyBody(sniff) {
+function describeEmptyBody(sniff, status = 0) {
   const t = (sniff || '').trim();
   const fallback = '模型这次没有返回任何内容。可能是模型名不对、额度用尽，或该模型的接口格式不兼容。';
   if (!t) return fallback;
   const j = tryJson(t);
   if (j) {
-    if (j.error) return `上游返回错误：${j.error.message || j.error.code || JSON.stringify(j.error).slice(0, 160)}`;
-    if (j.message) return `上游返回：${String(j.message).slice(0, 160)}`;
+    if (j.error) {
+      return friendlyProviderError(j.error.message || j.error.code || JSON.stringify(j.error).slice(0, 160), status);
+    }
+    if (j.message) return friendlyProviderError(String(j.message).slice(0, 160), status);
     return fallback;
   }
   if (/^</.test(t)) {
@@ -347,10 +387,13 @@ async function relayCompletion({ res, upstream, abort }) {
       return true;
     }
     if (j.error) {
-      fatal = j.error.message || j.error.code || '模型返回错误';
+      fatal = friendlyProviderError(j.error.message || j.error.code || '模型返回错误', upstream.resp.status);
       return false;
     }
-    if (j.message && !j.choices) { fatal = String(j.message); return false; }
+    if (j.message && !j.choices) {
+      fatal = friendlyProviderError(String(j.message), upstream.resp.status);
+      return false;
+    }
     emit(deltaFromChunk(j));
     return true;
   };
@@ -409,7 +452,7 @@ async function relayCompletion({ res, upstream, abort }) {
   clearTimeout(idle);
 
   if (fatal) sseWrite(res, { shu_error: fatal });
-  else if (!emitted) sseWrite(res, { shu_error: describeEmptyBody(sniffed) });
+  else if (!emitted) sseWrite(res, { shu_error: describeEmptyBody(sniffed, upstream.resp.status) });
 }
 
 function tryJson(text) {

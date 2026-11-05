@@ -6387,6 +6387,8 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
     $('#checkBox').innerHTML = '<span class="dim">生成中…</span>';
   }
   let acc = '';
+  let streamFailed = false;
+  const openSettings = () => setView('settings');
   try {
     acc = await streamAI(body, {
       signal: ac.signal,
@@ -6405,11 +6407,12 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
       onReasoning: (r) => { if (target === 'out') { S.reasoning += r; renderOut(); } },
     });
   } catch (err) {
+    streamFailed = true;
     if (err.name === 'AbortError') toast('已停止');
     else if (!retried && isModelSetupError(err)) {
       openGenerateModelSetup(body, () => runStream(body, { target, retried: true }));
     } else {
-      toast(err.message, 'err');
+      toast(err.message, 'err', { label: '打开设置', onClick: openSettings });
       if (target !== 'out') $('#checkBox').innerHTML = `<span class="status-err">${esc(err.message)}</span>`;
     }
   } finally {
@@ -6420,6 +6423,14 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
       // 流式输出停在底部，生成结束后把「追加到正文」也带进视野
       if (S.out && PROSE_OUT_TASKS.has(S.outTask)) revealOutput({ toActions: true });
     }
+  }
+  if (!streamFailed && !acc.trim()) {
+    const msg = target === 'out' && S.reasoning
+      ? '模型这一回只返回了思考内容，没写出正文。可以在设置把「单次最大输出 tokens」调大，或换个模型。'
+      : '模型这一回没写出任何内容。可能是 Key、额度或模型名有问题，可以在设置里检查后再试。';
+    if (target === 'out') $('#outInfo').textContent = '没有返回内容';
+    else $('#checkBox').innerHTML = `<span class="status-err">${esc(msg)}</span>`;
+    toast(msg, 'err', { label: '打开设置', onClick: openSettings });
   }
   return acc;
 }

@@ -769,6 +769,31 @@ async function main() {
     }
   }
 
+  // ---------------------------------------------------------------
+  group('模型报错的人话');
+  {
+    const mockBase = 'http://127.0.0.1:8890/v1';
+    const mockUp = await fetch(`${mockBase}/models`).then((r) => r.ok).catch(() => false);
+    if (!mockUp) {
+      console.log('  SKIP 假模型服务没起（tools\\node\\node.exe dev\\mock-openai.js），跳过错误提示检查');
+    } else {
+      const before = (await get(`${BASE}/api/config`)) || {};
+      const origProviders = before.providers || [];
+      const testProv = { id: 'p_regress_error', name: '自检报错模型', baseUrl: mockBase, apiKey: 'sk-regress', models: ['mock-error', 'mock-quota'] };
+      try {
+        await post(`${BASE}/api/config`, { providers: [...origProviders, testProv] });
+        const err = await streamOnce(testProv.id, 'mock-error', id, cid);
+        check('Key 错时不再甩英文报错', /API Key/.test(err.error || '') && !/Invalid API key/i.test(err.error || ''), err.error || '');
+        const quota = await streamOnce(testProv.id, 'mock-quota', id, cid);
+        check('额度错误给出人话建议', /额度|频繁/.test(quota.error || ''), quota.error || '');
+      } finally {
+        await post(`${BASE}/api/config`, { providers: origProviders });
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------
+  group('回收站往返');
   const beforeTrash = (await get(`${BASE}/api/novels/${id}`)).novel?.chapters?.length || 0;
   const del = await req('DELETE', `${BASE}/api/novels/${id}`);
   check('删除进回收站', del.status === 200);
