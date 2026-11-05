@@ -1238,6 +1238,16 @@ kbd {
 }
 .output-plain { font-family: var(--font-ui); font-size: 12.5px; line-height: 1.7; }
 .output:empty::before { content: "等待生成"; color: var(--text-3); font-family: var(--font-ui); font-size: 12px; }
+.out-next {
+  display: flex; align-items: flex-start; gap: 7px;
+  margin-top: 10px; padding: 8px 10px;
+  background: var(--surface-2); border: 1px dashed var(--border-2); border-radius: var(--r-md);
+  color: var(--text-2); font-size: 12px; line-height: 1.65;
+}
+.out-next::before {
+  content: ""; flex: 0 0 auto; width: 5px; height: 5px; margin-top: 7px;
+  border-radius: 50%; background: var(--accent);
+}
 .output .reasoning {
   margin-bottom: 10px; padding: 2px 0 2px 10px;
   border-left: 2px solid var(--border-2); color: var(--text-3);

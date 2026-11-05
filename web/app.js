@@ -336,6 +336,7 @@ const S = {
   bibleSearch: { outline: '', characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '', timelineViz: '' }, // 设定库搜索词，按页签分别记住
   revisionDraftChapterId: null, // 修订输入框里未提交的草稿属于哪一章
   out: '',
+  outTask: '',      // 输出区这份内容属于哪个任务：只有正文类任务才显示「写进正文」
   reasoning: '',
   lastOp: null,
   styleDraft: '',
@@ -966,19 +967,59 @@ function openNewNovelModal() {
     box.querySelector('#nvCancel').onclick = closeModal;
     box.querySelector('#nvTitle').focus();
     box.querySelector('#nvOk').onclick = async () => {
-      const { novel } = await api.send('/api/novels', {
-        title: box.querySelector('#nvTitle').value.trim() || '未命名作品',
-        genre: box.querySelector('#nvGenre').value.trim(),
-        author: box.querySelector('#nvAuthor').value.trim(),
-        tags: parseNovelTags(box.querySelector('#nvTags').value),
-      });
-      novel.meta.logline = box.querySelector('#nvLogline').value.trim();
-      novel.meta.platform = box.querySelector('#nvPlatform').value;
-      await api.put(`/api/novels/${novel.id}`, { meta: novel.meta });
+      const okBtn = box.querySelector('#nvOk');
+      if (okBtn.disabled) return;   // 连点两下只建一本书
+      const original = okBtn.textContent;
+      okBtn.disabled = true;
+      okBtn.textContent = '创建中…';
+      // 先把要填的内容读出来：后面弹窗可能被 Esc 关掉，节点就没了
+      const title = box.querySelector('#nvTitle').value.trim() || '未命名作品';
+      const genre = box.querySelector('#nvGenre').value.trim();
+      const author = box.querySelector('#nvAuthor').value.trim();
+      const tags = parseNovelTags(box.querySelector('#nvTags').value);
+      const logline = box.querySelector('#nvLogline').value.trim();
+      const platform = box.querySelector('#nvPlatform').value;
+      let novel;
+      try {
+        ({ novel } = await api.send('/api/novels', { title, genre, author, tags }));
+      } catch (err) {
+        okBtn.disabled = false;
+        okBtn.textContent = original;
+        return toast(err.message, 'err');
+      }
+      const warnings = [];
+      // 简介和目标平台只在真的填了时才写回，省一次请求
+      if (logline || platform) {
+        novel.meta = { ...(novel.meta || {}), logline, platform };
+        try {
+          await api.put(`/api/novels/${novel.id}`, { meta: novel.meta });
+        } catch (err) {
+          warnings.push(`简介没保存：${err.message}`);
+        }
+      }
+      // 手动新建也顺手建好第一章：新作者不用再找「新建第一章」在哪
+      let chapter = null;
+      try {
+        ({ chapter } = await api.send(`/api/novels/${novel.id}/chapters`, { title: '第 1 章' }));
+      } catch (err) {
+        warnings.push(`第一章没建成：${err.message}`);
+      }
       closeModal();
-      await loadNovels();
-      await openNovel(novel.id);
-      toast('已创建。建议先到「设定库」写总纲，再让 AI 生成大纲', 'ok');
+      await loadNovels().catch(() => {});
+      try {
+        await openNovel(novel.id, chapter ? { chapterId: chapter.id } : {});
+      } catch (err) {
+        return toast(`《${novel.title}》已建好，但没能打开：${err.message}`, 'err');
+      }
+      if (chapter) {
+        $('#chContent').focus();
+        toast(
+          warnings.length ? `《${novel.title}》已建好，但${warnings.join('；')}` : `《${novel.title}》和第一章已准备好，直接写就行`,
+          warnings.length ? 'err' : 'ok',
+        );
+      } else {
+        toast(`《${novel.title}》已建好；第一章没建成，点「新建第一章」可以补上`, 'err');
+      }
     };
   });
 }
@@ -1983,7 +2024,7 @@ async function openNovel(id, opts = {}) {
   S.novel = novel;
   const want = opts.chapterId && novel.chapters.some((c) => c.id === opts.chapterId) ? opts.chapterId : null;
   S.chapterId = want || novel.chapters[0]?.id || null;
-  S.out = ''; S.reasoning = '';
+  S.out = ''; S.outTask = ''; S.reasoning = '';
   volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   S.stageFilter = '';          // 筛选也一样，换作品先看全貌
   S.chapterSearch = '';        // 章节搜索属于上一本书，别带过去
@@ -6182,6 +6223,30 @@ function editAnnotation(ch, annotationId) {
  * ============================================================ */
 // 这几个任务的产出是文档型内容（Markdown），输出区按 Markdown 渲染；正文类任务保持纯文本
 const MD_OUT_TASKS = new Set(['titles', 'style', 'outline']);
+// 只有这几种产出能直接写进本章。润色 / 扩写等段落操作有自己的差异面板，
+// 把「替换正文」摆在输出区会让人误把整章换成一段。
+const PROSE_OUT_TASKS = new Set(['chapter', 'continue', 'compare']);
+
+function outNextText() {
+  const hasContent = !!($('#chContent')?.value || '').trim();
+  if (!hasContent) return '这是 AI 写的初稿，还没写进本章。满意就点「追加到正文」。';
+  return '满意就点「追加到正文」接在本章末尾；想放在光标处就点「插入光标处」。原稿不会被覆盖。';
+}
+
+/** 输出区的按钮跟着任务类型走：正文类才给「写进正文」，其它任务只留复制 / 清空 */
+function renderOutActions() {
+  const hasOut = !!S.out;
+  $('#outActions').hidden = !hasOut;
+  const canApply = hasOut && !S.controller && PROSE_OUT_TASKS.has(S.outTask);
+  ['#applyAppend', '#applyReplace', '#applyInsert'].forEach((sel) => {
+    const el = $(sel);
+    if (el) el.hidden = !canApply;
+  });
+  const next = $('#outNext');
+  if (!next) return;
+  next.hidden = !canApply;
+  if (canApply) next.textContent = outNextText();
+}
 
 function renderOut() {
   const box = $('#outBox');
@@ -6189,11 +6254,32 @@ function renderOut() {
     + (S.outMd ? mdLite(S.out) : esc(S.out))
     + (S.controller ? '<span class="cursor"></span>' : '');
   box.scrollTop = box.scrollHeight;
-  $('#outActions').hidden = !S.out;
+  renderOutActions();
   if (S.out) {
     $('#outInfo').textContent = `${S.outModel ? `${S.outModel} · ` : ''}${countWords(S.out)} 字${S.controller ? ' · 生成中…' : ''}`;
   } else if (!S.controller) {
     $('#outInfo').textContent = '';   // 失败或空回复后别停在「生成中…」
+  }
+}
+
+/** 生成正文时把输出区滚进视野：按钮在助手栏上方，输出区经常在折叠线以下。
+ *  toActions：生成结束后再滚一次，让「追加到正文」这排按钮也露出来。 */
+function revealOutput({ toActions = false } = {}) {
+  if (S.view !== 'studio') return;
+  const pane = $('.assist-pane[data-pane="write"]');
+  if (!pane || !pane.classList.contains('on')) return;
+  const body = $('.assist-body');
+  let el = $('#outBox');
+  if (!body || !el) return;
+  if (toActions && $('#outActions') && !$('#outActions').hidden) el = $('#outActions');
+  const bodyRect = body.getBoundingClientRect();
+  const rect = el.getBoundingClientRect();
+  if (toActions) {
+    if (rect.bottom <= bodyRect.bottom - 8) return;
+    body.scrollTop += rect.bottom - bodyRect.bottom + 12;
+  } else {
+    if (rect.top >= bodyRect.top + 8 && rect.bottom <= bodyRect.bottom - 8) return;
+    body.scrollTop = Math.max(0, rect.top - bodyRect.top + body.scrollTop - 12);
   }
 }
 
@@ -6238,8 +6324,15 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
   S.controller = ac;
   setBusy(true);
   // 产出文档型内容（大纲/起名/文风档案）的任务按 Markdown 渲染，正文类任务保持纯文本
-  if (target === 'out') { S.out = ''; S.reasoning = ''; S.outModel = ''; S.outMd = MD_OUT_TASKS.has(body.task); $('#outInfo').textContent = ''; renderOut(); }
-  else { $('#checkBox').innerHTML = '<span class="dim">生成中…</span>'; }
+  if (target === 'out') {
+    S.out = ''; S.outTask = body.task || ''; S.reasoning = ''; S.outModel = '';
+    S.outMd = MD_OUT_TASKS.has(body.task);
+    $('#outInfo').textContent = '';
+    renderOut();
+    if (PROSE_OUT_TASKS.has(S.outTask)) revealOutput();
+  } else {
+    $('#checkBox').innerHTML = '<span class="dim">生成中…</span>';
+  }
   let acc = '';
   try {
     acc = await streamAI(body, {
@@ -6269,7 +6362,11 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
   } finally {
     S.controller = null;
     setBusy(false);
-    if (target === 'out') renderOut();
+    if (target === 'out') {
+      renderOut();
+      // 流式输出停在底部，生成结束后把「追加到正文」也带进视野
+      if (S.out && PROSE_OUT_TASKS.has(S.outTask)) revealOutput({ toActions: true });
+    }
   }
   return acc;
 }
@@ -6330,6 +6427,8 @@ function insertIntoContent(text, mode) {
     ta.value = before + pad1 + text.trim() + pad2 + after;
   }
   ta.dispatchEvent(new Event('input'));
+  // 正文从空变成有内容后，提示语也该跟着变
+  renderOutActions();
 }
 $('#applyAppend').addEventListener('click', () => { if (S.out) { insertIntoContent(S.out, 'append'); toast('已追加到正文 · 按 Ctrl+Z 可撤销', 'ok'); } });
 $('#applyReplace').addEventListener('click', async () => {
@@ -6565,6 +6664,7 @@ async function runModelCompare(picks, task) {
           const s = state[Number(btn.dataset.use)];
           if (!s.text) return;
           S.out = s.text;
+          S.outTask = 'compare';
           S.reasoning = '';
           S.outMd = md;
           S.outModel = s.label;
