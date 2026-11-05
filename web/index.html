@@ -224,9 +224,15 @@
               </div>
             </div>
             <div class="editor-foot">
-              <span id="footInfo"></span>
-              <span class="stat-slot" id="footStats"></span>
-              <span class="narrow-tools" id="narrowTools">
+              <div class="foot-left">
+                <span id="footInfo"></span>
+                <button class="foot-suggest" id="footSuggest" type="button" hidden>
+                  <svg class="ico"><use href="#i-spark" /></svg><span id="footSuggestText"></span>
+                </button>
+              </div>
+              <div class="foot-right">
+                <span class="stat-slot" id="footStats"></span>
+                <span class="narrow-tools" id="narrowTools">
                 <button class="narrow-tool" id="narrowChaptersBtn" type="button" aria-expanded="false" aria-controls="chapterPane" title="章节列表"><svg class="ico"><use href="#i-layers" /></svg><span>章节</span></button>
                 <button class="narrow-tool" id="narrowAssistBtn" type="button" aria-expanded="false" aria-controls="assistPane" title="AI 助手"><svg class="ico"><use href="#i-spark" /></svg><span>AI 助手</span></button>
               </span>
@@ -235,6 +241,7 @@
                 <span><kbd>Ctrl</kbd><kbd>↵</kbd> 续写</span>
                 <span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>↵</kbd> 生成本章</span>
               </span>
+              </div>
             </div>
           </section>
 

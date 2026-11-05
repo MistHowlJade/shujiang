@@ -5231,9 +5231,26 @@ async function openChapterOutlineModal() {
   });
 }
 
+function updateFootSuggest() {
+  const suggestion = $('#footSuggest');
+  if (!suggestion) return;
+  const ch = currentChapter();
+  const empty = !($('#chContent')?.value || '').trim();
+  const hasProseOutput = !!S.out && PROSE_OUT_TASKS.has(S.outTask);
+  const canSuggest = !!S.novel && !!ch && empty && !S.controller && !S.batchController && (hasProseOutput || !S.out);
+  suggestion.hidden = !canSuggest;
+  if (!canSuggest) return;
+  $('#footSuggestText').textContent = hasProseOutput ? '初稿已生成，去采用' : '用 AI 写初稿';
+  suggestion.title = hasProseOutput ? '滚到输出区，把刚才的初稿写进正文' : '让 AI 按章纲写一段初稿；缺模型会先带你接好';
+}
+
 function updateFoot() {
   const ch = currentChapter();
-  if (!ch) { $('#footInfo').textContent = ''; return; }
+  if (!ch) {
+    $('#footInfo').textContent = '';
+    updateFootSuggest();
+    return;
+  }
   const i = S.novel.chapters.indexOf(ch);
   const vol = volumesOf().length ? volumeTitle(effVolumeIds()[i]) : '';
   const hook = effectiveChapterOutline(ch).outline.hook;
@@ -5246,7 +5263,13 @@ function updateFoot() {
     ch.memory ? '已存档记忆' : '未生成记忆',
     hook ? `钩子：${hook}` : '',
   ].filter(Boolean).join('　·　');
+  updateFootSuggest();
 }
+
+$('#footSuggest')?.addEventListener('click', () => {
+  if (S.out && PROSE_OUT_TASKS.has(S.outTask)) return revealOutput({ toActions: true });
+  generateChapter();
+});
 
 /** 当前搜索 / 筛选会把这一章藏起来时，清掉对应的条件；返回是否清过。
  *  拆分 / 合并 / 新建章节后，新标题或新章号可能不匹配当前搜索，先用它恢复可见性。 */
@@ -6316,9 +6339,15 @@ function renderOut() {
 }
 
 /** 生成正文时把输出区滚进视野：按钮在助手栏上方，输出区经常在折叠线以下。
- *  toActions：生成结束后再滚一次，让「追加到正文」这排按钮也露出来。 */
+ *  toActions：生成结束后再滚一次，让「追加到正文」这排按钮也露出来。
+ *  窄窗口里助手栏收成抽屉：直接拉开，否则生成结束后用户只看到稿纸，不知道产出在哪。 */
 function revealOutput({ toActions = false } = {}) {
-  if (S.view !== 'studio') return;
+  if (S.view !== 'studio' || S.focusMode) return;
+  const outer = $('#assistPane');
+  if (outer) {
+    const style = getComputedStyle(outer);
+    if (style.display === 'none' || style.visibility === 'hidden') openStudioPane('assist');
+  }
   const pane = $('.assist-pane[data-pane="write"]');
   if (!pane || !pane.classList.contains('on')) return;
   const body = $('.assist-body');
@@ -6345,6 +6374,8 @@ function setBusy(busy) {
   $('#consistencyBtn').disabled = busy;
   $('#reviewBtn').disabled = busy;
   $$('[data-quick]').forEach((b) => { b.disabled = busy; });
+  // 生成/批量任务跑起来时收起「用 AI 写初稿」，避免连点
+  updateFootSuggest();
   // 流式进行中禁止把半截内容写进正文
   ['#applyAppend', '#applyReplace', '#applyInsert', '#copyOut'].forEach((sl) => { const el = $(sl); if (el) el.disabled = busy; });
 }
