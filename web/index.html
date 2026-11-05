@@ -135,9 +135,10 @@
       <!-- ==================== 工作台 ==================== -->
       <section class="view" id="view-studio">
         <div class="studio">
+          <div class="studio-backdrop" id="studioBackdrop" hidden></div>
 
           <!-- 章节栏 -->
-          <aside class="pane-chapters">
+          <aside class="pane-chapters" id="chapterPane" aria-label="章节列表">
             <div class="pane-head">
               <span class="pane-title">章节</span>
               <div class="pane-tools">
@@ -225,6 +226,10 @@
             <div class="editor-foot">
               <span id="footInfo"></span>
               <span class="stat-slot" id="footStats"></span>
+              <span class="narrow-tools" id="narrowTools">
+                <button class="narrow-tool" id="narrowChaptersBtn" type="button" aria-expanded="false" aria-controls="chapterPane" title="章节列表"><svg class="ico"><use href="#i-layers" /></svg><span>章节</span></button>
+                <button class="narrow-tool" id="narrowAssistBtn" type="button" aria-expanded="false" aria-controls="assistPane" title="AI 助手"><svg class="ico"><use href="#i-spark" /></svg><span>AI 助手</span></button>
+              </span>
               <span class="keyhints">
                 <span><kbd>Ctrl</kbd><kbd>S</kbd> 保存</span>
                 <span><kbd>Ctrl</kbd><kbd>↵</kbd> 续写</span>
@@ -234,7 +239,7 @@
           </section>
 
           <!-- 助手栏 -->
-          <aside class="pane-assist">
+          <aside class="pane-assist" id="assistPane" aria-label="助手面板">
             <div class="segmented" id="assistTabs">
               <button data-tab="write" class="on">写作</button>
               <button data-tab="check">检查</button>

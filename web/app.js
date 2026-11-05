@@ -186,6 +186,7 @@ document.addEventListener('keydown', (e) => {
   // 弹窗、命令面板、阅读器、浮层和选中工具条优先处理 Esc，避免误退出专注模式
   if (!$('#modalMask').hidden && !S.batchController) { closeModal(); return; }
   if (S.batchController) return;
+  if (studioPane) { closeStudioPane({ returnFocus: true }); return; }
   if ($('#cmdkMask') && !$('#cmdkMask').hidden) return;
   if ($('#readerMask')) return;
   if (document.querySelector('.popmenu')) return;
@@ -402,8 +403,59 @@ function refreshSavePill() {
 /* ============================================================
  * 3. 视图
  * ============================================================ */
+/* ============================================================
+ * 窄窗口：工作台左右栏收成抽屉
+ * ============================================================
+ * 900 多像素以下一次看不下三栏，但直接 display:none 会让「章节」
+ * 和「AI 助手」完全消失。这里保留入口：底部两个按钮打开抽屉，
+ * 点遮罩 / 再点按钮 / Esc 关闭。 */
+const NARROW_QUERY = window.matchMedia('(max-width: 920px)');
+const studioToggleEls = {
+  chapters: $('#narrowChaptersBtn'),
+  assist: $('#narrowAssistBtn'),
+};
+let studioPane = '';   // '' | 'chapters' | 'assist'
+
+function syncStudioPaneUI() {
+  const studio = $('.studio');
+  if (!studio) return;
+  studio.classList.toggle('show-chapters', studioPane === 'chapters');
+  studio.classList.toggle('show-assist', studioPane === 'assist');
+  const backdrop = $('#studioBackdrop');
+  if (backdrop) backdrop.hidden = !studioPane;
+  for (const [key, btn] of Object.entries(studioToggleEls)) {
+    btn?.setAttribute('aria-expanded', String(studioPane === key));
+  }
+}
+
+function openStudioPane(which) {
+  studioPane = which;
+  syncStudioPaneUI();
+  if (which === 'chapters') $('#chapterSearch')?.focus({ preventScroll: true });
+  else $('#assistTabs .on, #assistTabs button')?.focus({ preventScroll: true });
+}
+
+function closeStudioPane({ returnFocus = false } = {}) {
+  if (!studioPane) return;
+  const which = studioPane;
+  studioPane = '';
+  syncStudioPaneUI();
+  if (returnFocus) studioToggleEls[which]?.focus({ preventScroll: true });
+}
+
+function toggleStudioPane(which) {
+  if (studioPane === which) closeStudioPane({ returnFocus: true });
+  else openStudioPane(which);
+}
+
+$('#narrowChaptersBtn')?.addEventListener('click', () => toggleStudioPane('chapters'));
+$('#narrowAssistBtn')?.addEventListener('click', () => toggleStudioPane('assist'));
+$('#studioBackdrop')?.addEventListener('click', () => closeStudioPane({ returnFocus: true }));
+NARROW_QUERY.addEventListener?.('change', (e) => { if (!e.matches) closeStudioPane(); });
+
 function setView(v) {
   if (v !== 'studio' && S.focusMode) exitFocus();
+  closeStudioPane();
   S.view = v;
   $$('.view').forEach((el) => el.classList.toggle('on', el.id === `view-${v}`));
   $$('#topnav .tab').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
@@ -3998,6 +4050,7 @@ function enterFocus() {
   if (!S.novel) return toast('先打开一部作品', 'err');
   if (!currentChapter()) return toast('先打开一章再专注', 'err');
   if (S.view !== 'studio') setView('studio');
+  closeStudioPane();
   S.focusMode = true;
   document.querySelector('.app')?.classList.add('focus-mode');
   const bar = $('#focusBar');
