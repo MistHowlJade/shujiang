@@ -106,8 +106,8 @@ function completionsUrl(baseUrl) {
 function resolveProvider(cfg, providerId) {
   const list = cfg.providers || [];
   const p = list.find((x) => x.id === providerId) || list.find((x) => x.id === cfg.activeProviderId) || list[0];
-  if (!p) throw new Error('还没有配置模型服务商，请先到「设置」里填写 Base URL 与 API Key。');
-  if (!p.apiKey) throw new Error(`服务商「${p.name || p.baseUrl}」还没有填写 API Key。`);
+  if (!p) throw new Error('还没有配置模型服务商。请到「设置」里接入，或在书架点「一键开书」按提示完成。');
+  if (!p.apiKey) throw new Error(`服务商「${p.name || p.baseUrl}」还没有填写 API Key。请到「设置」里补齐，或在书架点「一键开书」按提示完成。`);
   return p;
 }
 
@@ -135,7 +135,10 @@ const FRAGMENT_TYPES = [
 
 function resolveModel(cfg, provider, task) {
   const role = ROLE_OF_TASK[task] || 'write';
-  return (cfg.roleModels && cfg.roleModels[role]) || cfg.model || (provider.models || [])[0] || '';
+  const roles = cfg.roleModels || {};
+  // 没单独配角色模型时：先按老规则用全局模型；再退回写作模型；
+  // 最后才用模型列表第一个（可能是向量模型，只作兼容兜底）。
+  return roles[role] || cfg.model || roles.write || (provider.models || [])[0] || '';
 }
 
 /* ------------------------------------------------------------------ */
@@ -197,7 +200,7 @@ function prepareTask(cfg, body) {
 async function callUpstream({ cfg, provider, model, messages, temperature, maxTokens, stream, signal }) {
   const url = completionsUrl(provider.baseUrl);
   const modelName = model || provider.models?.[0] || '';
-  if (!modelName) throw new Error('还没有选择模型');
+  if (!modelName) throw new Error('还没有选择模型。请到「设置」里选一个，或在书架点「一键开书」按提示完成。');
   const body = {
     model: modelName,
     messages,
@@ -233,6 +236,24 @@ async function upstreamErrorText(resp) {
   } catch {
     return `HTTP ${resp.status}`;
   }
+}
+
+/** 把 fetch 的底层网络错误翻成用户能照着查的一两句，别只甩 fetch failed */
+function networkErrorText(err) {
+  const raw = `${err?.code || ''} ${err?.cause?.code || ''} ${err?.message || ''}`;
+  if (err?.name === 'AbortError' || /timeout|timed out|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT/i.test(raw)) {
+    return '连接服务商超时。请检查网络，或确认 Base URL 能打开。';
+  }
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(raw)) {
+    return '找不到这个服务商地址。请检查 Base URL 是否写对。';
+  }
+  if (/ECONNREFUSED/i.test(raw)) {
+    return '服务商拒绝了连接。请检查 Base URL 的地址和端口。';
+  }
+  if (/CERT|SSL|TLS|self.signed|UNABLE_TO_VERIFY/i.test(raw)) {
+    return 'HTTPS 证书校验失败。请确认 Base URL 是 https，且证书有效。';
+  }
+  return '连不上服务商。请检查 Base URL、网络和代理设置。';
 }
 
 /** 上游一个字正文都没给时，尽量说清楚到底发生了什么 */
@@ -533,7 +554,7 @@ async function handleApi(req, res, url) {
       const ids = (j.data || j.models || []).map((m) => m.id || m.name).filter(Boolean).sort();
       return sendJson(res, 200, { ok: true, models: ids });
     } catch (err) {
-      return sendJson(res, 200, { ok: false, error: `连接失败：${err.message}` });
+      return sendJson(res, 200, { ok: false, error: networkErrorText(err) });
     }
   }
 
@@ -1171,7 +1192,7 @@ async function handleApi(req, res, url) {
           error: `模型服务超过 ${Math.round(IDLE_MS / 1000)} 秒没有响应。请检查服务商地址是否正确、网络是否通畅，或换一个模型再试。`,
         });
       }
-      return sendJson(res, 502, { error: `无法连接模型服务：${err.message}` });
+      return sendJson(res, 502, { error: `无法连接模型服务：${networkErrorText(err)}` });
     }
     if (!upstream.resp.ok) {
       const detail = await upstreamErrorText(upstream.resp);

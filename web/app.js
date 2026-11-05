@@ -1012,8 +1012,30 @@ function providerHasKey(provider) {
   return !!provider && (provider.apiKeySet || !!String(provider.apiKey || '').trim());
 }
 
+/** 任务对应的模型角色：记忆 / 一致性用 summary，审稿用 review，其余用 write */
+const TASK_MODEL_ROLE = { memory: 'summary', consistency: 'summary', review: 'review' };
+
+function taskModelRole(task) {
+  return TASK_MODEL_ROLE[task] || 'write';
+}
+
+/** 当前任务明确配置过的模型：角色模型 → 全局模型 → 写作模型；不拿列表第一个凑合 */
+function configuredModel(task = 'chapter') {
+  const cfg = S.config || {};
+  const roles = cfg.roleModels || {};
+  const role = taskModelRole(task);
+  return String(roles[role] || cfg.model || roles.write || '').trim();
+}
+
+/** 现在能不能直接发起 AI 调用：至少有一个带 Key 的服务商，并且选过模型 */
+function aiModelReady(task = 'chapter', explicitModel = '') {
+  const cfg = S.config || {};
+  if (!(cfg.providers || []).some(providerHasKey)) return false;
+  return !!String(explicitModel || configuredModel(task) || '').trim();
+}
+
 /**
- * 找出当前真正能用的服务商和模型；缺一个都先去补，别让请求发出去才报错。
+ * 找出一键开书真正能用的服务商和模型；缺一个都先去补，别让请求发出去才报错。
  * 只看「明确选过」的模型，不拿列表里第一个凑合：
  * 列表里第一个可能是向量 / 画图模型，用它开书只会得到一堆看不懂的错误。
  */
@@ -1021,7 +1043,7 @@ function quickStartModel() {
   const cfg = S.config || {};
   const usable = (cfg.providers || []).filter(providerHasKey);
   if (!usable.length) return null;
-  const model = String((cfg.roleModels && cfg.roleModels.write) || cfg.model || '').trim();
+  const model = configuredModel('chapter');
   if (!model) return null;
   // 哪个服务商的列表里有这个模型，就用哪个；都没有就按当前服务商 / 第一个来
   const holder = usable.find((p) => (p.models || []).some((m) => String(m).trim() === model));
@@ -1139,14 +1161,24 @@ function openQuickStartModal() {
 }
 
 /**
- * 一键开书前的模型准备。
- * 不把用户直接丢进设置页，而是按当前配置判断缺哪一步：
+ * 模型准备：不把用户直接丢进设置页，而是按当前配置判断缺哪一步：
  *   没有服务商 → 选一家常用服务商，当场填 Key
  *   有服务商没 Key → 当场填 Key
  *   有 Key 没模型 → 自动拉模型列表，选一个；拉不到就手动填
- * 选好后保存配置，直接回到开书表单。
+ * 选好后保存配置，再通过 onReady 回到用户本来要做的事。
+ * 默认的服务对象是一键开书；其它 AI 操作可传 isReady / onReady 接回原动作。
  */
-async function openQuickStartSetup() {
+async function openModelSetup(opts = {}) {
+  const {
+    introTitle = '还差一步：接入模型',
+    introText = '写正文、想大纲、改稿子都要用 AI 模型。接一次，以后都能用。',
+    modelTitle = '选一个模型，继续',
+    saveLabel = '保存，继续',
+    onCancel = null,
+  } = opts;
+  // renderModel 内部也有一个叫 opts 的渲染参数，这里先留一份，别被它遮住
+  const setup = opts;
+
   if (!S.config) {
     try {
       S.config = await api.get('/api/config');
@@ -1155,21 +1187,31 @@ async function openQuickStartSetup() {
         <h3>读不到模型设置</h3>
         <p class="modal-sub">${esc(quickStartErrorText(err))}</p>
         <div class="modal-foot"><button class="btn btn-primary" id="qsCfgRetry">重试</button></div>`, (box) => {
-        box.querySelector('#qsCfgRetry').onclick = () => { closeModal(); openQuickStartSetup(); };
+        box.querySelector('#qsCfgRetry').onclick = () => { closeModal(); openModelSetup(opts); };
       });
       return;
     }
   }
-  // 配置可能在别处已经改好，能开书就别再拦一道
-  if (quickStartModel()) return openQuickStartModal();
+  // 配置可能在别处已经改好，能用就别再拦一道
+  if ((setup.isReady || quickStartModel)()) {
+    (setup.onReady || openQuickStartModal)();
+    return;
+  }
 
   let closed = false;
-  const box = showModal('', null, { onClose: () => { closed = true; } });
+  let finished = false;
+  const box = showModal('', null, {
+    onClose: () => {
+      closed = true;
+      // 用户主动关掉弹窗时，让原操作知道这次没继续
+      if (!finished) onCancel?.();
+    },
+  });
   const cfg = () => S.config || {};
   const providers = () => (cfg().providers || []).filter(Boolean);
   const providerById = (id) => providers().find((p) => p.id === id) || null;
   const close = () => closeModal();
-  const goSettings = () => { closeModal(); setView('settings'); };
+  const goSettings = () => { finished = true; closeModal(); setView('settings'); };
   const presetOf = (provider) => PRESETS.find((x) => x.baseUrl && provider?.baseUrl
     && x.baseUrl.replace(/\/+$/, '') === String(provider.baseUrl).replace(/\/+$/, ''));
 
@@ -1196,12 +1238,12 @@ async function openQuickStartSetup() {
     if (closed) return;
     const quick = PRESETS.filter((p) => !/Ollama/i.test(p.name));
     box.innerHTML = `
-      <h3>一键开书还差一步：接入模型</h3>
-      <p class="modal-sub">一键开书要请一个 AI 模型来写书名、人物、大纲和第一章。接一次，以后都能用。</p>
+      <h3>${esc(introTitle)}</h3>
+      <p class="modal-sub">${esc(introText)}</p>
       <div class="qs-setup-steps">
         <div class="qs-setup-step"><b>1</b><div><strong>选一家服务商</strong><em>国内常用 DeepSeek；已经有别家的 Key 也可以直接用。</em></div></div>
         <div class="qs-setup-step"><b>2</b><div><strong>粘贴 API Key</strong><em>在服务商后台创建一个 Key，复制过来。这里不需要注册账号。</em></div></div>
-        <div class="qs-setup-step"><b>3</b><div><strong>选一个模型</strong><em>连上后会自动列出可用模型，点一个就能回来开书。</em></div></div>
+        <div class="qs-setup-step"><b>3</b><div><strong>选一个模型</strong><em>连上后会自动列出可用模型，点一个就能继续。</em></div></div>
       </div>
       <label class="field-label">从常用服务商开始<span class="field-hint">已有 Key 的话，下一步粘贴即可</span></label>
       <div class="qs-preset-grid">
@@ -1411,7 +1453,7 @@ async function openQuickStartSetup() {
     const picked = opts.picked || preferredModel(provider, models);
     const manualPlaceholder = presetOf(provider)?.models?.[0] || '例如 deepseek-chat';
     box.innerHTML = `
-      <h3>选一个模型，继续开书</h3>
+      <h3>${esc(modelTitle)}</h3>
       <p class="modal-sub">服务商「${esc(provider.name || '未命名服务商')}」已经接上。<span class="qs-dim">${esc(provider.baseUrl || '')}</span></p>
       ${loading ? `<div class="qs-fetch"><span class="qs-spinner"></span><span>正在获取可用模型…</span></div>` : ''}
       ${error ? `<div class="qs-warns qs-warns-err"><b>没能自动获取模型列表</b><p>${esc(error)}</p><p>有些服务商不开放这个接口，这不影响使用；在服务商文档里找到模型 ID，填到下面就可以。</p></div>` : ''}
@@ -1433,7 +1475,7 @@ async function openQuickStartSetup() {
       </div>
       <div class="modal-foot qs-foot">
         <button class="btn btn-text" id="qsModelCancel">取消</button>
-        <button class="btn btn-primary" id="qsModelUse" ${loading ? 'disabled' : ''}>保存，继续开书</button>
+        <button class="btn btn-primary" id="qsModelUse" ${loading ? 'disabled' : ''}>${esc(saveLabel)}</button>
       </div>`;
     const errorEl = box.querySelector('#qsModelError');
     const manualEl = box.querySelector('#qsModelInput');
@@ -1484,9 +1526,10 @@ async function openQuickStartSetup() {
         await api.send('/api/config', configForSave(c));
         S.config = await api.get('/api/config');
         if (closed) return;
+        finished = true;
         closeModal();
         toast(`已选好模型 ${model}`, 'ok');
-        openQuickStartModal();
+        (setup.onReady || openQuickStartModal)();
       } catch (err) {
         if (closed) return;
         showError(quickStartErrorText(err));
@@ -1507,6 +1550,18 @@ async function openQuickStartSetup() {
   }
   const models = quickStartModelList(active.models);
   return renderModel(active.id, { models, fetched: models.length > 0 });
+}
+
+/** 一键开书的模型准备：缺什么补什么，补好回到开书表单 */
+function openQuickStartSetup() {
+  return openModelSetup({
+    introTitle: '一键开书还差一步：接入模型',
+    introText: '一键开书要请一个 AI 模型来写书名、人物、大纲和第一章。接一次，以后都能用。',
+    modelTitle: '选一个模型，继续开书',
+    saveLabel: '保存，继续开书',
+    isReady: quickStartModel,
+    onReady: openQuickStartModal,
+  });
 }
 
 function renderQuickStartRun(box, run) {
@@ -6155,8 +6210,30 @@ function setBusy(busy) {
   ['#applyAppend', '#applyReplace', '#applyInsert', '#copyOut'].forEach((sl) => { const el = $(sl); if (el) el.disabled = busy; });
 }
 
-async function runStream(body, { target = 'out' } = {}) {
+/** 生成前发现缺少服务商 / Key / 模型：就地打开接入引导，接好后重跑这次生成 */
+function openGenerateModelSetup(body, retry) {
+  return openModelSetup({
+    introTitle: '开始生成前还差一步：接入模型',
+    introText: '写正文、想大纲、改稿子都要用 AI 模型。接一次，以后都能用。',
+    modelTitle: '选一个模型，继续生成',
+    saveLabel: '保存，继续生成',
+    isReady: () => aiModelReady(body.task || 'chapter', body.model),
+    onReady: retry,
+    onCancel: () => toast('还没接入模型，这次没有开始生成'),
+  });
+}
+
+/** 服务端先一步发现配置问题时，也接到同一套模型引导，而不是只弹一句报错 */
+function isModelSetupError(err) {
+  return /还没有配置模型服务商|还没有填写 API Key|还没有选择模型/.test(String(err?.message || err || ''));
+}
+
+async function runStream(body, { target = 'out', retried = false } = {}) {
   if (S.controller || S.batchController) { toast('已有任务在跑，先停止', 'err'); return ''; }
+  if (!retried && !aiModelReady(body.task || 'chapter', body.model)) {
+    openGenerateModelSetup(body, () => runStream(body, { target, retried: true }));
+    return '';
+  }
   const ac = new AbortController();
   S.controller = ac;
   setBusy(true);
@@ -6183,7 +6260,9 @@ async function runStream(body, { target = 'out' } = {}) {
     });
   } catch (err) {
     if (err.name === 'AbortError') toast('已停止');
-    else {
+    else if (!retried && isModelSetupError(err)) {
+      openGenerateModelSetup(body, () => runStream(body, { target, retried: true }));
+    } else {
       toast(err.message, 'err');
       if (target !== 'out') $('#checkBox').innerHTML = `<span class="status-err">${esc(err.message)}</span>`;
     }
@@ -6343,7 +6422,17 @@ function cmpTaskBody(task) {
 function openModelCompare() {
   if (!S.novel) return toast('先打开作品', 'err');
   const cand = cmpCandidates();
-  if (!cand.length) return toast('还没有配置模型服务商，去「设置」里加一个', 'err');
+  if (!cand.length) {
+    return openModelSetup({
+      introTitle: '模型对比前还差一步：接入模型',
+      introText: '对比要同时调用两个模型。先接好一个服务商，再回来选两边。',
+      modelTitle: '选一个模型，继续设置对比',
+      saveLabel: '保存，继续',
+      isReady: () => cmpCandidates().length > 0,
+      onReady: openModelCompare,
+      onCancel: () => toast('还没接入模型，这次没有开始对比'),
+    });
+  }
   const tasks = cmpTaskList();
   if (!tasks.length) return toast('先建一章', 'err');
 
@@ -6750,6 +6839,17 @@ function openBatchMemory() {
   if (S.controller || S.batchController) return toast('已有任务在跑，先停止', 'err');
   const chapters = S.novel.chapters;
   if (!chapters.length) return toast('这部作品还没有章节', 'err');
+  if (!aiModelReady('memory')) {
+    return openModelSetup({
+      introTitle: '批量补记忆前还差一步：接入模型',
+      introText: '补章节记忆要逐章调用模型。先把模型接好，再回来选章节范围。',
+      modelTitle: '选一个模型，继续补记忆',
+      saveLabel: '保存，继续补记忆',
+      isReady: () => aiModelReady('memory'),
+      onReady: openBatchMemory,
+      onCancel: () => toast('还没接入模型，这次没有开始补记忆'),
+    });
+  }
   const last = chapters[chapters.length - 1].no || chapters.length;
   const firstMissing = chapters.find((c) => (c.content || '').trim() && !c.memory);
 
@@ -13207,7 +13307,7 @@ async function boot() {
   setView('shelf');
   loadStats();
   if (!S.config?.providers?.length) {
-    setTimeout(() => toast('第一次使用：请到「设置」填好 Base URL 与 API Key'), 500);
+    setTimeout(() => toast('第一次使用：点「一键开书」，会先带你接好模型'), 500);
   }
 }
 
