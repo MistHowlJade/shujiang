@@ -994,6 +994,23 @@ $('#restoreBackupInput')?.addEventListener('change', (e) => {
   if (file) restoreNovelBackup(file);
 });
 
+function novelDraftFrom(box) {
+  return {
+    title: box.querySelector('#nvTitle').value.trim() || '导入的作品',
+    genre: box.querySelector('#nvGenre').value.trim(),
+    author: box.querySelector('#nvAuthor').value.trim(),
+    tags: parseNovelTags(box.querySelector('#nvTags').value),
+    logline: box.querySelector('#nvLogline').value.trim(),
+    platform: box.querySelector('#nvPlatform').value,
+  };
+}
+
+async function saveNovelDraftMeta(novel, logline, platform) {
+  if (!logline && !platform) return;
+  novel.meta = { ...(novel.meta || {}), logline, platform };
+  await api.put(`/api/novels/${novel.id}`, { meta: novel.meta });
+}
+
 function openNewNovelModal() {
   showModal(`
     <h3>新建作品</h3>
@@ -1012,12 +1029,41 @@ function openNewNovelModal() {
       <option value="">不限</option><option>番茄小说</option><option>起点中文网</option>
       <option>七猫</option><option>晋江</option><option>出版向</option>
     </select>
+    <div class="nv-import">手上有旧稿？<button type="button" class="link-btn" id="nvImportLink">直接导入</button>，不用在这里填完。</div>
     <div class="modal-foot">
       <button class="btn btn-text" id="nvCancel">取消</button>
       <button class="btn btn-primary" id="nvOk">创建</button>
     </div>`, (box) => {
     box.querySelector('#nvCancel').onclick = closeModal;
     box.querySelector('#nvTitle').focus();
+    box.querySelector('#nvImportLink').onclick = async () => {
+      const linkBtn = box.querySelector('#nvImportLink');
+      const okBtn = box.querySelector('#nvOk');
+      if (linkBtn.disabled) return;
+      linkBtn.disabled = true;
+      okBtn.disabled = true;
+      const { title, genre, author, tags, logline, platform } = novelDraftFrom(box);
+      let novel;
+      try {
+        ({ novel } = await api.send('/api/novels', { title, genre, author, tags }));
+      } catch (err) {
+        linkBtn.disabled = false;
+        okBtn.disabled = false;
+        return toast(err.message, 'err');
+      }
+      const warnings = [];
+      try { await saveNovelDraftMeta(novel, logline, platform); } catch (err) { warnings.push(`简介没保存：${err.message}`); }
+      closeModal();
+      await loadNovels().catch(() => {});
+      try {
+        await openNovel(novel.id);
+      } catch (err) {
+        return toast(`《${novel.title}》已建好，但没能打开：${err.message}`, 'err');
+      }
+      openImportModal();
+      if (warnings.length) toast(`作品已建好；${warnings.join('；')}`, 'err');
+      else toast('先导入稿子，导入后可以在标题上改名', 'ok');
+    };
     box.querySelector('#nvOk').onclick = async () => {
       const okBtn = box.querySelector('#nvOk');
       if (okBtn.disabled) return;   // 连点两下只建一本书
@@ -1025,12 +1071,7 @@ function openNewNovelModal() {
       okBtn.disabled = true;
       okBtn.textContent = '创建中…';
       // 先把要填的内容读出来：后面弹窗可能被 Esc 关掉，节点就没了
-      const title = box.querySelector('#nvTitle').value.trim() || '未命名作品';
-      const genre = box.querySelector('#nvGenre').value.trim();
-      const author = box.querySelector('#nvAuthor').value.trim();
-      const tags = parseNovelTags(box.querySelector('#nvTags').value);
-      const logline = box.querySelector('#nvLogline').value.trim();
-      const platform = box.querySelector('#nvPlatform').value;
+      const { title, genre, author, tags, logline, platform } = novelDraftFrom(box);
       let novel;
       try {
         ({ novel } = await api.send('/api/novels', { title, genre, author, tags }));
@@ -1042,9 +1083,8 @@ function openNewNovelModal() {
       const warnings = [];
       // 简介和目标平台只在真的填了时才写回，省一次请求
       if (logline || platform) {
-        novel.meta = { ...(novel.meta || {}), logline, platform };
         try {
-          await api.put(`/api/novels/${novel.id}`, { meta: novel.meta });
+          await saveNovelDraftMeta(novel, logline, platform);
         } catch (err) {
           warnings.push(`简介没保存：${err.message}`);
         }
