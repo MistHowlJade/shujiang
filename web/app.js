@@ -2231,12 +2231,18 @@ function quickStartResult(box, run, kind, message = '') {
   if (run.chapterTitle) {
     facts.push(['第一章', `${run.chapterTitle}${run.words ? ` · ${fmtWords(run.words)} 字` : ' · 还没写正文'}`]);
   }
-  const head = kind === 'stopped' ? '已停止' : kind === 'error' ? '开书没走完' : '书已经开好了';
+  const needsResume = !!run.novelId && quickStartNeedsResume(run);
+  const head = kind === 'stopped' ? '已停止'
+    : kind === 'error' ? '开书没走完'
+    : needsResume ? '书已经搭好，还差几步'
+    : '书已经开好了';
   const sub = kind === 'stopped'
     ? '已经生成并保存的内容都在书架里，可以随时接着写。'
     : kind === 'error'
       ? '已经建好的部分都留在书架里，没有丢。'
-      : '有几处模型没配合好，但书已经可以写了。';
+      : needsResume
+        ? '下面这几步补上，开写会顺很多；已经生成的内容不会重跑。'
+        : '有几处模型没配合好，但书已经可以写了。';
   const errHtml = kind === 'error' && message
     ? `<div class="qs-warns qs-warns-err"><b>卡住的原因</b><p>${esc(message)}</p>${run.warnings.length ? '' : '<p>已经生成的内容已保存；可以打开作品继续写，或稍后重试。</p>'}</div>`
     : '';
@@ -2251,8 +2257,8 @@ function quickStartResult(box, run, kind, message = '') {
     ${warns}
     <div class="modal-foot">
       ${run.novelId ? '<button class="btn btn-text" id="qsShelf">留在书架</button>' : '<button class="btn btn-text" id="qsDone">关闭</button>'}
-      ${run.novelId && quickStartNeedsResume(run) ? '<button class="btn" id="qsResume" type="button">接着补完</button>' : ''}
-      ${run.novelId ? `<button class="btn btn-primary" id="qsOpen">${run.chapterId ? '打开作品，开始写' : '打开作品'}</button>` : ''}
+      ${run.novelId && needsResume ? '<button class="btn btn-primary" id="qsResume" type="button">接着补完</button>' : ''}
+      ${run.novelId ? `<button class="${needsResume ? 'btn' : 'btn btn-primary'}" id="qsOpen">${run.chapterId ? '打开作品，开始写' : '打开作品'}</button>` : ''}
     </div>`;
   box.querySelector('#qsDone')?.addEventListener('click', closeModal);
   box.querySelector('#qsShelf')?.addEventListener('click', async () => {
