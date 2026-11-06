@@ -5770,19 +5770,46 @@ function syncOrder(serverChapters) {
   n.chapters.sort((a, b) => (rank.get(a.id) ?? -1) - (rank.get(b.id) ?? -1));
 }
 
+/** 下一章如果能在章纲里找到还没建过的一条，就用它：章节名 / 概要 / 章纲 / 归属一起带上 */
+function nextUncreatedOutlineChapter(novel) {
+  const used = new Set((novel.chapters || []).map((c) => c.outlineId).filter(Boolean));
+  for (const volume of novel.outline?.volumes || []) {
+    for (const ch of volume.chapters || []) {
+      if (ch && !used.has(ch.id)) return { volume, chapter: ch };
+    }
+  }
+  return null;
+}
+
 async function addChapter() {
   const n = S.novel;
   if (!n) return toast('先打开一部作品', 'err');
   const at = n.chapters.findIndex((c) => c.id === S.chapterId);
   const eff = volumesOf().length ? effVolumeIds() : null;
   const insertAt = at >= 0 ? at + 1 : n.chapters.length;
-  // 新章节跟着当前章走，落在同一卷里
-  const volId = eff && at >= 0 ? (eff[at] || '') : '';
-  const { chapter } = await api.send(`/api/novels/${n.id}/chapters`, {
-    title: `第 ${n.chapters.length + 1} 章`,
-    at: at >= 0 ? at + 1 : undefined,
-    volumeId: volId,
-  });
+  const insertAtArg = at >= 0 ? at + 1 : undefined;
+  const linked = nextUncreatedOutlineChapter(n);
+  let payload;
+  if (linked) {
+    // 有章纲就按章纲建，没有就回退空白章
+    const outline = { scene: linked.chapter.scene, characters: linked.chapter.characters, summary: linked.chapter.summary, hook: linked.chapter.hook };
+    payload = {
+      title: linked.chapter.title || `第 ${n.chapters.length + 1} 章`,
+      summary: linked.chapter.summary || '',
+      outline: Object.values(outline).some(Boolean) ? outline : null,
+      outlineId: linked.chapter.id,
+      volumeId: linked.volume.id,
+      at: insertAtArg,
+    };
+  } else {
+    // 新章节跟着当前章走，落在同一卷里
+    payload = {
+      title: `第 ${n.chapters.length + 1} 章`,
+      at: insertAtArg,
+      volumeId: eff && at >= 0 ? (eff[at] || '') : '',
+    };
+  }
+  const { chapter } = await api.send(`/api/novels/${n.id}/chapters`, payload);
   n.chapters.splice(insertAt, 0, chapter);
   // 新章是草稿；如果当前正筛着「定稿」之类，或搜索词不匹配，会把刚建的章藏起来，先回到全部
   clearFiltersHidingChapter(chapter.id);
