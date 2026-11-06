@@ -434,21 +434,24 @@
               <span class="tag tag-info">OpenAI 兼容</span>
             </div>
             <p class="desc">填任意兼容 OpenAI 接口的服务：DeepSeek、通义、Kimi、智谱、Ollama 本地、各种中转站都可以。密钥只保存在本机 <code>data/config.json</code>。</p>
+            <p class="desc dim-text">第一次用？先不用看懂下面每个字段——回书架点「一键开书」，缺什么会当场带你补上。</p>
             <div id="providerList"></div>
             <div class="btn-row"><button class="btn" id="addProviderBtn"><svg class="ico"><use href="#i-plus" /></svg>添加服务商</button></div>
             <div class="preset-row" id="presetRow"></div>
           </div>
 
           <div class="card">
-            <div class="card-head"><h2>生成参数</h2></div>
-            <div class="field-grid">
-              <label class="field-label">默认模型<select id="cfgModel" class="select"></select></label>
-              <label class="field-label">单次最大输出 tokens<input id="cfgMaxTokens" class="input" type="number" min="256" step="256" /></label>
-              <label class="field-label">上下文预算（字符）<input id="cfgBudget" class="input" type="number" min="4000" step="1000" /></label>
-              <label class="field-label">温度 <span class="dim-text" id="tempVal">0.85</span><input id="cfgTemp" type="range" min="0" max="1.5" step="0.05" /></label>
-            </div>
+            <div class="card-head"><h2>生成参数</h2><span class="tag">默认就能用</span></div>
+            <p class="desc">新手先不用改：这些是适合大多数中文网文的默认值。展开以后也可以按需调整。</p>
             <details class="details">
-              <summary>分角色指定模型（可选）</summary>
+              <summary>详细参数（通常不用改）</summary>
+              <div class="field-grid">
+                <label class="field-label">默认模型<select id="cfgModel" class="select"></select></label>
+                <label class="field-label">单次最大输出 tokens<input id="cfgMaxTokens" class="input" type="number" min="256" step="256" /></label>
+                <label class="field-label">上下文预算（字符）<input id="cfgBudget" class="input" type="number" min="4000" step="1000" /></label>
+                <label class="field-label">温度 <span class="dim-text" id="tempVal">0.85</span><input id="cfgTemp" type="range" min="0" max="1.5" step="0.05" /></label>
+              </div>
+              <p class="dim-text" style="margin-top:16px;margin-bottom:2px">分角色模型（可选）：留空 = 用上面的默认模型</p>
               <div class="field-grid three">
                 <label class="field-label">写作 / 润色<input id="roleWrite" class="input" placeholder="留空 = 默认" /></label>
                 <label class="field-label">记忆 / 一致性<input id="roleSummary" class="input" placeholder="留空 = 默认" /></label>
