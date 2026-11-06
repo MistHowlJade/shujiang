@@ -1695,6 +1695,151 @@ function renderQuickStartRun(box, run) {
   });
 }
 
+/** 快开流程的单步：调用模型、落盘、更新 run；失败按类型处理 */
+async function quickStartTitleStep(box, run, novelId, base) {
+  quickStartStep(box, 'title', 'running');
+  quickStartSub(box, '正在起书名…');
+  try {
+    const text = await quickStartStream(run, box, 'title', '起书名', {
+      ...base,
+      task: 'titles',
+      novelId,
+      payload: { instruction: `这本书的一句话故事是「${run.idea}」。请为它起 8 个书名候选，每个附一句理由，贴合网文平台的搜索习惯。` },
+    });
+    const title = quickStartPickTitle(text);
+    if (!title) {
+      quickStartStep(box, 'title', 'skip', '先叫《未命名作品》，之后可改');
+      return '书名没生成成功。作品暂时叫《未命名作品》，可以在「设定库 → 大纲」里改名。';
+    }
+    await api.put(`/api/novels/${novelId}`, { title });
+    run.title = title;
+    quickStartStep(box, 'title', 'done', `《${title}》`);
+    return '';
+  } catch (err) {
+    if (quickStartIsStop(err, run)) throw err;
+    quickStartStep(box, 'title', 'error', '跳过，之后可在设定库改名');
+    return `书名没生成成功：${quickStartErrorText(err)}。作品暂时叫《未命名作品》。`;
+  }
+}
+
+async function quickStartCharactersStep(box, run, novelId, base) {
+  quickStartStep(box, 'characters', 'running');
+  quickStartSub(box, '正在设计人物…');
+  try {
+    const text = await quickStartStream(run, box, 'characters', '设计人物', {
+      ...base,
+      task: 'characters',
+      novelId,
+      payload: { instruction: `根据这句话故事「${run.idea}」，设计 6 位主要人物（含主角、对手、关键配角）。` },
+    });
+    const arr = parseJsonLoose(text);
+    const rawList = Array.isArray(arr) ? arr : (Array.isArray(arr?.characters) ? arr.characters : []);
+    const list = rawList
+      .filter((x) => x && typeof x === 'object' && String(x.name || '').trim())
+      .map((x) => ({
+        ...x,
+        id: uid('ch'),
+        name: String(x.name).trim(),
+        relations: Array.isArray(x.relations) ? x.relations : [],
+        keywords: Array.isArray(x.keywords) ? x.keywords : [],
+      }));
+    if (!list.length) throw new Error('模型返回的人物格式看不懂');
+    await api.put(`/api/novels/${novelId}`, { bible: { characters: list } });
+    run.characters = list.length;
+    quickStartStep(box, 'characters', 'done', `${list.length} 位 · ${list.slice(0, 3).map((x) => x.name).join('、')}${list.length > 3 ? '…' : ''}`);
+    return '';
+  } catch (err) {
+    if (quickStartIsStop(err, run)) throw err;
+    quickStartStep(box, 'characters', 'error', '跳过，可在设定库补');
+    return `人物没生成成功：${quickStartErrorText(err)}。之后可以在「设定库 → 人物」补。`;
+  }
+}
+
+async function quickStartOutlineStep(box, run, novelId, base) {
+  quickStartStep(box, 'outline', 'running');
+  quickStartSub(box, '正在铺全书大纲…');
+  try {
+    const text = await quickStartStream(run, box, 'outline', '铺全书大纲', {
+      ...base,
+      task: 'outline',
+      novelId,
+      payload: {
+        templateKey: 'outline:aiFullOutline',
+        instruction: quickStartOutlineInstruction(run),
+      },
+    });
+    const parsed = parseOutlineMarkdown(text);
+    const total = parsed.reduce((s, v) => s + (v.chapters?.length || 0), 0);
+    if (!total) throw new Error('模型没有输出可用的分卷 / 章纲');
+    parsed.forEach((v) => { v.id = v.id || uid('v'); });
+    await api.put(`/api/novels/${novelId}`, { outline: { volumes: parsed, notes: '' } });
+    run.outline = parsed;
+    run.outlineChapters = total;
+    quickStartStep(box, 'outline', 'done', `${parsed.length} 卷 · ${total} 章`);
+    const planned = run.scale.volumes * run.scale.perVolume;
+    return total < planned
+      ? `模型只排了 ${total} 章（原计划 ${planned} 章）。先按现有大纲写第一章，之后可以在「设定库 → 大纲」继续补。`
+      : '';
+  } catch (err) {
+    if (quickStartIsStop(err, run)) throw err;
+    quickStartStep(box, 'outline', 'error', '没能生成可用的分卷大纲');
+    throw new Error(`全书大纲没生成成功：${quickStartErrorText(err)}`);
+  }
+}
+
+async function quickStartChapterStep(box, run, novelId) {
+  const first = quickStartFirstChapter(run.outline);
+  if (!first) throw new Error('大纲里没有可用的第一章');
+  quickStartStep(box, 'chapter', 'running');
+  quickStartSub(box, `正在建第一章「${first.chapter.title}」…`);
+  const made = await api.send(`/api/novels/${novelId}/chapters`, {
+    title: first.chapter.title || '第一章',
+    summary: first.chapter.summary || '',
+    outline: quickStartChapterOutline(first.chapter),
+    outlineId: first.chapter.id,
+    volumeId: first.volume.id,
+    at: 0,
+  });
+  run.chapterId = made.chapter.id;
+  run.chapterTitle = made.chapter.title;
+  quickStartStep(box, 'chapter', 'done', `第 1 章 · ${made.chapter.title}`);
+  return first;
+}
+
+async function quickStartProseStep(box, run, novelId, chapterId, firstChapter, base) {
+  quickStartStep(box, 'prose', 'running');
+  quickStartSub(box, '正在写第一章正文…');
+  let prose = '';
+  try {
+    await quickStartStream(run, box, 'prose', '写第一章正文', {
+      ...base,
+      task: 'chapter',
+      novelId,
+      chapterId,
+      payload: {
+        targetWords: 1600,
+        instruction: quickStartChapterInstruction(firstChapter.chapter),
+      },
+    }, (text) => { prose = text; });
+    if (!prose.trim()) throw new Error('模型没有返回正文');
+    await api.put(`/api/novels/${novelId}/chapters/${chapterId}`, { content: prose.trim() });
+    run.words = countWords(prose);
+    quickStartStep(box, 'prose', 'done', `${fmtWords(run.words)} 字`);
+    return '';
+  } catch (err) {
+    if (quickStartIsStop(err, run)) {
+      // 停止时已经写出来的半章也留下，别让作者白等
+      if (prose.trim().length >= 40) {
+        await api.put(`/api/novels/${novelId}/chapters/${chapterId}`, { content: prose.trim() }).catch(() => {});
+        run.words = countWords(prose);
+      }
+      throw err;
+    }
+    quickStartStep(box, 'prose', 'error', '可以先打开作品自己写');
+    return `第一章正文没生成成功：${quickStartErrorText(err)}。章纲和空白章已经建好，可以直接开写。`;
+  }
+}
+
 async function runQuickStart(box, run) {
   const ready = quickStartModel();
   if (!ready) {
@@ -1703,7 +1848,6 @@ async function runQuickStart(box, run) {
     return;
   }
   const base = { providerId: ready.providerId, model: ready.model };
-  let prose = '';
   try {
     /* 1. 建作品 */
     quickStartStep(box, 'create', 'running');
@@ -1716,136 +1860,28 @@ async function runQuickStart(box, run) {
     quickStartAssertRunning(run);
 
     /* 2. 书名 */
-    try {
-      const text = await quickStartStream(run, box, 'title', '起书名', {
-        ...base,
-        task: 'titles',
-        novelId: novel.id,
-        payload: { instruction: `这本书的一句话故事是「${run.idea}」。请为它起 8 个书名候选，每个附一句理由，贴合网文平台的搜索习惯。` },
-      });
-      const title = quickStartPickTitle(text);
-      if (!title) {
-        quickStartStep(box, 'title', 'skip', '先叫《未命名作品》，之后可改');
-        run.warnings.push('书名没生成成功。作品暂时叫《未命名作品》，可以在「设定库 → 大纲」里改名。');
-      } else {
-        await api.put(`/api/novels/${novel.id}`, { title });
-        run.title = title;
-        quickStartStep(box, 'title', 'done', `《${title}》`);
-      }
-    } catch (err) {
-      if (quickStartIsStop(err, run)) throw err;
-      quickStartStep(box, 'title', 'error', '跳过，之后可在设定库改名');
-      run.warnings.push(`书名没生成成功：${quickStartErrorText(err)}。作品暂时叫《未命名作品》。`);
-    }
+    const titleWarning = await quickStartTitleStep(box, run, novel.id, base);
+    if (titleWarning) run.warnings.push(titleWarning);
     quickStartAssertRunning(run);
 
     /* 3. 人物 */
-    try {
-      const text = await quickStartStream(run, box, 'characters', '设计人物', {
-        ...base,
-        task: 'characters',
-        novelId: novel.id,
-        payload: { instruction: `根据这句话故事「${run.idea}」，设计 6 位主要人物（含主角、对手、关键配角）。` },
-      });
-      const arr = parseJsonLoose(text);
-      const rawList = Array.isArray(arr) ? arr : (Array.isArray(arr?.characters) ? arr.characters : []);
-      const list = rawList
-        .filter((x) => x && typeof x === 'object' && String(x.name || '').trim())
-        .map((x) => ({
-          ...x,
-          id: uid('ch'),
-          name: String(x.name).trim(),
-          relations: Array.isArray(x.relations) ? x.relations : [],
-          keywords: Array.isArray(x.keywords) ? x.keywords : [],
-        }));
-      if (!list.length) throw new Error('模型返回的人物格式看不懂');
-      await api.put(`/api/novels/${novel.id}`, { bible: { characters: list } });
-      run.characters = list.length;
-      quickStartStep(box, 'characters', 'done', `${list.length} 位 · ${list.slice(0, 3).map((x) => x.name).join('、')}${list.length > 3 ? '…' : ''}`);
-    } catch (err) {
-      if (quickStartIsStop(err, run)) throw err;
-      quickStartStep(box, 'characters', 'error', '跳过，可在设定库补');
-      run.warnings.push(`人物没生成成功：${quickStartErrorText(err)}。之后可以在「设定库 → 人物」补。`);
-    }
+    const charWarning = await quickStartCharactersStep(box, run, novel.id, base);
+    if (charWarning) run.warnings.push(charWarning);
     quickStartAssertRunning(run);
 
     /* 4. 全书大纲 */
-    try {
-      const text = await quickStartStream(run, box, 'outline', '铺全书大纲', {
-        ...base,
-        task: 'outline',
-        novelId: novel.id,
-        payload: {
-          templateKey: 'outline:aiFullOutline',
-          instruction: quickStartOutlineInstruction(run),
-        },
-      });
-      const parsed = parseOutlineMarkdown(text);
-      const total = parsed.reduce((s, v) => s + (v.chapters?.length || 0), 0);
-      if (!total) throw new Error('模型没有输出可用的分卷 / 章纲');
-      parsed.forEach((v) => { v.id = v.id || uid('v'); });
-      await api.put(`/api/novels/${novel.id}`, { outline: { volumes: parsed, notes: '' } });
-      run.outline = parsed;
-      run.outlineChapters = total;
-      quickStartStep(box, 'outline', 'done', `${parsed.length} 卷 · ${total} 章`);
-      const planned = run.scale.volumes * run.scale.perVolume;
-      if (total < planned) {
-        run.warnings.push(`模型只排了 ${total} 章（原计划 ${planned} 章）。先按现有大纲写第一章，之后可以在「设定库 → 大纲」继续补。`);
-      }
-    } catch (err) {
-      if (quickStartIsStop(err, run)) throw err;
-      quickStartStep(box, 'outline', 'error', '没能生成可用的分卷大纲');
-      throw new Error(`全书大纲没生成成功：${quickStartErrorText(err)}`);
-    }
+    const outlineWarning = await quickStartOutlineStep(box, run, novel.id, base);
+    if (outlineWarning) run.warnings.push(outlineWarning);
     quickStartAssertRunning(run);
 
     /* 5. 建第一章 */
-    const first = quickStartFirstChapter(run.outline);
-    if (!first) throw new Error('大纲里没有可用的第一章');
-    quickStartStep(box, 'chapter', 'running');
-    quickStartSub(box, `正在建第一章「${first.chapter.title}」…`);
-    const made = await api.send(`/api/novels/${novel.id}/chapters`, {
-      title: first.chapter.title || '第一章',
-      summary: first.chapter.summary || '',
-      outline: quickStartChapterOutline(first.chapter),
-      outlineId: first.chapter.id,
-      volumeId: first.volume.id,
-      at: 0,
-    });
-    run.chapterId = made.chapter.id;
-    run.chapterTitle = made.chapter.title;
-    quickStartStep(box, 'chapter', 'done', `第 1 章 · ${made.chapter.title}`);
+    const first = await quickStartChapterStep(box, run, novel.id);
     quickStartAssertRunning(run);
 
     /* 6. 第一章正文 */
-    try {
-      prose = await quickStartStream(run, box, 'prose', '写第一章正文', {
-        ...base,
-        task: 'chapter',
-        novelId: novel.id,
-        chapterId: made.chapter.id,
-        payload: {
-          targetWords: 1600,
-          instruction: quickStartChapterInstruction(first.chapter),
-        },
-      }, (text) => { prose = text; });
-      if (!prose.trim()) throw new Error('模型没有返回正文');
-      await api.put(`/api/novels/${novel.id}/chapters/${made.chapter.id}`, { content: prose.trim() });
-      run.words = countWords(prose);
-      quickStartStep(box, 'prose', 'done', `${fmtWords(run.words)} 字`);
-      quickStartAssertRunning(run);
-    } catch (err) {
-      if (quickStartIsStop(err, run)) {
-        // 停止时已经写出来的半章也留下，别让作者白等
-        if (prose.trim().length >= 40) {
-          await api.put(`/api/novels/${novel.id}/chapters/${made.chapter.id}`, { content: prose.trim() }).catch(() => {});
-          run.words = countWords(prose);
-        }
-        throw err;
-      }
-      quickStartStep(box, 'prose', 'error', '可以先打开作品自己写');
-      run.warnings.push(`第一章正文没生成成功：${quickStartErrorText(err)}。章纲和空白章已经建好，可以直接开写。`);
-    }
+    const proseWarning = await quickStartProseStep(box, run, novel.id, run.chapterId, first, base);
+    if (proseWarning) run.warnings.push(proseWarning);
+    quickStartAssertRunning(run);
 
     run.running = false;
     if (run.closed) return;
@@ -1856,6 +1892,215 @@ async function runQuickStart(box, run) {
     if (run.closed) return;
     if (quickStartIsStop(err, run)) return quickStartResult(box, run, 'stopped');
     quickStartResult(box, run, 'error', quickStartErrorText(err));
+  }
+}
+
+const QUICK_START_RESUME_LABELS = {
+  title: '起书名',
+  characters: '设计人物',
+  outline: '铺全书大纲',
+  chapter: '新建第一章',
+  prose: '写第一章正文',
+};
+
+/** 弹窗里要不要给「接着补完」：只看本次运行已经知道哪些没做完 */
+function quickStartNeedsResume(run) {
+  if (!run?.novelId) return false;
+  return !run.title || !run.characters || !run.outline || !run.chapterId || !run.words;
+}
+
+/** 真正开始补完前读一遍作品：手动改过、已经有正文 / 章节 / 人物的，不覆盖，也不重跑 */
+async function quickStartResumeMissing(run) {
+  const { novel } = await api.get(`/api/novels/${run.novelId}`);
+  const missing = [];
+  const title = String(novel.title || '').trim();
+  if (title === '' || title === '未命名作品') missing.push('title');
+  if (!(novel.bible?.characters || []).length) missing.push('characters');
+  if (!(novel.outline?.volumes || []).length) missing.push('outline');
+  if (!(novel.chapters || []).length) missing.push('chapter', 'prose');
+  else if (!String(novel.chapters[0]?.content || '').trim()) missing.push('prose');
+  return { novel, missing };
+}
+
+function openQuickStartResumeSetup(run, onReady) {
+  return openModelSetup({
+    introTitle: '接着补完还差一步：接入模型',
+    introText: '补完会继续请 AI 模型接着生成。接一次，以后也能用。',
+    modelTitle: '选一个模型，继续补完',
+    saveLabel: '保存，继续补完',
+    isReady: quickStartModel,
+    onReady,
+    onCancel: () => toast('还没接入模型，这次补完没开始'),
+  });
+}
+
+/** 二次确认：把要重跑的步骤列出来，再交给模型 */
+async function openQuickStartResume(run) {
+  if (!quickStartModel()) return openQuickStartResumeSetup(run, () => openQuickStartResume(run));
+  let data;
+  try {
+    data = await quickStartResumeMissing(run);
+  } catch (err) {
+    return toast(err.message, 'err');
+  }
+  const { novel, missing } = data;
+  if (!missing.length) return toast(`《${novel.title}》已经补齐了`, 'ok');
+  const labels = missing.map((k) => QUICK_START_RESUME_LABELS[k]);
+  showModal(`
+    <h3>接着补完这本书</h3>
+    <p class="modal-sub">只补下面这些，已经生成的内容不会重跑。</p>
+    <ol class="qs-resume-list">${labels.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>
+    <p class="qs-note">会再调用 ${missing.length} 次模型，费用由你的服务商结算。</p>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="qsResumeCancel">先不开</button>
+      <button class="btn btn-primary" id="qsResumeStart">${ico('spark')}开始补完</button>
+    </div>`, (box) => {
+    box.querySelector('#qsResumeCancel').onclick = closeModal;
+    box.querySelector('#qsResumeStart').onclick = () => {
+      closeModal();
+      openQuickStartResumeRun(run, missing, novel);
+    };
+  });
+}
+
+function renderQuickStartResumeRun(missing) {
+  const steps = missing.map((k) => QUICK_START_STEPS.find((s) => s.key === k)).filter(Boolean);
+  return `
+    <h3>正在补完这本书…</h3>
+    <p class="modal-sub" id="qsRunSub">正在准备…</p>
+    <ol class="qs-steps">
+      ${steps.map((s) => `
+        <li class="qs-step" id="qsStep-${s.key}" data-state="pending">
+          <span class="qs-step-dot"></span>
+          <div class="qs-step-text"><b>${s.label}</b><em>${s.hint}</em></div>
+          <span class="qs-step-state">等待</span>
+        </li>`).join('')}
+    </ol>
+    <div class="qs-preview" id="qsPreview" hidden>
+      <div class="qs-preview-head"><span id="qsPreviewLabel">生成中</span><span id="qsPreviewCount"></span></div>
+      <pre id="qsPreviewText"></pre>
+    </div>
+    <div class="qs-note">只补空缺，已生成的内容不会重跑。</div>
+    <div class="modal-foot qs-foot">
+      <button class="btn btn-text" id="qsClose" disabled>关闭</button>
+      <button class="btn btn-danger-ghost" id="qsStop">停止</button>
+    </div>`;
+}
+
+async function openQuickStartResumeRun(run, missing, novel) {
+  if (!quickStartModel()) return openQuickStartResumeSetup(run, () => openQuickStartResumeRun(run, missing, novel));
+  const rrun = { ...run, controller: new AbortController(), stopped: false, closed: false, running: true, warnings: [] };
+  showModal(renderQuickStartResumeRun(missing), (box) => {
+    box.querySelector('#qsStop').onclick = () => {
+      rrun.stopped = true;
+      rrun.controller?.abort();
+      quickStartSub(box, '正在停止，已经生成的内容会保留…');
+    };
+    runQuickStartResume(box, rrun, missing, novel);
+  }, {
+    onClose: () => { rrun.closed = true; rrun.controller?.abort(); },
+  });
+}
+
+async function runQuickStartResume(box, rrun, missing, novel) {
+  const ready = quickStartModel();
+  if (!ready) {
+    rrun.running = false;
+    if (!rrun.closed) openQuickStartResumeSetup(rrun, () => openQuickStartResume(rrun));
+    return;
+  }
+  const base = { providerId: ready.providerId, model: ready.model };
+  const currentOf = async () => (await api.get(`/api/novels/${rrun.novelId}`)).novel;
+  try {
+    let current = novel;
+
+    /* 书名 */
+    if (missing.includes('title')) {
+      const t = String(current.title || '').trim();
+      if (t && t !== '未命名作品') quickStartStep(box, 'title', 'done', `《${t}》`);
+      else {
+        const warning = await quickStartTitleStep(box, rrun, current.id, base);
+        if (warning) rrun.warnings.push(warning);
+        current = await currentOf();
+      }
+      quickStartAssertRunning(rrun);
+    }
+
+    /* 人物 */
+    if (missing.includes('characters')) {
+      current = await currentOf();
+      const existing = (current.bible?.characters || []).length;
+      if (existing) quickStartStep(box, 'characters', 'done', `已有 ${existing} 位`);
+      else {
+        const warning = await quickStartCharactersStep(box, rrun, current.id, base);
+        if (warning) rrun.warnings.push(warning);
+      }
+      quickStartAssertRunning(rrun);
+    }
+
+    /* 大纲 */
+    if (missing.includes('outline')) {
+      current = await currentOf();
+      const existing = (current.outline?.volumes || []).length;
+      if (existing) {
+        rrun.outline = current.outline.volumes;
+        rrun.outlineChapters = rrun.outline.reduce((s, v) => s + (v.chapters?.length || 0), 0);
+        quickStartStep(box, 'outline', 'done', `${existing} 卷 · ${rrun.outlineChapters} 章`);
+      } else {
+        const warning = await quickStartOutlineStep(box, rrun, current.id, base);
+        if (warning) rrun.warnings.push(warning);
+      }
+      quickStartAssertRunning(rrun);
+    }
+
+    /* 第一章 */
+    if (missing.includes('chapter')) {
+      current = await currentOf();
+      const existing = (current.chapters || []).length;
+      if (existing) {
+        rrun.chapterId = current.chapters[0].id;
+        rrun.chapterTitle = current.chapters[0].title;
+        quickStartStep(box, 'chapter', 'done', `第 1 / ${existing} 章 · ${rrun.chapterTitle}`);
+      } else {
+        if (!rrun.outline?.length) {
+          current = await currentOf();
+          rrun.outline = current.outline?.volumes || [];
+        }
+        if (!rrun.outline?.length) throw new Error('大纲还没准备好，先补大纲这一步');
+        await quickStartChapterStep(box, rrun, current.id);
+      }
+      quickStartAssertRunning(rrun);
+    }
+
+    /* 第一章正文 */
+    if (missing.includes('prose')) {
+      current = await currentOf();
+      const ch = current.chapters?.[0];
+      if (!ch) throw new Error('还没有第一章，先补「新建第一章」这一步');
+      if (String(ch.content || '').trim()) {
+        rrun.words = countWords(ch.content);
+        rrun.chapterId = ch.id;
+        rrun.chapterTitle = ch.title;
+        quickStartStep(box, 'prose', 'done', `已有 ${fmtWords(rrun.words)} 字`);
+      } else {
+        if (!rrun.outline?.length) rrun.outline = current.outline?.volumes || [];
+        const first = quickStartFirstChapter(rrun.outline);
+        if (!first) throw new Error('找不到第一章章纲，先补大纲');
+        const warning = await quickStartProseStep(box, rrun, current.id, ch.id, first, base);
+        if (warning) rrun.warnings.push(warning);
+      }
+      quickStartAssertRunning(rrun);
+    }
+
+    rrun.running = false;
+    if (rrun.closed) return;
+    if (rrun.warnings.length) quickStartResult(box, rrun, 'success');
+    else await openQuickStartNovel(rrun);
+  } catch (err) {
+    rrun.running = false;
+    if (rrun.closed) return;
+    if (quickStartIsStop(err, rrun)) return quickStartResult(box, rrun, 'stopped');
+    quickStartResult(box, rrun, 'error', quickStartErrorText(err));
   }
 }
 
@@ -2006,6 +2251,7 @@ function quickStartResult(box, run, kind, message = '') {
     ${warns}
     <div class="modal-foot">
       ${run.novelId ? '<button class="btn btn-text" id="qsShelf">留在书架</button>' : '<button class="btn btn-text" id="qsDone">关闭</button>'}
+      ${run.novelId && quickStartNeedsResume(run) ? '<button class="btn" id="qsResume" type="button">接着补完</button>' : ''}
       ${run.novelId ? `<button class="btn btn-primary" id="qsOpen">${run.chapterId ? '打开作品，开始写' : '打开作品'}</button>` : ''}
     </div>`;
   box.querySelector('#qsDone')?.addEventListener('click', closeModal);
@@ -2015,6 +2261,7 @@ function quickStartResult(box, run, kind, message = '') {
     setView('shelf');
   });
   box.querySelector('#qsOpen')?.addEventListener('click', () => openQuickStartNovel(run));
+  box.querySelector('#qsResume')?.addEventListener('click', () => openQuickStartResume(run));
 }
 
 async function openQuickStartNovel(run) {
