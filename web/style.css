@@ -601,7 +601,31 @@ kbd {
 }
 .empty-state h3 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--text-1); }
 .empty-state p { margin: 0 0 20px; font-size: 12.5px; }
-.empty-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
+.empty-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; max-width: 720px; margin: 0 auto; }
+.empty-option {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  min-height: 148px; padding: 16px 14px 16px; text-align: center;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg);
+  color: var(--text-1); cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.empty-option:hover { border-color: var(--border-2); background: var(--surface-3); transform: translateY(-1px); }
+.empty-option:active { transform: translateY(0); }
+.empty-option:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-bg), 0 0 0 1.5px var(--accent); }
+.empty-option .ico { width: 24px; height: 24px; stroke-width: 1.6; color: var(--accent); }
+.empty-option b { font-size: 13px; font-weight: 600; }
+.empty-option span:not(.empty-option-badge) { font-size: 11px; line-height: 1.6; color: var(--text-3); }
+.empty-option-badge {
+  position: absolute; top: -7px; left: 14px; padding: 1px 7px;
+  font-size: 10px; font-weight: 600; color: var(--accent-hover);
+  background: var(--accent-bg); border-radius: var(--r-full);
+}
+@media (max-width: 720px) {
+  .empty-options { grid-template-columns: 1fr; gap: 8px; }
+  .empty-option { min-height: 0; flex-direction: row; align-items: center; text-align: left; padding: 14px 16px; }
+  .empty-option .ico { width: 20px; height: 20px; flex: 0 0 auto; }
+  .empty-option-badge { left: auto; right: 14px; }
+}
 
 .empty-line {
   display: flex; align-items: flex-start; gap: 9px;

@@ -124,11 +124,24 @@
         <div class="empty-state" id="shelfEmpty" hidden>
           <svg class="empty-ico"><use href="#i-book-open" /></svg>
           <h3>书架还空着</h3>
-          <p>写一句想法，AI 帮你把书名、人物、大纲和第一章一起铺好。手上已经有旧稿？也可以直接导入。</p>
-          <div class="empty-actions">
-            <button class="btn btn-primary" id="emptyQuickStartBtn"><svg class="ico"><use href="#i-spark" /></svg>一键开书</button>
-            <button class="btn" id="emptyNewBtn"><svg class="ico"><use href="#i-plus" /></svg>手动新建</button>
-            <button class="btn" id="emptyImportBtn"><svg class="ico"><use href="#i-upload" /></svg>导入已有稿子</button>
+          <p>选一种开始方式，不用先想清楚全部。</p>
+          <div class="empty-options" aria-label="开始方式">
+            <button class="empty-option" id="emptyQuickStartBtn" title="写一句话想法，AI 帮你铺好书名、人物和大纲">
+              <span class="empty-option-badge">推荐</span>
+              <svg class="ico"><use href="#i-spark" /></svg>
+              <b>一键开书</b>
+              <span>只有一句话想法，AI 帮你铺好书名、人物和大纲</span>
+            </button>
+            <button class="empty-option" id="emptyNewBtn" title="先自己写，想到哪填到哪">
+              <svg class="ico"><use href="#i-plus" /></svg>
+              <b>手动新建</b>
+              <span>先自己写，想到哪填到哪</span>
+            </button>
+            <button class="empty-option" id="emptyImportBtn" title="把 .txt / .md / .docx 直接搬进来，自动按章切分">
+              <svg class="ico"><use href="#i-upload" /></svg>
+              <b>导入旧稿</b>
+              <span>有现成稿子？按章节直接切开</span>
+            </button>
           </div>
         </div>
       </section>
