@@ -1078,6 +1078,50 @@ function openNewNovelModal() {
 $('#newNovelBtn').addEventListener('click', openNewNovelModal);
 $('#emptyNewBtn').addEventListener('click', openNewNovelModal);
 
+/* 空书架：没有模型也能先把旧稿搬进来；先建一本空书，再进导入流程 */
+function openImportNew() {
+  showModal(`
+    <h3>导入已有稿子</h3>
+    <p class="modal-sub">给这本书起个名字，然后把 .txt / .md / .docx 拖进来，或直接粘贴。导入后还能在标题上随时改。</p>
+    <label class="field-label">书名</label>
+    <input id="impNewTitle" class="input" placeholder="例如：旧稿《半盏残雪》" autocomplete="off" />
+    <div class="modal-foot">
+      <button class="btn btn-text" id="impNewCancel">取消</button>
+      <button class="btn btn-primary" id="impNewOk">创建并导入</button>
+    </div>`, (box) => {
+    const titleEl = box.querySelector('#impNewTitle');
+    const okBtn = box.querySelector('#impNewOk');
+    titleEl.focus();
+    const create = async () => {
+      if (okBtn.disabled) return;
+      okBtn.disabled = true;
+      const original = okBtn.textContent;
+      okBtn.textContent = '创建中…';
+      let novel;
+      try {
+        ({ novel } = await api.send('/api/novels', { title: titleEl.value.trim() || '导入的作品' }));
+      } catch (err) {
+        okBtn.disabled = false;
+        okBtn.textContent = original;
+        return toast(err.message, 'err');
+      }
+      closeModal();
+      await loadNovels().catch(() => {});
+      try {
+        await openNovel(novel.id);
+      } catch (err) {
+        return toast(`《${novel.title}》已建好，但没能打开：${err.message}`, 'err');
+      }
+      openImportModal();
+      toast('先导入稿子，导入后可以在标题上改名', 'ok');
+    };
+    okBtn.onclick = create;
+    titleEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); create(); } });
+    box.querySelector('#impNewCancel').onclick = closeModal;
+  });
+}
+$('#emptyImportBtn').addEventListener('click', openImportNew);
+
 /* ============================================================
  * 4.5 一键开书：一句话 → 书名 / 人物 / 大纲 / 第一章
  * ============================================================
