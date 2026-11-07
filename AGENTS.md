@@ -150,6 +150,7 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
 | 模块自检挂了 | 先看哪条 `import` 缺了或撞了名；最大的 `web/lib/data.js` (964 行) 最容易有这种事 |
 | 字体糊/太细 | 默认字体栈已经切到黑体（`PingFang SC` / `Microsoft YaHei UI` / `SimSun` 兜底）。不要改回 16 宋体——用户测试说字体不方便 |
 | NSIS 安装报「无法关闭书匠」 | 用户机器上不是 App 在跑，是 NSIS 自己的 process detection 判错了。`安装书匠.cmd`（dist 下）通过把 TEMP 重定向到 `.cache/nsis-temp` 绕过了它。现在根本不发 NSIS 安装器了——便携版 + 绿色 zip 是唯一发布形态 |
+| 本机新打包的 exe（含便携版）启动报 `NSIS Error / Error writing temporary file` 或 CreateProcess「文件已被用户占用」，但 GitHub 下载同一文件正常 | 这台机器对新生成的未签名 exe 有额外拦截（HIPS/沙箱），与 Temp、AV 无关（AV 全关、Temp 实测可写 150 MB）。**冒烟/验证必须从 GitHub Releases 下载版做**，本机 dist 产物只用于比对 hash，别指望它能起 |
 
 ## 给 AI 的模糊地带
 
