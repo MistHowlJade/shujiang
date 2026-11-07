@@ -393,7 +393,7 @@ body[data-theme="light"] .segmented button.on { box-shadow: var(--sh-1); }
   border-radius: var(--r-lg); padding: 14px;
   transition: border-color var(--dur) var(--ease);
 }
-.card:hover { border-color: var(--border-2); }
+.card:hover { border-color: var(--border-2); box-shadow: var(--sh-2); }
 .card + .card, .card + .section-head { margin-top: 12px; }
 .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .card-head h2 { margin: 0; font-size: 13.5px; font-weight: 600; }
