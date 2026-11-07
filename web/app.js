@@ -1494,9 +1494,13 @@ function openInspirationModal() {
       const orig = hotBtn.innerHTML;
       hotBtn.textContent = '正在搜索…';
       hotList.hidden = false;
-      hotList.innerHTML = '<p class="dim">正在联网搜各平台热门榜，几秒钟…</p>';
+      const curProvider = (S.config?.providers || []).find((p) => p.id === S.config?.activeProviderId);
+      const online = !!(curProvider && curProvider.extraBody && Object.keys(curProvider.extraBody).length);
+      hotList.innerHTML = online
+        ? '<p class="dim">正在联网搜各平台热门榜，几秒钟…</p>'
+        : '<p class="dim">未给服务商配联网参数——本次按模型记忆作答，可能已过时（设置→服务商→联网搜索可打开）</p>';
       try {
-        const text = await streamAI({ task: 'hotgenres', payload: {} });
+        const text = await streamAI({ task: 'hotgenres', payload: { online } });
         const parsed = parseJsonLoose(text);
         const list = (Array.isArray(parsed) ? parsed : parsed?.items || parsed?.genres || [])
           .filter((x) => x && typeof x === 'object' && (x.genre || x.title))
