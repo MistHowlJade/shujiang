@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="书匠：跑在本机的中文长篇小说创作台。AI 起稿、续写、润色，查证设定，作品只在本机 data/ 目录保存。" />
+<meta name="robots" content="noindex,nofollow" />
 <title>书匠 · AI 长篇小说创作台</title>
 <link rel="stylesheet" href="/style.css" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234a7dff'/><path d='M9 8h9a4 4 0 0 1 4 4v12H13a4 4 0 0 0-4 4z' fill='none' stroke='white' stroke-width='2' stroke-linejoin='round'/></svg>" />
@@ -89,7 +91,7 @@
       </button>
       <div class="topbar-mid" id="topbarMid"></div>
       <div class="topbar-right">
-        <button class="save-pill" id="savePill" type="button" title="立即保存" aria-label="立即保存" aria-keyshortcuts="Control+S Meta+S">已保存</button>
+        <button class="save-pill" id="savePill" type="button" title="立即保存" aria-label="已保存" aria-keyshortcuts="Control+S Meta+S">已保存</button>
         <button class="icon-btn" id="focusBtn" title="专注写作（Ctrl+Alt+F）" aria-label="专注写作" aria-pressed="false"><svg class="ico"><use href="#i-focus" /></svg></button>
         <button class="icon-btn" id="helpBtn" title="新手指南：三种开始方式和常见问题" aria-label="新手指南"><svg class="ico"><use href="#i-help" /></svg></button>
         <button class="icon-btn" id="themeBtn" title="切换明暗主题" aria-label="切换明暗主题"></button>
@@ -126,7 +128,7 @@
         <div class="shelf-grid" id="shelfGrid"></div>
         <div class="empty-state" id="shelfEmpty" hidden>
           <svg class="empty-ico"><use href="#i-book-open" /></svg>
-          <h3>书架还空着</h3>
+          <h2 class="empty-title">书架还空着</h2>
           <p>选一种开始方式，不用先想清楚全部。</p>
           <div class="empty-options" aria-label="开始方式">
             <button class="empty-option" id="emptyQuickStartBtn" title="写一句话想法，AI 帮你铺好书名、人物和大纲">
