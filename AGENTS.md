@@ -121,9 +121,22 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
 
 1. 本地 `npm run regress` + `npm test` 必须全绿
 2. `npm run dist`（生成 `dist\ShuJiang-Portable-1.0.2.exe` 和 `win-x64.zip`）
+
+   这台机器直接跑 npm 会挂——AppData\Local 写不进、TLS 证书链也不通（v1.0.2 实测踩过两次 EPERM 和 unable to verify the first certificate）。用这个包一层环境变量（不改全局 PATH/系统环境）：
+
+   ```powershell
+   $env:TEMP=(Resolve-Path '.cache\electron-builder-temp').Path   # 给 electron-builder 一个能写的临时目录
+   $env:TMP=$env:TEMP
+   $env:PATH=(Resolve-Path 'tools\node').Path + ';' + $env:PATH   # npm 不在系统 PATH，tools\node 自带完整 Node+npm
+   $env:ELECTRON_BUILDER_CACHE=(Join-Path (Resolve-Path '.cache').Path 'electron-builder-cache')
+   $env:ELECTRON_BUILDER_BINARIES_MIRROR='https://npmmirror.com/mirrors/electron-builder-binaries/'  # 7zip/nsis 从 npmmirror 下，TLS 能过
+   tools\node\node.exe node_modules\electron-builder\cli.js --win --x64
+   ```
+
+   zip 用 win-unpacked 打（内容在 zip 根目录，不是整个文件夹）：`Compress-Archive -Path 'dist\win-unpacked\*' -DestinationPath 'dist\ShuJiang-x.y.z-win-x64.zip' -CompressionLevel Optimal -Force`
 3. 更新 `README.md` / `RELEASE_NOTES.md` 资产名和 tag 到 v1.0.2
 4. `git push` + `git tag v1.0.2` + `git push origin v1.0.2`
-5. 用 Windows Credential Manager 存的 token 上传，替换/新建 GitHub Releases 资产
+5. 用 Windows Credential Manager 存的 token 上传，替换/新建 GitHub Releases 资产（POST /repos/{owner}/{repo}/releases → uploads.github.com 传两个资产；token 只从 `git credential fill` 读到、仅在内存使用）
 6. 若说 setup="……"，不要自己去买新的证书；发布页上是未签名的，用户自行「更多信息→仍要运行」
 7. 便携版是唯一发布形态；绿色版 zip 备用；Setup 包已删除
 
