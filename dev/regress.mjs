@@ -295,7 +295,9 @@ async function main() {
 
   // 自检会往章节里写字，那些字会记进码字统计 —— 跑之前存一份，跑完原样还回去，
   // 免得自检把作者真实的日更记录搅乱。
-  const statsFile = path.join('data', 'stats.json');
+  // 隔离时（SHU_DATA_DIR=…），统计文件也要跟着走，不能直写真 data/
+  const DATA_DIR = process.env.SHU_DATA_DIR || 'data';
+  const statsFile = path.join(DATA_DIR, 'stats.json');
   const statsBackup = fs.existsSync(statsFile) ? fs.readFileSync(statsFile) : null;
 
   // 连不上就早点说清楚，别打一屏无意义的 FAIL
@@ -707,7 +709,7 @@ async function main() {
     });
     const upJson = await up.json();
     check('上传自定义封面成功', up.status === 200 && upJson.cover?.ext === 'png', upJson.error || '');
-    check('封面文件落到 data/covers', fs.existsSync(path.join('data', 'covers', `${id}.png`)));
+    check('封面文件落到数据目录的 covers', fs.existsSync(path.join(DATA_DIR, 'covers', `${id}.png`)));
     const rec = (await get(`${BASE}/api/novels/${id}`)).novel;
     check('作品记录里记下了封面', rec.cover?.ext === 'png' && rec.cover?.size === png.length, JSON.stringify(rec.cover));
     const back = await req('GET', `${BASE}/api/novels/${id}/cover`);
@@ -730,7 +732,7 @@ async function main() {
     check('不支持的格式被拒', webp.status === 400, `status=${webp.status}`);
     const rm = await req('DELETE', `${BASE}/api/novels/${id}/cover`);
     check('移除自定义封面', rm.status === 200 && rm.json?.ok === true);
-    check('封面文件已删', !fs.existsSync(path.join('data', 'covers', `${id}.png`)));
+    check('封面文件已删', !fs.existsSync(path.join(DATA_DIR, 'covers', `${id}.png`)));
     check('作品记录里封面也没了', !(await get(`${BASE}/api/novels/${id}`)).novel?.cover);
     const epub3 = await req('GET', `${BASE}/api/novels/${id}/export?format=epub`);
     const files3 = unzip(epub3.buf);
