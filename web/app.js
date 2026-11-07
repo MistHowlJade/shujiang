@@ -5424,6 +5424,21 @@ async function saveAllPending() {
 // 兜底保存：失焦、切章、切标签页、关闭页面时立刻落盘。
 // beacon=true 只用于页面即将卸载的场景（sendBeacon 是唯一能活过卸载的方式），
 // 但它有 64KB 上限且失败时返回 false —— 失败时保留待存状态，让关闭拦截与重试接着管。
+// 关闭/切出页面时把待写的设定库/大纲改动也带走——与正文一样，关闭窗口时用 beacon 发
+function flushNovelPartBeacon() {
+  const pending = typeof pendingNovelSave !== 'undefined' ? pendingNovelSave : null;
+  if (!pending) return;
+  clearTimeout(novelSaveTimer);
+  novelSaveTimer = 0;
+  const url = `/api/novels/${pending.id}`;
+  try {
+    navigator.sendBeacon(url, new Blob([JSON.stringify(pending.part)], { type: 'application/json' }));
+  } catch {
+    api.put(url, pending.part).catch(() => {});
+  }
+  pendingNovelSave = null;
+}
+
 function flushSave({ beacon = false } = {}) {
   if (!S.unsaved.size) return Promise.resolve(true);
   if (!beacon) return saveAllPending();
@@ -5454,6 +5469,7 @@ function flushSave({ beacon = false } = {}) {
 
 window.addEventListener('beforeunload', (e) => {
   rememberEditorPosition();
+  flushNovelPartBeacon();
   if (!S.unsaved.size && !S.saveErr) return;
   flushSave({ beacon: true });
   // 还没落盘、或上一次保存本来就失败（服务多半还没起来）→ 拦一下
@@ -5463,7 +5479,7 @@ window.addEventListener('beforeunload', (e) => {
   }
 });
 // 切标签页只是「离开视线」，页面还活着 —— 走普通 PUT，失败时仍由重试接着管
-document.addEventListener('visibilitychange', () => { if (document.hidden) { rememberEditorPosition(); flushSave().catch(() => {}); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { rememberEditorPosition(); flushNovelPartBeacon(); flushSave().catch(() => {}); } });
 window.addEventListener('pagehide', rememberEditorPosition);
 
 /** 任意一章有改动（不只是当前章）都走这里：加入待存集合并排队落盘 */
