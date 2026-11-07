@@ -208,12 +208,18 @@ document.addEventListener('keydown', (e) => {
   if (S.focusMode) exitFocus();
 });
 
-/** 弹窗开着时按 Tab，焦点在弹窗内循环，不会跑到弹窗背后的页面上 */
+/** 全屏覆盖层开着时按 Tab，焦点在其内循环，不跑到背后的页面 */
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Tab') return;
-  const mask = $('#modalMask');
-  if (mask.hidden) return;
-  const box = $('#modal');
+  if (e.key !== 'Tab' || e.defaultPrevented) return;
+  let box = null;
+  if (!$('#modalMask').hidden) {
+    box = $('#modal');
+  } else if ($('#readerMask')) {
+    // 目录面板开着时有自己的焦点循环，别叠两层
+    const tocOpen = $('#readerTocMask') && !$('#readerTocMask').hidden;
+    if (!tocOpen) box = $('#readerMask');
+  }
+  if (!box) return;
   const focusables = [...box.querySelectorAll('a[href], button, input, select, textarea, [tabindex]')]
     .filter((el) => {
       const ti = el.getAttribute('tabindex');
