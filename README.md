@@ -848,6 +848,15 @@ npm run dist           # 完整产物：dist\ShuJiang-Setup-1.0.0.exe + dist\Shu
 
 ---
 
+## Code signing policy
+
+Free code signing provided by SignPath.io, certificate by SignPath Foundation.
+
+- **维护者 / 源码仓库所有人**：MistHowlJade（书匠作者，github.com/MistHowlJade/shujiang）
+- **隐私声明**：本程序不会向任何网络系统主动传输信息，除非该系统是**用户自己配置并主动触发**的（例如用户在设置里填的模型服务商，以及用户每次点按生成/检查时发起的请求）。作品、设定、密钥三者都只存在本机 `data/` 目录里；除模型接口外，本程序不发出任何外部请求。
+- **构建与来源**：安装包从本公开仓库构建（`npm run dist`），用户可以自行从源码复现验证；二进制的签名显示为 SignPath Foundation。
+- 本策略同样适用于本仓库 GitHub Releases 上发布的所有安装包。
+
 ## 常见问题
 
 **启动后浏览器打不开、或显示端口被占用？**
