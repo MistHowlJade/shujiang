@@ -505,5 +505,3 @@ export function buildTask(taskName, ctx) {
   };
 }
 
-export { DEFAULT_ANTI_AI };
-export const ASSISTANT_PREFIX_GUARD = '不要输出解释、前言、总结或 markdown 代码块包裹。';

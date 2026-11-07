@@ -694,6 +694,3 @@ export function countWords(text) {
   return String(text).replace(/\s+/g, '').length;
 }
 
-export function nowId(prefix) {
-  return newId(prefix);
-}
