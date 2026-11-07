@@ -1810,6 +1810,19 @@ kbd {
 /* ==========================================================================
    设置
    ========================================================================== */
+.current-model {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin: 10px 0 12px; padding: 9px 12px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
+}
+.current-model-info { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.current-model-label { flex: 0 0 auto; font-size: 11px; color: var(--text-3); }
+.current-model-value, .current-model-name {
+  min-width: 0; font-size: 11.5px; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.current-model-value b { color: var(--text-1); font-weight: 600; }
+.current-model-value .dim, .current-model-name { color: var(--text-3); }
 .provider {
   margin-bottom: 10px; padding: 13px 15px;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg);

@@ -11472,6 +11472,7 @@ function renderSettings() {
   $('#roleSummary').value = cfg.roleModels?.summary || '';
   $('#roleReview').value = cfg.roleModels?.review || '';
   renderModelSelect();
+  renderModelStatus();
   renderPromptTemplatesInSettings();
 }
 
@@ -11831,6 +11832,39 @@ function renderModelSelect() {
   const opts = Array.from(models).map((m) => `<option ${cfg.model === m ? 'selected' : ''}>${esc(m)}</option>`).join('');
   sel.innerHTML = `<option value="">（未设置）</option>${opts}`;
   if (cfg.model && !models.has(cfg.model)) sel.innerHTML += `<option selected>${esc(cfg.model)}</option>`;
+}
+
+/** 在模型服务卡里说明当前到底用哪个模型：只看「明确选过」的模型 */
+function renderModelStatus() {
+  const row = $('#currentModelRow');
+  if (!row) return;
+  const ready = quickStartModel();
+  if (!ready) {
+    row.innerHTML = `<div class="current-model-info"><span class="current-model-label">当前写作模型</span><span class="current-model-name">还没接上</span></div><button class="btn btn-sm" id="currentModelConnect">先接一个</button>`;
+  } else {
+    row.innerHTML = `<div class="current-model-info"><span class="current-model-label">当前写作模型</span><span class="current-model-value"><b>${esc(ready.model)}</b><span class="dim"> · ${esc(ready.providerName)}</span></span></div><button class="btn btn-sm" id="currentModelConnect">换一个</button>`;
+  }
+  row.querySelector('#currentModelConnect')?.addEventListener('click', () => {
+    openModelSetup(ready ? {
+      introTitle: '换一个写作模型',
+      introText: '换模型会影响接下来生成的质量、速度和费用。选好后保存，这个模型会用于写作和大纲生成。',
+      modelTitle: '选一个模型',
+      saveLabel: '保存，用这个模型',
+      // 换模型时一定要打开选择器，不能因为现在的配置能用就跳过
+      isReady: () => false,
+      onReady: renderSettings,
+      onCancel: () => toast('没有换模型'),
+    } : {
+      introTitle: '先接入写作模型',
+      introText: '接一次，以后写作、续写和大纲生成都能直接用。不用先去设置页摸一圈。',
+      modelTitle: '选一个模型',
+      saveLabel: '保存，继续',
+      // 这里是来接模型的，ready 反而是 false，不能跳过
+      isReady: () => false,
+      onReady: renderSettings,
+      onCancel: () => toast('还没接上，这次没有开始接入'),
+    });
+  });
 }
 
 $('#cfgTemp').addEventListener('input', () => { $('#tempVal').textContent = $('#cfgTemp').value; });
