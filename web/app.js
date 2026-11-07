@@ -5491,6 +5491,7 @@ function renderStudio({ list = true } = {}) {
   histSync();
   $('#genWords').value = n.meta.targetWordsPerChapter || 3000;
   $('#genModel').placeholder = S.config?.model || '默认';
+  $('#genRhythm').value = ch?.rhythm || '';
   updateFoot();
   renderChapterOutlineCard();
   renderRevisionCard();
@@ -7282,6 +7283,12 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
 async function generateChapter() {
   const ch = currentChapter();
   if (!ch) return toast('先建一章', 'err');
+  const rhythm = $('#genRhythm').value;
+  if ($('#genRhythm').dataset.lastSaved !== rhythm) {
+    ch.rhythm = rhythm || undefined;
+    markChapterDirty(ch);
+    $('#genRhythm').dataset.lastSaved = rhythm;
+  }
   await runStream({
     task: 'chapter',
     novelId: S.novel.id,
@@ -7301,6 +7308,12 @@ async function continueWriting() {
   if (!ch) return toast('先建一章', 'err');
   const content = $('#chContent').value;
   if (!content.trim()) return generateChapter();
+  const rhythm = $('#genRhythm').value;
+  if ($('#genRhythm').dataset.lastSaved !== rhythm) {
+    ch.rhythm = rhythm || undefined;
+    markChapterDirty(ch);
+    $('#genRhythm').dataset.lastSaved = rhythm;
+  }
   await runStream({
     task: 'continue',
     novelId: S.novel.id,

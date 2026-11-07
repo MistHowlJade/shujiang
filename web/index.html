@@ -298,6 +298,14 @@
                   <div class="field-row">
                     <label class="field-label">目标字数<input id="genWords" class="input" type="number" value="3000" min="300" step="100" /></label>
                     <label class="field-label">模型<input id="genModel" class="input" placeholder="默认" /></label>
+                    <label class="field-label">节奏<select id="genRhythm" class="input">
+                      <option value="">不指定</option>
+                      <option value="calm">平静铺垫</option>
+                      <option value="rising">逐章升温</option>
+                      <option value="peak">全场高潮</option>
+                      <option value="ebb">事后喘息</option>
+                      <option value="sweet">轻松明快</option>
+                    </select></label>
                   </div>
                   <div class="btn-row">
                     <button class="btn btn-primary btn-block" id="genChapterBtn" title="按章纲写初稿；不会覆盖原文，满意后再采用"><svg class="ico"><use href="#i-spark" /></svg>生成本章</button>

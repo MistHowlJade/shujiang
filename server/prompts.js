@@ -84,6 +84,16 @@ function user(content) {
 function assistant(content) {
   return { role: 'assistant', content };
 }
+const RHYTHM_LABELS = {
+  calm: '平静铺垫——这章缓一缓，慢条斯理交代环境与状态，不要急着上冲突；',
+  rising: '逐章升温——每场推进去一步、每章收口时比上一张高半分，不要让节奏断掉；',
+  peak: '全场高潮——本章是情绪顶点，句子要短，冲突要硬，结尾停在爆裂点上；',
+  ebb: '事后喘息——上一冲突刚过去，这章让角色喘口气，给后劲让路；',
+  sweet: '轻松明快——允许风趣与日常，不用命运感弦绷得那么紧；',
+};
+function rhythmNote(r) {
+  return RHYTHM_LABELS[r] || '';
+}
 
 export const TASKS = {
   /* ---------- 大纲 ---------- */
@@ -162,6 +172,7 @@ export const TASKS = {
               `3. 只写本章内容，不要抢下一章的剧情；`,
               `4. 严格遵守资料中的设定，不得凭空新增与设定冲突的能力、人物或地名；`,
               `5. 开头要接续前文，结尾留钩子。`,
+              chapter?.rhythm ? `6. 本章节奏：${rhythmNote(chapter.rhythm)}` : '',
             ]
               .filter(Boolean)
               .join('\n'),
@@ -184,7 +195,7 @@ export const TASKS = {
         messages: [
           sys(BASE_SYSTEM, antiAi(novel), head(novel, pack)),
           user(
-            `以下是《${novel.title}》第 ${chapter?.no || '?'} 章「${chapter?.title || ''}」已写好的部分：\n"""\n${tail}\n"""\n\n请直接接着往下写约 ${target} 字。要求：${req}\n直接输出续写内容，不要重复上文、不要任何说明文字。`,
+            `以下是《${novel.title}》第 ${chapter?.no || '?'} 章「${chapter?.title || ''}」已写好的部分：\n"""\n${tail}\n"""\n\n请直接接着往下写约 ${target} 字。要求：${req}${chapter?.rhythm ? `\n本章节奏：${rhythmNote(chapter.rhythm)}` : ''}\n直接输出续写内容，不要重复上文、不要任何说明文字。`,
           ),
         ],
       };
