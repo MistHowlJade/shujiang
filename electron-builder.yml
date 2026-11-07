@@ -27,28 +27,17 @@ electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
   cache: D:/项目/shu/.cache/electron-cache
 
+# 只发布便携版：NSIS 安装包在个别机器上有「无法关闭书匠」死循环，
+# 发布流程里不再打也不再附 Setup。需要安装版自行按下文绿色版使用。
 win:
   target:
-    - target: nsis
-      arch: [x64]
     - target: portable
       arch: [x64]
   icon: build/icon.ico
 
-nsis:
-  oneClick: false                 # 向导式安装，允许选目录
-  allowToChangeInstallationDirectory: true
-  perMachine: false               # 当前用户安装，不需要管理员权限
-  createDesktopShortcut: true
-  createStartMenuShortcut: true
-  shortcutName: 书匠
-  deleteAppDataOnUninstall: false # 卸载时保留用户数据，别把作品删了
-
 portable:
-  artifactName: 书匠-Portable-${version}.${ext}
+  artifactName: ShuJiang-Portable-${version}.${ext}
 
 # 发布到 GitHub Releases 时，electron-builder 认得 "github"，
 # 这里先不写死仓库信息，发布用手工提供的 token/仓库参数。
 publish: []
-
-artifactName: 书匠-Setup-${version}.${ext}

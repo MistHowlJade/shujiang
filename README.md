@@ -808,7 +808,7 @@ dev/
 tools/node/    项目内便携 Node 运行时（可删，改用系统 Node）
 build/         应用图标（icon.png / icon.ico 多尺寸，已提交）
 package.json   npm scripts 收纳（start / desktop / pack / dist / regress…）
-electron-builder.yml   桌面版打包配置（nsis + portable，不含 data/tools，asar 关闭）
+electron-builder.yml   桌面版打包配置（仅 portable 便携版，不含 data/tools，asar 关闭）
 ```
 
 ## 桌面版（Windows）
@@ -819,12 +819,12 @@ electron-builder.yml   桌面版打包配置（nsis + portable，不含 data/too
 
 **下载页：[github.com/MistHowlJade/shujiang/releases](https://github.com/MistHowlJade/shujiang/releases)**
 
-- `ShuJiang-Setup-1.0.0.exe`：向导式安装版（可选安装目录，当前用户安装，不需要管理员权限；桌面与开始菜单都有快捷方式）
-- `ShuJiang-Portable-1.0.0.exe`：单文件便携版，解压/U 盘随身，不用安装
-- **`ShuJiang-1.0.0-win-x64.zip`：绿色版（首选，最稳）**——解压到任意目录，双击 `书匠.exe` 即运行；删除文件夹即卸载。慢速机器、安装失败、权限受限都是这条路最省事
-  - 已遇到的 NSIS 安装器个别机器上「无法关闭书匠」死循环，绿色版可完全绕开
+- `ShuJiang-Portable-1.0.0.exe`：单文件便携版（主推），解压/U 盘随身，不用安装
+- **`ShuJiang-1.0.0-win-x64.zip`：绿色版（备用）**——解压到任意目录，双击 `书匠.exe` 即运行；删除文件夹即卸载。慢速机器、权限受限、或文件夹布局被其他原因打破时是这条路最省事
+- 便携版是安装目录-free 的单文件方案；安装目录里永远不会被写入作品数据
 - 这些安装包**没有代码签名证书**，第一次运行时 Windows SmartScreen 会拦一下：点「更多信息 → 仍要运行」即可。（签名需要正式的证书，暂未购买）
-- 安装/卸载不会动你的作品：用户数据在 `%APPDATA%\书匠\data`，卸载时默认保留
+- 不需要卸载：删掉 exe 就是删除整个应用
+- 用户数据在 `%APPDATA%\书匠\data`，删 exe 不会动它
 
 ### 自己从源码构建
 
@@ -832,8 +832,8 @@ electron-builder.yml   桌面版打包配置（nsis + portable，不含 data/too
 npm install            # 只装两个 build 依赖：electron、electron-builder
 npm run desktop        # 直接预览桌面版（等同 electron .）
 npm run icon           # 重新生成 build/icon.png / build/icon.ico（改过设计后）
-npm run pack           # 只打包到 dist/win-unpacked（不生成安装包）
-npm run dist           # 完整产物：dist\ShuJiang-Setup-1.0.0.exe + dist\ShuJiang-Portable-1.0.0.exe
+npm run pack           # 只打包到 dist/win-unpacked（不生成 exe）
+npm run dist           # 完整产物：dist\ShuJiang-Portable-1.0.0.exe（仅便携版，不打 NSIS 安装包）
 ```
 
 实现方式（`electron/main.mjs`）：单进程，把原有的零依赖本地服务端直接内嵌进 Electron 的 Node 里跑，动态找一个空闲端口，窗口打开它；单实例运行，重复双击只会聚焦已有窗口；外部链接一律不放行，只允许访问本应用地址；菜单栏默认隐藏（`Alt` 可调出）。数据目录优先尊重 `SHU_DATA_DIR` 环境变量，否则用 `%APPDATA%\书匠\data`——安装目录不会被写入任何文件。
@@ -844,7 +844,7 @@ npm run dist           # 完整产物：dist\ShuJiang-Setup-1.0.0.exe + dist\Shu
 
 **SmartScreen 拦住了怎么办？** 见上文，点「更多信息 → 仍要运行」。如果嫌麻烦，可以从便携版开始：Portable 同样会被拦，但不用装。
 
-**作品在哪？** 安装版在 `%APPDATA%\书匠\data`；源码模式（`npm start` / `启动.bat`）在项目 `data/`。两个目录互不相通，互不覆盖。想搬家：把老 `data/` 整个复制到新目录，或设环境变量 `SHU_DATA_DIR` 指过去。
+**作品在哪？** 便携版数据在 `%APPDATA%\书匠\data`；源码模式（`npm start` / `启动.bat`）在项目 `data/`。两个目录互不相通，互不覆盖。想搬家：把老 `data/` 整个复制到新目录，或设环境变量 `SHU_DATA_DIR` 指过去。
 
 **为什么包这么大（~110–120 MB）？** 打进去的只有 Electron 自带的 Chromium——这是全世界做桌面应用都要付的固定成本。应用本身 1 MB 不到。
 
