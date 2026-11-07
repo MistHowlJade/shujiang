@@ -1732,9 +1732,27 @@ function serveStatic(req, res, url) {
 /* 启动                                                                */
 /* ------------------------------------------------------------------ */
 
+// 跨源防护：书匠只服务本机浏览器 / Electron。凡是带 Origin 的请求，
+// 来源必须是本机 http(s) 地址，否则一律 403。
+// 浏览器对跨源 POST（含 text/plain 的 simple request）一定会带 Origin，
+// 配合只监听 127.0.0.1，可挡住网页“隔空”驱动本机 API（烧模型额度、乱建作品等）。
+function originAllowed(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true; // curl / 直接调用：不代替浏览器做判断
+  try {
+    const u = new URL(origin);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    const h = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    return h === '127.0.0.1' || h === 'localhost' || h === '::1';
+  } catch {
+    return false;
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${HOST}:${PORT}`);
   try {
+    if (!originAllowed(req)) return sendJson(res, 403, { error: '只接受本机来源的请求' });
     if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
     return serveStatic(req, res, url);
   } catch (err) {
