@@ -215,10 +215,17 @@ h1, h2, h3 { letter-spacing: -.021em; }
 .topbar-right { display: flex; align-items: center; gap: 8px; }
 
 .save-pill {
-  font-size: 11px; color: var(--text-3); padding: 3px 10px;
+  display: inline-flex; align-items: center; height: 19px; padding: 0 10px;
+  font-size: 11px; color: var(--text-3);
   border: 1px solid var(--border); border-radius: var(--r-full);
-  background: var(--surface-2); white-space: nowrap;
-  transition: all 200ms var(--ease);
+  background: var(--surface-2); white-space: nowrap; cursor: pointer;
+  font-family: inherit;
+  transition: color 200ms var(--ease), border-color 200ms var(--ease), background 200ms var(--ease);
+}
+.save-pill:hover { color: var(--text-2); border-color: var(--border-2); }
+.save-pill:focus-visible {
+  outline: none; border-color: transparent;
+  box-shadow: 0 0 0 3px var(--accent-bg), 0 0 0 1.5px var(--accent);
 }
 .save-pill.dirty { color: var(--warning); border-color: var(--warning); background: var(--warning-bg); }
 .save-pill.saving { color: var(--accent-hover); border-color: var(--accent-line); background: var(--accent-bg); }
