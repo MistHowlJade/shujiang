@@ -437,6 +437,11 @@ function refreshSavePill() {
     pill.title = n
       ? (S.saveErr ? `最近一次保存失败：${S.saveErr}\n点击立即重试` : '点击立即保存')
       : '正文已写入 data/ 目录';
+    pill.setAttribute('aria-label', n
+      ? (S.saveErr
+        ? `保存失败：${S.saveErr}，点击重试`
+        : (n > 1 ? `还有 ${n} 章待保存，点击立即保存` : '还有改动未保存，点击立即保存'))
+      : '已保存');
     pill.style.cursor = n ? 'pointer' : '';
   }
 }
