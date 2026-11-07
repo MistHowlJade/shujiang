@@ -850,14 +850,14 @@ npm run dist           # 完整产物：dist\ShuJiang-Portable-1.0.1.exe（仅�
 
 ---
 
-## Code signing policy
+## 签名状态
 
-Free code signing provided by SignPath.io, certificate by SignPath Foundation.
+本项目发布的 Windows 安装包/便携版**未签名**。Windows SmartScreen 会提示「Windows 已保护你的电脑」，点「**更多信息 → 仍要运行**」即可。发布者显示为「未知」。
 
-- **维护者 / 源码仓库所有人**：MistHowlJade（书匠作者，github.com/MistHowlJade/shujiang）
-- **隐私声明**：本程序不会向任何网络系统主动传输信息，除非该系统是**用户自己配置并主动触发**的（例如用户在设置里填的模型服务商，以及用户每次点按生成/检查时发起的请求）。作品、设定、密钥三者都只存在本机 `data/` 目录里；除模型接口外，本程序不发出任何外部请求。
-- **构建与来源**：安装包从本公开仓库构建（`npm run dist`），用户可以自行从源码复现验证；二进制的签名显示为 SignPath Foundation。
-- 本策略同样适用于本仓库 GitHub Releases 上发布的所有安装包。
+- **签名太贵了**：OV 证书几百到几千人民币/年、EV 证书更贵；个人维护的开源项目没必要也没能力申请
+- **隐私声明**：本程序不会向任何网络系统主动传输信息，除非该系统是**用户自己配置并主动触发**的（例如用户在设置里填的模型服务商，以及用户每次点按生成/检查时发起的请求）。作品、设定、密钥三者都只存在本机 `data/` 目录里；除模型接口外，本程序不发出任何外部请求
+- **源码构建**：所有发行版都从本公开仓库构建（`npm run dist` / `npm run pack`），用户可以自行验证后自行构建
+- 本声明适用于本仓库 GitHub Releases 上发布的所有安装包
 
 ## 常见问题
 
