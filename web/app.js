@@ -4365,7 +4365,7 @@ function renderTopbarActions() {
   const goalTag = goal
     ? `<span class="top-goal${goal.done ? ' done' : ''}" title="${esc(goalTip)}">目标 ${fmtGoal(goal.target)} 字 · ${goal.pct}%</span>`
     : '';
-  mid.innerHTML = `<span title="点击导出这部作品">${ico('book')}《${esc(S.novel.title)}》<span class="dim-text">${S.novel.chapters.length} 章 · ${fmtWords(total)} 字</span>${goalTag}${ico('download')}</span>`;
+  mid.innerHTML = `<button type="button" class="top-export" title="导出这部作品">${ico('book')}《${esc(S.novel.title)}》<span class="dim-text">${S.novel.chapters.length} 章 · ${fmtWords(total)} 字</span>${goalTag}${ico('download')}</button>`;
   mid.onclick = exportBook;
 }
 
