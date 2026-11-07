@@ -820,8 +820,10 @@ electron-builder.yml   桌面版打包配置（nsis + portable，不含 data/too
 **下载页：[github.com/MistHowlJade/shujiang/releases](https://github.com/MistHowlJade/shujiang/releases)**
 
 - `ShuJiang-Setup-1.0.0.exe`：向导式安装版（可选安装目录，当前用户安装，不需要管理员权限；桌面与开始菜单都有快捷方式）
-- `ShuJiang-Portable-1.0.0.exe`：单文件便携版，解压即用/U 盘随身，不用安装
-- 这两个包**没有代码签名证书**，第一次运行时 Windows SmartScreen 会拦一下：点「更多信息 → 仍要运行」即可。（签名需要正式的证书，暂未购买）
+- `ShuJiang-Portable-1.0.0.exe`：单文件便携版，解压/U 盘随身，不用安装
+- **`ShuJiang-1.0.0-win-x64.zip`：绿色版（首选，最稳）**——解压到任意目录，双击 `书匠.exe` 即运行；删除文件夹即卸载。慢速机器、安装失败、权限受限都是这条路最省事
+  - 已遇到的 NSIS 安装器个别机器上「无法关闭书匠」死循环，绿色版可完全绕开
+- 这些安装包**没有代码签名证书**，第一次运行时 Windows SmartScreen 会拦一下：点「更多信息 → 仍要运行」即可。（签名需要正式的证书，暂未购买）
 - 安装/卸载不会动你的作品：用户数据在 `%APPDATA%\书匠\data`，卸载时默认保留
 
 ### 自己从源码构建
