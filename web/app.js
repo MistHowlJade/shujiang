@@ -1444,7 +1444,7 @@ function renderChatLog() {
     if (msg.role === 'assistant' && msg.content.trim()) {
       const actions = document.createElement('div');
       actions.className = 'chat-actions';
-      actions.innerHTML = `<button class="btn btn-sm btn-primary" data-chat-action="apply" data-idx="${i}">应用到正文</button><button class="btn btn-sm btn-text" data-chat-action="copy" data-idx="${i}">复制</button><button class="btn btn-sm btn-text" data-chat-action="regenerate" data-idx="${i}">再来一次</button>`;
+      actions.innerHTML = `<button class="btn btn-sm" data-chat-action="append" data-idx="${i}">附加到正文</button><button class="btn btn-sm" data-chat-action="replace" data-idx="${i}">替换正文</button><button class="btn btn-sm btn-text" data-chat-action="insert" data-idx="${i}">插入光标处</button><button class="btn btn-sm btn-text" data-chat-action="copy" data-idx="${i}">复制</button><button class="btn btn-sm btn-text" data-chat-action="regenerate" data-idx="${i}">再来一次</button>`;
       log.appendChild(actions);
     }
   });
@@ -1564,9 +1564,15 @@ function chatInit() {
     const msg = chatHistory[idx];
     if (!msg) return;
     const action = btn.dataset.chatAction;
-    if (action === 'apply') {
+    if (action === 'append') {
       chatApplyToContent(msg.content, 'append');
       toast('已附加到正文', 'ok');
+    } else if (action === 'replace') {
+      chatApplyToContent(msg.content, 'replace');
+      toast('已替换正文', 'ok');
+    } else if (action === 'insert') {
+      chatApplyToContent(msg.content, 'insert');
+      toast('已插入到光标处', 'ok');
     } else if (action === 'copy') {
       navigator.clipboard.writeText(msg.content).then(() => toast('已复制', 'ok'));
     } else if (action === 'regenerate') {
