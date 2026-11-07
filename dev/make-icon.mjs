@@ -205,7 +205,4 @@ fs.writeFileSync(path.join(BUILD_DIR, 'icon.png'), pngs[256]);
 fs.writeFileSync(path.join(BUILD_DIR, 'icon.ico'), buildIco(
   [256, 48, 32, 16].map((size) => ({ size, data: pngs[size] })),
 ));
-for (const size of [48, 32, 16]) {
-  fs.writeFileSync(path.join(BUILD_DIR, `icon-${size}.png`), pngs[size]);
-}
-console.log('图标生成完毕：build/icon.png  build/icon.ico（256/48/32/16）');
+console.log('图标生成完毕：build/icon.png  build/icon.ico（多尺寸 256/48/32/16 内嵌）');
