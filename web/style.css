@@ -194,6 +194,7 @@ h1, h2, h3 { letter-spacing: -.021em; }
   padding: 4px 11px; border-radius: var(--r-full);
   border: 1px solid var(--border); background: var(--surface-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  cursor: pointer;
   transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 .topbar-mid > span:hover { border-color: var(--border-2); color: var(--text-1); }
