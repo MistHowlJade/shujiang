@@ -512,6 +512,7 @@ function renderThemeIcon() {
   const dark = document.body.dataset.theme === 'dark';
   $('#themeBtn').innerHTML = ico(dark ? 'sun' : 'moon');
   $('#themeBtn').title = dark ? '切换到浅色主题' : '切换到深色主题';
+  $('#themeBtn').setAttribute('aria-label', dark ? '切换到浅色主题' : '切换到深色主题');
 }
 $('#themeBtn').addEventListener('click', () => {
   const next = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
