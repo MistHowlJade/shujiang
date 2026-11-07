@@ -859,8 +859,8 @@ electron-builder.yml   桌面版打包配置（仅 portable 便携版，不含 d
 
 **下载页：[github.com/MistHowlJade/shujiang/releases](https://github.com/MistHowlJade/shujiang/releases)**
 
-- `ShuJiang-Portable-1.0.6.exe`：单文件便携版（主推），解压/U 盘随身，不用安装
-- **`ShuJiang-1.0.6-win-x64.zip`：绿色版（备用）**——解压到任意目录，双击 `书匠.exe` 即运行；删除文件夹即卸载。慢速机器、权限受限、或文件夹布局被其他原因打破时是这条路最省事
+- `ShuJiang-Portable-1.0.7.exe`：单文件便携版（主推），解压/U 盘随身，不用安装
+- **`ShuJiang-1.0.7-win-x64.zip`：绿色版（备用）**——解压到任意目录，双击 `书匠.exe` 即运行；删除文件夹即卸载。慢速机器、权限受限、或文件夹布局被其他原因打破时是这条路最省事
 - 便携版是安装目录-free 的单文件方案；安装目录里永远不会被写入作品数据
 - 这些安装包**没有代码签名证书**，第一次运行时 Windows SmartScreen 会拦一下：点「更多信息 → 仍要运行」即可。（签名需要正式的证书，暂未购买）
 - 不需要卸载：删掉 exe 就是删除整个应用
@@ -873,7 +873,7 @@ npm install            # 只装两个 build 依赖：electron、electron-builder
 npm run desktop        # 直接预览桌面版（等同 electron .）
 npm run icon           # 重新生成 build/icon.png / build/icon.ico（改过设计后）
 npm run pack           # 只打包到 dist/win-unpacked（不生成 exe）
-npm run dist           # 完整产物：dist\ShuJiang-Portable-1.0.6.exe（仅便携版，不打 NSIS 安装包）
+npm run dist           # 完整产物：dist\ShuJiang-Portable-1.0.7.exe（仅便携版，不打 NSIS 安装包）
 ```
 
 实现方式（`electron/main.mjs`）：单进程，把原有的零依赖本地服务端直接内嵌进 Electron 的 Node 里跑，动态找一个空闲端口，窗口打开它；单实例运行，重复双击只会聚焦已有窗口；外部链接一律不放行，只允许访问本应用地址；菜单栏默认隐藏（`Alt` 可调出）。数据目录解析顺序：`SHU_DATA_DIR` 环境变量 > 本体同目录的 `data/`（zip 解压目录 / 便携版 exe 旁边，v1.0.3 起新装默认） > 老位置 `%APPDATA%\书匠\data`（已在那边有数据的老用户继续用它，避免两份数据分家）。本体目录只读时回退到老位置。
