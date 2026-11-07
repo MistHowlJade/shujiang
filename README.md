@@ -22,6 +22,9 @@
   <img src="docs/screenshots/bible-overview.jpeg" alt="设定库·大纲：全书控制、一句话故事与梗概" width="49%">
   <img src="docs/screenshots/characters.jpeg" alt="设定库·人物：人物卡与关系" width="49%">
 </p>
+<p align="center">
+  <img src="docs/screenshots/outline.jpeg" alt="设定库·分卷与章纲：拖拽排序、进度条、章纲编辑" width="60%">
+</p>
 
 ---
 
