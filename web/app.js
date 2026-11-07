@@ -9912,6 +9912,7 @@ function novelField(label, key, obj, opts = {}) {
 
 function bindFields(root, obj, after, numericKeys = []) {
   $$('[data-key]', root).forEach((el) => el.addEventListener('input', () => {
+    if (obj?.locked) return; // 锁定设定不接受键盘修改
     const k = el.dataset.key;
     if (SKIP_KEYS.has(k)) return;
     obj[k] = numericKeys.includes(k) ? Number(el.value) || 0 : el.value;
@@ -10555,15 +10556,17 @@ function openEntryStatesModal(entry, states) {
 /* ---- 人物条目渲染（供虚拟列表复用） ---- */
 function renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache) {
   const div = document.createElement('div');
-  div.className = 'entry';
+  div.className = 'entry' + (c.locked ? ' entry--locked' : '');
   if (c.id) div.dataset.entryId = c.id;
   div.innerHTML = `
     <div class="entry-head">
-      <input class="input" data-key="name" value="${esc(c.name || '')}" placeholder="姓名" style="max-width:180px;font-weight:600" />
-      <input class="input" data-key="role" value="${esc(c.role || '')}" placeholder="主角 / 配角 / 反派" style="max-width:150px" />
+      <input class="input" data-key="name" value="${esc(c.name || '')}" placeholder="姓名" style="max-width:180px;font-weight:600" ${c.locked ? 'disabled' : ''} />
+      <input class="input" data-key="role" value="${esc(c.role || '')}" placeholder="主角 / 配角 / 反派" style="max-width:150px" ${c.locked ? 'disabled' : ''} />
       <span style="flex:1"></span>
-      <button class="del" title="删除">${ico('trash')}</button>
+      <button class="lock-btn${c.locked ? ' on' : ''}" title="${c.locked ? '取消锁定' : '锁定后 AI 生成不可改变此人设定'}" aria-label="${c.locked ? '取消锁定' : '锁定'}">${ico('lock')}</button>
+      <button class="del" title="删除" ${c.locked ? 'disabled' : ''}>${ico('trash')}</button>
     </div>
+    <div class="entry-locked-note" ${c.locked ? '' : 'hidden'}>已锁定，AI 生成不会改动此设定</div>
     <div class="fields">
       ${field('身份', 'identity', c)}
       ${field('年龄', 'age', c)}
@@ -10579,13 +10582,24 @@ function renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache) {
     ${field('关系（每行一条：对象|关系|备注）', 'relText', { relText: (c.relations || []).map((r) => `${r.to}|${r.type || ''}|${r.note || ''}`).join('\n') }, { area: true, rows: 2 })}
     <div class="char-appear-slot">${characterIndexHtml(c, i, charIndex, mentionIndex, stateCache)}</div>`;
   bindFields(div, c, () => saveNovelPart({ bible: n.bible }));
+  // 锁定切换
+  div.querySelector('.lock-btn').addEventListener('click', () => {
+    c.locked = !c.locked;
+    div.classList.toggle('entry--locked', c.locked);
+    div.querySelector('.entry-locked-note').hidden = !c.locked;
+    div.querySelector('.lock-btn').classList.toggle('on', c.locked);
+    div.querySelectorAll('input, textarea, .del').forEach((el) => { el.disabled = c.locked; });
+    saveNovelPart({ bible: n.bible });
+  });
   const kw = div.querySelector('[data-key="kwText"]');
   kw.addEventListener('input', () => {
+    if (c.locked) return;
     c.keywords = kw.value.split(/[,，、\s]+/).filter(Boolean);
     saveNovelPart({ bible: n.bible });
   });
   const rel = div.querySelector('[data-key="relText"]');
   rel.addEventListener('input', () => {
+    if (c.locked) return;
     c.relations = rel.value.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
       const [to, type, note] = l.split('|').map((x) => (x || '').trim());
       return { to: to || '', type: type || '', note: note || '' };
@@ -10717,20 +10731,31 @@ function worldMentionsHtml(w, mentionIndex, entryIndex, mentionCache, stateCache
 
 function renderWorldEntry(w, i, n, mentionIndex, mentionCache, stateCache) {
   const div = document.createElement('div');
-  div.className = 'entry';
+  div.className = 'entry' + (w.locked ? ' entry--locked' : '');
   div.innerHTML = `
     <div class="entry-head">
-      <input class="input" data-key="name" value="${esc(w.name || '')}" placeholder="名称" style="max-width:200px;font-weight:600" />
-      <input class="input" data-key="category" value="${esc(w.category || '')}" placeholder="分类：地理/势力/力量体系/规则/物品" style="max-width:240px" />
+      <input class="input" data-key="name" value="${esc(w.name || '')}" placeholder="名称" style="max-width:200px;font-weight:600" ${w.locked ? 'disabled' : ''} />
+      <input class="input" data-key="category" value="${esc(w.category || '')}" placeholder="分类：地理/势力/力量体系/规则/物品" style="max-width:240px" ${w.locked ? 'disabled' : ''} />
       <span style="flex:1"></span>
-      <button class="del" title="删除">${ico('trash')}</button>
+      <button class="lock-btn${w.locked ? ' on' : ''}" title="${w.locked ? '取消锁定' : '锁定后 AI 生成不可改变此条目'}" aria-label="${w.locked ? '取消锁定' : '锁定'}">${ico('lock')}</button>
+      <button class="del" title="删除" ${w.locked ? 'disabled' : ''}>${ico('trash')}</button>
     </div>
+    <div class="entry-locked-note" ${w.locked ? '' : 'hidden'}>已锁定，AI 生成不会改动此设定</div>
     ${field('说明（写具体细节，模型才能用上）', 'desc', w, { area: true, rows: 3 })}
     ${field('检索关键词（逗号分隔）', 'kwText', { kwText: (w.keywords || []).join('，') })}
     <div class="world-index-slot">${worldMentionsHtml(w, mentionIndex, i, mentionCache, stateCache)}</div>`;
   bindFields(div, w, () => saveNovelPart({ bible: n.bible }));
+  div.querySelector('.lock-btn').addEventListener('click', () => {
+    w.locked = !w.locked;
+    div.classList.toggle('entry--locked', w.locked);
+    div.querySelector('.entry-locked-note').hidden = !w.locked;
+    div.querySelector('.lock-btn').classList.toggle('on', w.locked);
+    div.querySelectorAll('input, textarea, .del').forEach((el) => { el.disabled = w.locked; });
+    saveNovelPart({ bible: n.bible });
+  });
   const kw = div.querySelector('[data-key="kwText"]');
   kw.addEventListener('input', () => {
+    if (w.locked) return;
     w.keywords = kw.value.split(/[,，、\s]+/).filter(Boolean);
     saveNovelPart({ bible: n.bible });
   });

@@ -1623,6 +1623,24 @@ kbd {
 .entry .del:hover { background: var(--danger-bg); color: var(--danger); }
 .entry .del .ico { width: 14px; height: 14px; }
 
+/* —— 设定锁定 —— */
+.entry .lock-btn {
+  width: 26px; height: 26px; flex: 0 0 auto; display: grid; place-items: center;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-4); cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+.entry .lock-btn:hover { background: var(--surface-3); color: var(--accent-hover); }
+.entry .lock-btn.on { color: var(--accent-hover); background: var(--accent-bg); }
+.entry .lock-btn .ico { width: 13px; height: 13px; }
+.entry.entry--locked { border-color: var(--accent-line); }
+.entry.entry--locked .fields { opacity: .55; }
+.entry.entry--locked .fields input,
+.entry.entry--locked .fields textarea { pointer-events: none; }
+.entry-locked-note {
+  margin-top: 4px; font-size: 10.5px; color: var(--accent-hover);
+  padding: 2px 6px; border-radius: var(--r-xs); background: var(--accent-bg); display: inline-block;
+}
+
 /* 人物出场索引 / 世界观提及索引 */
 .char-appear, .entry-appear {
   display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;

@@ -122,6 +122,8 @@ export function buildContext(novel, opts = {}) {
   };
 
   // 查询串 = 本章标题 + 本章要求 + 最近概要 + 用户补充搜索词
+  // 查询词 = 当前章 + 上一章摘要 + 章节卡片 + 用户额外要求 + 本章正文片段（锚点检索：用正文提到的名字找出相关设定）
+  const currentChapterText = idx >= 0 ? String(chapters[idx]?.content || '').slice(-1500) : '';
   const query = [
     chapter?.title,
     chapter?.summary,
@@ -129,6 +131,7 @@ export function buildContext(novel, opts = {}) {
     chapterOutline.scene,
     chapterOutline.characters,
     opts.extraQuery,
+    currentChapterText,
     chapters.slice(Math.max(0, prevIndex - 3), prevIndex).map((c) => `${c.title} ${c.summary || c.memory?.summary || ''}`).join(' '),
   ]
     .filter(Boolean)
@@ -154,6 +157,14 @@ export function buildContext(novel, opts = {}) {
     m.synopsis && `故事梗概：${m.synopsis}`,
   ].filter(Boolean).join('\n');
   push('全书总纲', topBits, true);
+
+  // 锁定设定：必须始终带上，不受 budget 影响
+  const lockedBits = [
+    ...(novel.bible?.characters || []).filter((c) => c.locked).map((c) => `人物·${c.name}（${c.role || ''}）：${c.personality || ''}${c.goal ? `；目标：${c.goal}` : ''}${c.flaw ? `；缺陷：${c.flaw}` : ''}${c.speech ? `；说话：${c.speech}` : ''}`),
+    ...(novel.bible?.world || []).filter((w) => w.locked).map((w) => `世界观·${w.name}（${w.category || ''}）：${w.desc || ''}`),
+    ...(novel.bible?.timeline || []).filter((t) => t.locked).map((t) => `时间线·${t.when || t.time || ''}：${t.event || t.text || ''}`),
+  ];
+  if (lockedBits.length) push('🔒 锁定设定（生成时必须遵守）', lockedBits.join('\n'), true);
 
   const volumes = novel.outline?.volumes || [];
   if (volumes.length) {
