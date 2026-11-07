@@ -1067,8 +1067,8 @@ function openNewNovelModal() {
     </label>
     <label class="field-label">一句话故事<span class="field-hint">可后补</span></label>
     <input id="nvLogline" class="input" placeholder="一个少年背着一把不能出鞘的剑，去杀他师傅。" />
-    <label class="field-label">目标平台</label>
-    <select id="nvPlatform" class="select">
+    <label class="field-label" for="nvPlatform">目标平台</label>
+    <select id="nvPlatform" class="select" aria-label="目标平台">
       <option value="">不限</option><option>番茄小说</option><option>起点中文网</option>
       <option>七猫</option><option>晋江</option><option>出版向</option>
     </select>
