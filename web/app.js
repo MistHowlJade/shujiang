@@ -11400,7 +11400,7 @@ function renderSettings() {
         </label>
         <span style="flex:1"></span>
         <button class="btn btn-sm" data-act="test">测试连接</button>
-        <button class="icon-btn sm" data-act="del" title="删除该服务商">${ico('trash')}</button>
+        <button class="icon-btn sm" data-act="del" title="删除该服务商" aria-label="删除该服务商">${ico('trash')}</button>
       </div>
       <div class="grid2">
         <label class="field-label">Base URL<input class="input" data-pk="baseUrl" value="${esc(p.baseUrl || '')}" placeholder="https://api.deepseek.com/v1" /></label>
