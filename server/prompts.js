@@ -352,6 +352,28 @@ export const TASKS = {
       };
     },
   },
+
+  /* ---------- 灵感 ---------- */
+  inspiration: {
+    expect: 'json',
+    temperature: 1.0,
+    maxTokens: 3000,
+    build({ payload }) {
+      const genre = String(payload?.genre || '').trim() || '都市';
+      const kw = String(payload?.keywords || '').trim();
+      return {
+        messages: [
+          sys('你是一位深谙当前中文网文市场风向的编辑，懂起点、番茄、七猫、晋江等平台的读者口味与推荐位逻辑，擅长把“什么能火”翻译成可以动笔的设定。'),
+          user(
+            `给出 8 个「${genre}」题材的开书灵感${kw ? `，关键词「${kw}」` : ''}。每个灵感必须面向当下读者偏好，卖点清晰（金手指/人设反差/核心钩子）。
+只返回 JSON 数组，不要任何说明文字、不要 markdown 代码块。每个元素结构：
+{"title":"书名候选（7字以内）","hook":"一句话金手指/核心卖点（30字以内）","persona":"主角人设一句话","opening":"第一章从哪里开（触发事件，一句话）","audience":"谁会追这本、看它图什么"}
+要求：8 个方向互不雷同；不要都是重生/系统/穿书套路，用得住才用，用得套就换一种包装；每个都要支撑 10 万+ 字的追读。`,
+          ),
+        ],
+      };
+    },
+  },
 };
 
 // 段落级任务的公共构造：把「选中文本」当作用户消息主体
@@ -472,6 +494,7 @@ export const TEMPLATE_SLOTS = [
   { key: 'batchMemory', task: 'memory', label: '批量补记忆', vars: ['novel.title', 'chapter.no', 'chapter.title', 'content'] },
   { key: 'analyzeStyle', task: 'style', label: '提取文风', vars: ['text'] },
   { key: 'generateSceneProse', task: 'chapter', label: '生成场景正文', vars: ['pov', 'location', 'time', 'characters', 'summary', 'hook', 'target', 'tone', 'req'] },
+  { key: 'inspiration', task: 'inspiration', label: '灵感', vars: ['req'] },
 ];
 
 export function buildTask(taskName, ctx) {

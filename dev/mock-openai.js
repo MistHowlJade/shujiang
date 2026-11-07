@@ -236,6 +236,65 @@ const STYLE = `## 叙事视角与人称
 
 const SUMMARY = '谢迟夜里携剑前往青石巷，被脸上带疤的青衫人拦路试探。对方以「剑出得了鞘吗」相问，谢迟答「出不了，但够用」，得以放行。他进入巷底小院，见一女子在枯井边补衣，女子转述了师傅留下的口信，要他想通之后回来烧掉这个院子。';
 
+const INSPIRATIONS = [
+  {
+    "title": "剑来小城",
+    "hook": "退役剑仙在三线小城卖煎饼，饼里封着断剑",
+    "persona": "面皮咸、心硬的中年大叔，前来复仇的少年见一面就怕了",
+    "opening": "少年捧着认主玉佩闯进店里，大叔翻了个白眼继续摊饼",
+    "audience": "想看爽文但想换口味的老书虫读者"
+  },
+  {
+    "title": "我在修仙界开公司",
+    "hook": "穿成仙宗后勤，专修「别人修炼不了的生意」",
+    "persona": "精打细算的穿越财务，修炼全靠记账通透",
+    "opening": "宗门大比在即，他手里只有一本账本和三张欠条",
+    "audience": "仙侠+商战双爱好者，金手指是脑子和算盘"
+  },
+  {
+    "title": "诸天道具店",
+    "hook": "道具店只卖不值钱的东西，用了却暴富",
+    "persona": "雷厉风行的店主娘子，账目算得比杀人还准",
+    "opening": "一个穷书生进店，挑中了一把快断的木梳，店主娘子表情一僵",
+    "audience": "轻松+金手指爱好者，章节爽点密"
+  },
+  {
+    "title": "重生者只想躺平",
+    "hook": "前世996修仙，这辈子每日只修一炷香",
+    "persona": "躺平但心里长着刺的老干部",
+    "opening": "他掀开被子，窗外云海剑宗的钟声第 864 次响起——可这次他决定不起床",
+    "audience": "想看反内卷、反套路修仙的人"
+  },
+  {
+    "title": "末世小超市",
+    "hook": "末世首夜，他发现了被墙挡住的神秘超市",
+    "persona": "社恐但不怕尸的宅家青年",
+    "opening": "雨越落越大，货架尽头有一盏还亮着的灯",
+    "audience": "末世+囤货流，喜欢规则感和日常的读者"
+  },
+  {
+    "title": "学神在隔壁班",
+    "hook": "语文学神被调到数学班，连加减法都要补",
+    "persona": "表面学霸实则文科霸王的乖乖女",
+    "opening": "数学老师随手抽她起来回答第 1 题，她卡了 0.1 秒",
+    "audience": "校园轻喜，喜欢反差萌的读者"
+  },
+  {
+    "title": "万古剑仙在便利店",
+    "hook": "剑仙下山修炼，选择了便利店夜班",
+    "persona": "沉默寡言、出了名的勤快夜班店长",
+    "opening": "凌晨三点，一群混混推门进来，他放下手里的饭团",
+    "audience": "短视频改编型读者，高爽强反差"
+  },
+  {
+    "title": "全民读档案",
+    "hook": "觉醒阅读技能的普通人，靠档案里的信息一路开挂",
+    "persona": "爱较真的小档案员，谁都别想骗过他",
+    "opening": "他第一次翻开档案柜，就看到了自己名字的第 7 页",
+    "audience": "悬疑+信息流爱好者，脑洞党"
+  }
+];
+
 const TITLES = `### 书名候选
 1. **《剑不出鞘》** —— 直接把核心悬念做成书名，搜索辨识度高。
 2. **《十七圈》** —— 有神秘感，适合悬疑向读者。
@@ -286,6 +345,7 @@ function decide(text) {
   if (has('分卷大纲')) return 'outline';
   if (has('审稿意见')) return 'review';
   if (has('文风档案')) return 'style';
+  if (has('开书灵感') || has('灵感')) return 'inspiration';
   if (has('8 个书名')) return 'titles';
   if (has('概括这一章')) return 'summary';
   // 润色/扩写/精简/改写/自定义：五种任务的提示词都以「只输出…后的文字，不要任何解释」收尾
@@ -313,6 +373,8 @@ function buildReply(text, model = '') {
       return { kind, content: REVIEW };
     case 'style':
       return { kind, content: STYLE };
+    case 'inspiration':
+      return { kind, content: JSON.stringify(INSPIRATIONS) };
     case 'titles':
       return { kind, content: TITLES };
     case 'summary':

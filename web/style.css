@@ -1950,6 +1950,30 @@ kbd {
 }
 .qs-ideas button:hover { border-color: var(--border-2); background: var(--surface-3); color: var(--text-1); }
 
+/* ---------------- AI 灵感 ---------------- */
+.insp-genres { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.insp-genre {
+  cursor: pointer; font: inherit; font-size: 11.5px; color: var(--text-2);
+  background: var(--surface-3); border: 1px solid var(--border);
+  border-radius: var(--r-full); padding: 4px 12px;
+  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.insp-genre:hover { border-color: var(--border-2); color: var(--text-1); }
+.insp-genre.on { border-color: var(--accent-line); background: var(--accent-bg); color: var(--accent-hover); }
+.insp-results { margin-top: 16px; }
+.insp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+@media (max-width: 720px) { .insp-grid { grid-template-columns: 1fr; } }
+.insp-card {
+  display: flex; flex-direction: column; gap: 6px; align-items: stretch;
+  padding: 12px 13px; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.insp-title { font-size: 13.5px; font-weight: 600; color: var(--text-1); }
+.insp-hook { margin: 0; font-size: 12px; color: var(--text-2); line-height: 1.65; }
+.insp-meta { margin: 0; font-size: 11px; color: var(--text-3); line-height: 1.6; display: flex; gap: 8px; }
+.insp-meta span { flex: none; color: var(--text-4); }
+.insp-use { margin-top: auto; align-self: flex-start; }
+
 /* 接模型：没有服务商 / 没有 Key / 没有模型，分情况给下一步 */
 .qs-setup-steps { display: flex; flex-direction: column; gap: 9px; margin: 16px 0 18px; }
 .qs-setup-step { display: flex; align-items: flex-start; gap: 10px; }

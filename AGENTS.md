@@ -102,7 +102,7 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
 - `BASE_SYSTEM`：硬核人格（经验丰富的中文小说作者，守住设定不敷衍写）
 - `antiAi()`：**「口语粗粝」反AI味指令**——短句、动作折射情绪、话说半句也行、不总结、不升华、情绪靠身体折射。加载到章节正文/续写/段落操作/自定义处理/章节生成提示词中。如果用户以后问AI味问题，先看这里。
 - `head(novel, pack)`：把作品设定、出场人物、世界观、大纲捏合进 prompt 头（≈800 字量级）
-- `TEMPLATE_SLOTS`：19 个可定制任务的 key 列表（chapter / outline / worldview / …）
+- `TEMPLATE_SLOTS`：20 个可定制任务的 key 列表（chapter / outline / worldview / …）
 - 变量插值：`${novel.title}`、`${chapter.title}`、`${text}`、`${req}`、`${head}`；缺了一项会抛错并给你所有可用变量提示
 
 **AI 输出插入 vs 模板预览**：`/api/ai/stream` 流式推送，`/api/ai/preview` 一次性预览（不调模型不花钱）。所有模型请求是后端代理的，前端不直接碰模型 API。

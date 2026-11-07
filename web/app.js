@@ -1422,6 +1422,100 @@ function openQuickStartModal() {
   });
 }
 
+/* ---------------- AI 灵感 ---------------- */
+const INSPIRATION_GENRES = ['都市', '仙侠', '玄幻', '种田', '无限流', '悬疑', '言情', '末世', '科幻', '历史', '轻小说', '轻喜'];
+
+function openInspirationModal() {
+  if (!quickStartModel()) return openQuickStartSetup();
+
+  const provider = quickStartModel();
+  showModal(`
+    <h3>AI 灵感 · 当下风向</h3>
+    <p class="modal-sub">想知道现在流行什么、写什么能火？选一个题材（或者自己打关键词），让 AI 按当前中文网文风向给你 8 个开书灵感。每个都能直接拿来开书。</p>
+    <div class="insp-genres" id="insGenres" role="group" aria-label="题材方向">
+      ${INSPIRATION_GENRES.map((g, i) => `<button type="button" class="chip insp-genre" data-genre="${esc(g)}">${esc(g)}</button>`).join('')}
+    </div>
+    <label class="field-label">关键词<span class="field-hint">可选，如“穿书 女主 手撕绿茶”</span></label>
+    <input id="insKeywords" class="input" maxlength="60" autocomplete="off" placeholder="想要的元素关键词（可选）" />
+    <div class="tip qs-tip">${ico('spark')}<span>用的是你配的模型（<code>${esc(provider.providerName)} · ${esc(provider.model)}</code>），1 次请求。</span></div>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="insCancel">取消</button>
+      <button class="btn btn-primary" id="insGen">${ico('bulb')}生成 8 个灵感</button>
+    </div>
+    <div class="insp-results" id="insResults" hidden></div>`, (box) => {
+    let genre = INSPIRATION_GENRES[0];
+    const genreBtns = [...box.querySelectorAll('.insp-genre')];
+    genreBtns.forEach((btn, i) => {
+      btn.classList.toggle('on', i === 0);
+      btn.addEventListener('click', () => {
+        genre = btn.dataset.genre;
+        genreBtns.forEach((b) => b.classList.toggle('on', b === btn));
+      });
+    });
+    const kwEl = box.querySelector('#insKeywords');
+    const genBtn = box.querySelector('#insGen');
+    const resultsEl = box.querySelector('#insResults');
+    box.querySelector('#insCancel').onclick = closeModal;
+    kwEl.focus();
+    kwEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); gen(); }
+    });
+
+    const useIdea = (item) => {
+      const idea = `${item.title}——${item.hook}。${item.persona}`.trim().slice(0, 180);
+      closeModal();
+      openQuickStartModal();
+      const qs = document.querySelector('#qsIdea');
+      if (qs) { qs.value = idea; qs.dispatchEvent(new Event('input')); }
+      const g = document.querySelector('#qsGenre');
+      if (g && genre !== '全部') g.value = genre;
+      document.querySelector('#qsIdea')?.focus();
+    };
+
+    const gen = async () => {
+      const keywords = kwEl.value.trim();
+      genBtn.disabled = true;
+      const origLabel = genBtn.innerHTML;
+      genBtn.textContent = '正在请编辑出灵感…';
+      resultsEl.hidden = false;
+      resultsEl.innerHTML = '<p class="dim">正在读懂你的关键词、翻当前风向，大概需要几秒钟…</p>';
+      try {
+        const text = await streamAI({ task: 'inspiration', payload: { genre, keywords } });
+        const parsed = parseJsonLoose(text);
+        const list = (Array.isArray(parsed) ? parsed : parsed?.inspirations || parsed?.list || [])
+          .filter((x) => x && typeof x === 'object' && (x.title || x.hook))
+          .slice(0, 8);
+        if (!list.length) {
+          resultsEl.innerHTML = `<p class="qs-error">模型没给出结构化结果，原文前 300 字：${esc(text.slice(0, 300))}</p>`;
+          return;
+        }
+        resultsEl.innerHTML = `
+          <h3 style="margin-top:18px">给你 8 个灵感 <span class="dim small" style="font-weight:400">（${esc(genre)}${keywords ? ` · ${esc(keywords)}` : ''}）</span></h3>
+          <div class="insp-grid">
+            ${list.map((x) => `
+              <div class="insp-card">
+                <b class="insp-title">${esc(x.title || '无题')}</b>
+                <p class="insp-hook">${esc(x.hook || '')}</p>
+                <p class="insp-meta"><span>人设</span>${esc(x.persona || '')}</p>
+                <p class="insp-meta"><span>开篇</span>${esc(x.opening || '')}</p>
+                <p class="insp-meta"><span>谁看</span>${esc(x.audience || '')}</p>
+                <button type="button" class="btn btn-sm insp-use">用这个开书 →</button>
+              </div>`).join('')}
+          </div>`;
+        resultsEl.querySelectorAll('.insp-card').forEach((card, i) => {
+          card.querySelector('.insp-use').addEventListener('click', () => useIdea(list[i]));
+        });
+      } catch (err) {
+        resultsEl.innerHTML = `<p class="qs-error">灵感生成失败：${esc(err?.message || String(err))}</p>`;
+      } finally {
+        genBtn.disabled = false;
+        genBtn.innerHTML = '再来一批';
+      }
+    };
+    genBtn.onclick = gen;
+  }, { wide: true });
+}
+
 /**
  * 模型准备：不把用户直接丢进设置页，而是按当前配置判断缺哪一步：
  *   没有服务商 → 选一家常用服务商，当场填 Key
@@ -2470,6 +2564,7 @@ function quickStartErrorText(err) {
 }
 
 $('#quickStartBtn').addEventListener('click', openQuickStartModal);
+$('#inspirationBtn').addEventListener('click', openInspirationModal);
 $('#emptyQuickStartBtn').addEventListener('click', openQuickStartModal);
 
 
@@ -13496,6 +13591,7 @@ function cmdkSource() {
   });
   const op = (label, icon, run, hint) => out.push({ g: '操作', label, icon, run, hint });
   op('一键开书', 'spark', () => { setView('shelf'); openQuickStartModal(); }, '一句话生成全书');
+  op('AI 灵感', 'bulb', () => { setView('shelf'); openInspirationModal(); }, '生成开书灵感');
   op('新手指南', 'help', () => openHelpModal(), '?');
   op('新建作品', 'plus', () => openNewNovelModal(), 'N');
   op('回收站', 'trash', () => openTrash());
