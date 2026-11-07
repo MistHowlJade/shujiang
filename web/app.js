@@ -7676,8 +7676,24 @@ function showDiff(oldText, newText, op, range) {
 /* ============================================================
  * 7. 检查
  * ============================================================ */
-$$('#assistTabs button').forEach((b) => b.addEventListener('click', () => {
+const assistTabButtons = $$('#assistTabs button');
+assistTabButtons.forEach((b) => b.addEventListener('click', () => {
   showAssistTab(b.dataset.tab);
+}));
+assistTabButtons.forEach((b, _, buttons) => b.addEventListener('keydown', (e) => {
+  // 标准的 tablist 键盘语义：左右移动焦点，Home/End 跳到首尾
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+  e.preventDefault();
+  const current = document.activeElement?.dataset?.tab
+    ? buttons.findIndex((x) => x.dataset.tab === document.activeElement.dataset.tab)
+    : buttons.findIndex((x) => x.classList.contains('on'));
+  let idx = current < 0 ? 0 : current;
+  if (e.key === 'ArrowRight') idx = (idx + 1) % buttons.length;
+  else if (e.key === 'ArrowLeft') idx = (idx - 1 + buttons.length) % buttons.length;
+  else if (e.key === 'Home') idx = 0;
+  else if (e.key === 'End') idx = buttons.length - 1;
+  buttons[idx].focus();
+  showAssistTab(buttons[idx].dataset.tab);
 }));
 function showAssistTab(name) {
   $$('#assistTabs button').forEach((x) => {
