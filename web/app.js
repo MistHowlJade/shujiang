@@ -208,6 +208,29 @@ document.addEventListener('keydown', (e) => {
   if (S.focusMode) exitFocus();
 });
 
+/** 弹窗开着时按 Tab，焦点在弹窗内循环，不会跑到弹窗背后的页面上 */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  const mask = $('#modalMask');
+  if (mask.hidden) return;
+  const box = $('#modal');
+  const focusables = [...box.querySelectorAll('a[href], button, input, select, textarea, [tabindex]')]
+    .filter((el) => {
+      const ti = el.getAttribute('tabindex');
+      return !el.disabled && ti !== '-1' && el.getClientRects().length > 0;
+    });
+  if (!focusables.length) return;
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  const active = document.activeElement;
+  const inModal = box.contains(active);
+  if (e.shiftKey) {
+    if (!inModal || active === first) { e.preventDefault(); last.focus(); }
+  } else {
+    if (!inModal || active === last) { e.preventDefault(); first.focus(); }
+  }
+});
+
 /* ============================================================
  * 9.5 新手指南
  * ============================================================
