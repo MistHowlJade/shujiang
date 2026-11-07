@@ -387,6 +387,29 @@ export const TASKS = {
     },
   },
 
+  /* ---------- 诊断 ---------- */
+  diagnose: {
+    expect: 'json',
+    temperature: 0.3,
+    maxTokens: 2500,
+    build({ novel, pack, payload }) {
+      const text = String(payload?.text || '').slice(-8000);
+      return {
+        messages: [
+          sys('你是一位中文长篇小说责编。你的工作是指出问题，不改原文，只给出结构化的问题清单。', head(novel, pack)),
+          user(
+            `请检查以下文字有没有前后矛盾、设定冲突、时间线问题、人物口吻 / 性格漂移、重复（注水）的段落。
+只返回 JSON 数组，不要任何说明文字、不要 markdown 代码块。每个问题元素结构：
+{"severity":"high|medium|low","type":"设定冲突|时间线|人物口吻|重复|其他","text":"问题一句话","quote":"原文中出问题的那一句（原样复制，不要断章取义）","fix":"一句话修复建议"}
+最多列 8 条，按严重度从高到低排。没有问题就返回 []。text 总长度 30 字以内，fix 总长度 40 字以内，quote 总长度 80 字以内。
+
+以下是正文：
+${text}`,
+          ),
+        ],
+      };
+    },
+  },
   /* ---------- 对话助手 ---------- */
   chat: {
     expect: 'text',
@@ -416,6 +439,8 @@ export const TASKS = {
       };
     },
   },
+
+
 };
 
 // 段落级任务的公共构造：把「选中文本」当作用户消息主体

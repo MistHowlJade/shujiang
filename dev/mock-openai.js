@@ -240,6 +240,23 @@ const INSPIRATION_PROSE = "给你 5 个当下能写的方向，挑一个聊：\n
 
 
 
+const DIAGNOSE = [
+  {
+    "severity": "medium",
+    "type": "人物口吻",
+    "text": "沈砚前后斗试",
+    "quote": "沈砚咽了一口酒",
+    "fix": "这段他不该咽酒。"
+  },
+  {
+    "severity": "low",
+    "type": "设定冲突",
+    "text": "段落与地名不符",
+    "quote": "雪落长安村",
+    "fix": "改为「雪落剑冢」。"
+  }
+];
+
 const TITLES = `### 书名候选
 1. **《剑不出鞘》** —— 直接把核心悬念做成书名，搜索辨识度高。
 2. **《十七圈》** —— 有神秘感，适合悬疑向读者。
@@ -290,6 +307,7 @@ function decide(text) {
   if (has('分卷大纲')) return 'outline';
   if (has('审稿意见')) return 'review';
   if (has('文风档案')) return 'style';
+  if (has('请检查以下文字')) return 'diagnose';
   if (has('开书') || has('灵感') || has('什么火') || has('热门榜')) return 'inspiration';
   if (has('8 个书名')) return 'titles';
   if (has('概括这一章')) return 'summary';
@@ -318,6 +336,8 @@ function buildReply(text, model = '') {
       return { kind, content: REVIEW };
     case 'style':
       return { kind, content: STYLE };
+    case 'diagnose':
+      return { kind, content: JSON.stringify(DIAGNOSE) };
     case 'inspiration':
       return { kind, content: INSPIRATION_PROSE };
     case 'titles':

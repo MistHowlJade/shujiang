@@ -7228,8 +7228,10 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
     $('#outInfo').textContent = '';
     renderOut();
     if (PROSE_OUT_TASKS.has(S.outTask)) revealOutput();
-  } else {
+  } else if (target === 'check') {
     $('#checkBox').innerHTML = '<span class="dim">生成中…</span>';
+  } else {
+    // 诊断模式：不写 UI，只累加文本到 acc 返回
   }
   let acc = '';
   let streamFailed = false;
@@ -7247,7 +7249,8 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
       onDelta: (d) => {
         acc += d;
         if (target === 'out') { S.out += d; renderOut(); }
-        else if (!/^\s*[[{]/.test(acc)) $('#checkBox').innerHTML = mdLite(acc);
+        else if (target === 'check') { if (!/^\s*[[{]/.test(acc)) $('#checkBox').innerHTML = mdLite(acc); }
+        // diag: just accumulate
       },
       onReasoning: (r) => { if (target === 'out') { S.reasoning += r; renderOut(); } },
     });
@@ -7330,7 +7333,90 @@ async function continueWriting() {
 $('#contBtn').addEventListener('click', continueWriting);
 $('#stopBtn').addEventListener('click', () => S.controller?.abort());
 $('#stopBtn2').addEventListener('click', () => S.controller?.abort());
-$('#clearOut').addEventListener('click', () => { S.out = ''; S.reasoning = ''; renderOut(); });
+$('#clearOut').addEventListener('click', () => { S.out = ''; S.reasoning = ''; $('#diagList').hidden = true; renderOut(); });
+
+/* —— 诊断：AI 指出问题，逐条一键修 —— */
+const diagList = $('#diagList');
+
+async function diagnoseOutput() {
+  const text = S.out;
+  if (!text?.trim()) return toast('没有内容可诊断', 'err');
+  diagList.hidden = false;
+  diagList.innerHTML = '<p class="dim">正在诊断…</p>';
+  try {
+    const acc = await runStream({
+      task: 'diagnose',
+      novelId: S.novel?.id,
+      chapterId: S.chapterId,
+      payload: { text },
+    }, { target: 'diag' });
+    const parsed = parseJsonLoose(acc);
+    const list = (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
+      .filter((x) => x && typeof x === 'object' && x.text)
+      .slice(0, 8);
+    if (!list.length) {
+      diagList.innerHTML = '<p class="dim">没发现明显问题，或者模型没给出清单。不等于没有问题，但至少结构层过了。</p>';
+      return;
+    }
+    diagList.innerHTML = list.map((item, i) => `
+      <div class="diag-item severity-${String(item.severity || 'medium').toLowerCase()}">
+        <span class="diag-type">${esc(item.type || '其他')}</span>
+        <div class="diag-text">${esc(item.text || '')}</div>
+        <div class="diag-fix"><span class="diag-fix-label">修复：</span>${esc(item.fix || '')}</div>
+        <button type="button" class="btn btn-sm btn-text diag-fix-btn" data-idx="${i}">按此修复</button>
+      </div>`).join('');
+    diagList.querySelectorAll('.diag-fix-btn').forEach((btn) => {
+      btn.addEventListener('click', () => diagFixOne(list[Number(btn.dataset.idx)]));
+    });
+  } catch (err) {
+    diagList.innerHTML = `<p class="qs-error">诊断失败：${esc(err?.message || String(err))}</p>`;
+  }
+}
+
+async function diagFixOne(item) {
+  const quote = String(item.quote || '').trim();
+  const issue = String(item.text || '').trim();
+  if (!quote) return toast('模型没给原文引用，没法修', 'err');
+  try {
+    const acc = await runStream({
+      task: 'rewrite',
+      novelId: S.novel?.id,
+      chapterId: S.chapterId,
+      payload: {
+        instruction: `只修这一句/这一段，不要改其他地方——${issue}。只输出修复后的文字，不要解释。`,
+        text: quote,
+      },
+    });
+    const newText = acc.trim();
+    if (!newText) return;
+    // 三种匹配策略：精确 → 前8字 → 不匹配给出提示
+    const full = S.out;
+    let idx = full.indexOf(quote);
+    if (idx >= 0) {
+      S.out = full.slice(0, idx) + newText + full.slice(idx + quote.length);
+    } else {
+      const head = quote.slice(0, 8);
+      idx = full.indexOf(head);
+      if (idx >= 0) {
+        const span = full.slice(idx).match(/^[^。\n]{1,200}/)?.[0] || quote;
+        S.out = full.slice(0, idx) + newText + full.slice(idx + span.length);
+      } else {
+        toast('找不到原文片段，没法应用', 'err');
+        return;
+      }
+    }
+    renderOut();
+    toast('已修复', 'ok');
+    diagnoseOutput();
+  } catch (err) {
+    toast(`应用失败：${err?.message || String(err)}`, 'err');
+  }
+}
+
+$('#diagnoseBtn').addEventListener('click', () => {
+  if (!S.out?.trim()) return toast('先生成几句话再来诊断', 'err');
+  diagnoseOutput();
+});
 $('#copyOut').addEventListener('click', () => { navigator.clipboard.writeText(S.out); toast('已复制', 'ok'); });
 
 function insertIntoContent(text, mode) {

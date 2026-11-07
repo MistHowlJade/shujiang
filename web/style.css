@@ -1650,7 +1650,26 @@ kbd {
 }
 
 /* 人物出场索引 / 世界观提及索引 */
-.char-appear, .entry-appear {
+.diag-list { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
+.diag-item {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 10px; font-size: 11px; line-height: 1.55;
+  border-bottom: 1px solid var(--border);
+}
+.diag-item:last-child { border-bottom: none; }
+.diag-item.severity-high { background: var(--danger-bg); }
+.diag-item.severity-medium { background: var(--surface-2); }
+.diag-item.severity-low { background: var(--surface-3); }
+.diag-type {
+  flex: none; display: inline-block; padding: 1px 6px; border-radius: var(--r-xs);
+  font-size: 9.5px; font-weight: 600; color: var(--text-2);
+  background: var(--surface-1); border: 1px solid var(--border);
+  min-width: 48px; text-align: center;
+}
+.diag-text { flex: none; max-width: 180px; color: var(--text-1); }
+.diag-fix { flex: 1; min-width: 0; color: var(--text-3); overflow-wrap: anywhere; }
+.diag-fix-label { color: var(--text-4); }
+.diag-fix-btn { flex: none; }
   display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;
   margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--border);
   color: var(--text-3); font-size: 11.5px;
@@ -1677,6 +1696,7 @@ kbd {
   max-height: 52vh; overflow: auto; margin: 0 -4px; padding: 2px 4px;
 }
 .state-row {
+.char-appear, .entry-appear {
   display: flex; align-items: flex-start; gap: 10px; width: 100%;
   padding: 9px 11px; text-align: left; font: inherit;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
