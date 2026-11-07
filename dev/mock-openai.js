@@ -251,7 +251,6 @@ const TITLES = `### 书名候选
 /* ---------------------------------------------------------------- 逻辑 */
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const sse = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 const split = (s, n = CHUNK) => {
   const out = [];
   for (let i = 0; i < s.length; i += n) out.push(s.slice(i, i + n));
