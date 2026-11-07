@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
-const NOVELS_DIR = path.join(ROOT, 'data', 'novels');
+const NOVELS_DIR = path.join(process.env.SHU_DATA_DIR || path.join(ROOT, 'data'), 'novels');
 
 const CHAPTERS = Number(process.argv[2] || 120);
 const CHARS = Number(process.argv[3] || 3000);

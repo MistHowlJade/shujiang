@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const BASE = process.env.SHU_BASE || 'http://127.0.0.1:8848';
-const NOVELS_DIR = 'data/novels';
+const NOVELS_DIR = path.join(process.env.SHU_DATA_DIR || 'data', 'novels');
 
 // 找压测作品
 let id = process.argv[2];
