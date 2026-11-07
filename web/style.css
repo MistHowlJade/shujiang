@@ -89,9 +89,8 @@ body[data-theme="light"] {
   --r-lg: 10px; --r-xl: 14px; --r-full: 999px;
   --ease: cubic-bezier(.16, 1, .3, 1);
   --dur: 140ms;
-  --font-ui: "Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI",
-             "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", system-ui, sans-serif;
-  --font-write: "Source Han Serif SC", "Noto Serif SC", "Songti SC", "SimSun", Georgia, serif;
+  --font-ui: "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+  --font-write: "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "SimSun", Georgia, serif;
   --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
   /* 稿纸：设置页可以改，启动时从 config.ui.editor 挂到 body 上 */
   --ed-size: 16px;
@@ -108,7 +107,7 @@ body {
   background: var(--bg);
   color: var(--text-1);
   font-family: var(--font-ui);
-  font-size: 13px; line-height: 1.55;
+  font-size: 14px; line-height: 1.62;
   letter-spacing: -.006em;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
@@ -260,7 +259,7 @@ main { flex: 1; min-height: 0; position: relative; }
   height: 32px; padding: 0 12px; user-select: none; white-space: nowrap; cursor: pointer;
   border: 1px solid var(--border-2); border-radius: var(--r-md);
   background: var(--surface-2); color: var(--text-1);
-  font-size: 12.5px; font-weight: 500;
+  font-size: 13px; font-weight: 500;
   box-shadow: var(--sh-1);
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease),
               color var(--dur) var(--ease), transform var(--dur) var(--ease);
@@ -598,7 +597,7 @@ kbd {
   backdrop-filter: blur(12px);
 }
 .page-head h1 { margin: 0; font-size: 20px; font-weight: 600; }
-.page-sub { margin: 5px 0 0; font-size: 12.5px; color: var(--text-3); }
+.page-sub { margin: 5px 0 0; font-size: 13px; color: var(--text-3); }
 .page-sub-line { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .trash-link,
 .shelf-sort-link {
@@ -1202,7 +1201,7 @@ kbd {
   width: 100%; max-width: 760px; height: 100%; resize: none; outline: none;
   border: 0; background: transparent; color: var(--text-1);
   padding: 26px 32px 90px;
-  font-family: var(--ed-font); font-size: var(--ed-size); line-height: var(--ed-lh); letter-spacing: .2px;
+  font-family: var(--ed-font); font-size: var(--ed-size); line-height: var(--ed-lh); letter-spacing: .3px;
 }
 .editor::placeholder { color: var(--text-3); font-family: var(--font-ui); font-size: 13px; line-height: 1.9; }
 @media (min-width: 1440px) {
@@ -3097,7 +3096,7 @@ button.hm-cell:focus-visible { outline: 1px solid var(--accent); outline-offset:
 .reader-kicker { font-size: 10.5px; letter-spacing: .12em; color: var(--text-4); }
 .reader-page h1 { margin: 9px 0 8px; font-family: var(--font-write); font-size: 26px; font-weight: 500; line-height: 1.45; }
 .reader-meta { font-size: 10.5px; color: var(--text-4); font-variant-numeric: tabular-nums; }
-.reader-content { margin-top: 34px; font-family: var(--font-write); font-size: var(--reader-size, 18px); line-height: 2.05; color: var(--text-1); }
+.reader-content { margin-top: 34px; font-family: var(--font-write); font-size: var(--reader-size, 20px); line-height: 2.1; color: var(--text-1); }
 .reader-content p { margin: 0 0 .85em; text-indent: 2em; overflow-wrap: anywhere; }
 .reader-content p:last-child { margin-bottom: 0; }
 .reader-content .reader-empty { text-indent: 0; color: var(--text-3); font-family: var(--font-ui); font-size: 13px; line-height: 1.8; }

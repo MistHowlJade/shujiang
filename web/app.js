@@ -116,9 +116,9 @@ function restoreEditorPosition(novelId, chapterId, ta) {
 function readerFontSize() {
   try {
     const n = Math.round(Number(localStorage.getItem(READER_SIZE_KEY)));
-    return n >= 15 && n <= 24 ? n : 18;
+    return n >= 15 && n <= 24 ? n : 20;
   } catch {
-    return 18;
+    return 20;
   }
 }
 

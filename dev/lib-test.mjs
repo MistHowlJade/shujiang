@@ -564,9 +564,9 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
 // ---------------------------------------------------------------
 // 稿纸排版
 {
-  check('没设置过时用默认 16 / 2.0 / 宋体',
-    JSON.stringify(normalizePaper()) === JSON.stringify({ size: 16, lh: 2, font: 'serif' }), JSON.stringify(normalizePaper()));
-  check('默认值就是老版本写死的样子', PAPER_DEFAULTS.size === 16 && PAPER_DEFAULTS.lh === 2 && PAPER_DEFAULTS.font === 'serif');
+  check('没设置过时用默认 18 / 2.0 / 黑体',
+    JSON.stringify(normalizePaper()) === JSON.stringify({ size: 18, lh: 2, font: 'sans' }), JSON.stringify(normalizePaper()));
+  check('默认值就是 18/2.0/黑体（屏幕 CJK 正文最清晰的一档）', PAPER_DEFAULTS.size === 18 && PAPER_DEFAULTS.lh === 2 && PAPER_DEFAULTS.font === 'sans');
   check('字号边界是 14–22', PAPER_SIZE_MIN === 14 && PAPER_SIZE_MAX === 22);
   check('行距五档且含 2.0', PAPER_LH_STEPS.length === 5 && PAPER_LH_STEPS.includes(2), PAPER_LH_STEPS.join(','));
 
@@ -575,9 +575,9 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('字号太大夹到 22', normalizePaper({ size: 40 }).size === 22, String(normalizePaper({ size: 40 }).size));
   check('字号小数四舍五入', normalizePaper({ size: 17.6 }).size === 18, String(normalizePaper({ size: 17.6 }).size));
   check('字号字符串也认', normalizePaper({ size: '18' }).size === 18);
-  check('字号乱写退回 16', normalizePaper({ size: 'big' }).size === 16);
-  check('字号是 null 按没填算', normalizePaper({ size: null }).size === 16);
-  check('整个配置不是对象也不炸', JSON.stringify(normalizePaper('x')) === JSON.stringify({ size: 16, lh: 2, font: 'serif' }));
+  check('字号乱写退回 18', normalizePaper({ size: 'big' }).size === 18);
+  check('字号是 null 按没填算', normalizePaper({ size: null }).size === 18);
+  check('整个配置不是对象也不炸', JSON.stringify(normalizePaper('x')) === JSON.stringify({ size: 18, lh: 2, font: 'sans' }));
   check('行距是空串按没填算', normalizePaper({ lh: '' }).lh === 2);
 
   // 行距：吸到最近的档，不让设置页出现「没一档选中」
@@ -589,18 +589,19 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
 
   // 字体
   check('楷体原样保留', normalizePaper({ font: 'kai' }).font === 'kai');
-  check('不认识的字体退回宋体', normalizePaper({ font: 'comic-sans' }).font === 'serif');
-  check('原型上的键不算字体', normalizePaper({ font: 'toString' }).font === 'serif');
-  check('三款字体都有中文名和 font-family',
-    ['serif', 'sans', 'kai'].every((k) => PAPER_FONTS[k].label && /serif|sans-serif/.test(PAPER_FONTS[k].family)));
+  check('仿宋原样保留', normalizePaper({ font: 'fangsong' }).font === 'fangsong');
+  check('不认识的字体退回默认黑体', normalizePaper({ font: 'comic-sans' }).font === 'sans');
+  check('原型上的键不算字体', normalizePaper({ font: 'toString' }).font === 'sans');
+  check('四款字体都有中文名和 font-family',
+    ['serif', 'sans', 'kai', 'fangsong'].every((k) => PAPER_FONTS[k].label && PAPER_FONTS[k].family.length > 5));
 
   // 加减字号
   check('放大一格', nextPaperSize(16, 1) === 17);
   check('缩小一格', nextPaperSize(16, -1) === 15);
   check('最大就停在 22', nextPaperSize(22, 1) === 22 && nextPaperSize(21, 5) === 22);
   check('最小就停在 14', nextPaperSize(14, -1) === 14 && nextPaperSize(15, -5) === 14);
-  check('乱给一个当前字号按默认走', nextPaperSize('x', 1) === 17);
-  check('当前字号是 null 也按默认走', nextPaperSize(null, 1) === 17);
+  check('乱给一个当前字号按默认走', nextPaperSize('x', 1) === 19);
+  check('当前字号是 null 也按默认走', nextPaperSize(null, 1) === 19);
 
   // 落成 CSS 变量
   const vars = paperVars({ size: 18, lh: 2.2, font: 'kai' });
@@ -611,7 +612,7 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('楷体的 font-family 落到变量上', vars['--ed-font'].includes('KaiTi'), vars['--ed-font']);
 
   // 给人看的一句话
-  check('标签写清三项', paperLabel({ size: 16, lh: 2, font: 'serif' }) === '16 px · 2.0 倍行距 · 宋体', paperLabel({ size: 16, lh: 2, font: 'serif' }));
+  check('标签写清三项', paperLabel({ size: 18, lh: 2, font: 'sans' }) === '18 px · 2.0 倍行距 · 黑体', paperLabel({ size: 18, lh: 2, font: 'sans' }));
   check('标签用中文行距与字体', paperLabel({ size: 18, lh: 2.2, font: 'kai' }) === '18 px · 2.2 倍行距 · 楷体', paperLabel({ size: 18, lh: 2.2, font: 'kai' }));
 
   // 设置页的档位是手写在 index.html 里的，靠这几条守住两处不跑偏

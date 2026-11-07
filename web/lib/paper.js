@@ -4,8 +4,8 @@
 // 输出的是一组 CSS 变量，交给页面去挂，因此在 Node 里可以直接测。
 // ============================================================
 
-/** 没设置过时的样子（与老版本写死的 16px / 2.0 / 宋体一致） */
-export const PAPER_DEFAULTS = Object.freeze({ size: 16, lh: 2, font: 'serif' });
+/** 默认：18px / 2.0 倍行距 / 黑体（Windows 上最清晰的一档 CJK 正文显示） */
+export const PAPER_DEFAULTS = Object.freeze({ size: 18, lh: 2, font: 'sans' });
 
 export const PAPER_SIZE_MIN = 14;
 export const PAPER_SIZE_MAX = 22;
@@ -15,20 +15,24 @@ export const PAPER_LH_STEPS = Object.freeze([1.6, 1.8, 2.0, 2.2, 2.4]);
 
 /**
  * 字体：值是一整条 font-family，落到 CSS 变量上直接用。
- * 思源宋体 / 系统宋体优先，缺字体时逐级退到 Georgia / 无衬线。
+ * 黑体类最适合屏幕 CJK 正文；宋体/楷体/仿宋保留给习惯繁体/古籍风格的作者。
  */
 export const PAPER_FONTS = Object.freeze({
+  sans: {
+    label: '黑体',
+    family: '"PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "DengXian", system-ui, sans-serif',
+  },
   serif: {
     label: '宋体',
     family: '"Source Han Serif SC", "Noto Serif SC", "Songti SC", "SimSun", Georgia, serif',
   },
-  sans: {
-    label: '黑体',
-    family: '"PingFang SC", "Microsoft YaHei", "Noto Sans SC", "Heiti SC", system-ui, sans-serif',
-  },
   kai: {
     label: '楷体',
     family: '"Kaiti SC", "KaiTi", "STKaiti", "楷体", "AR PL UKai CN", serif',
+  },
+  fangsong: {
+    label: '仿宋',
+    family: '"FangSong", "FangSong_GB2312", "SimSun", Georgia, serif',
   },
 });
 
