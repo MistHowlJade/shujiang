@@ -2529,7 +2529,7 @@ function statsHeatmap(days, goal, today) {
           if (!d) return '<i class="hm-cell empty"></i>';
           const lv = level(d);
           const tip = `${d.date}　${fmtWords(d.words)} 字${goal ? `　目标 ${fmtWords(goal)}` : ''}　点击看当天明细`;
-          return `<button type="button" class="hm-cell lv${lv}${d.date === today ? ' today' : ''}" data-date="${d.date}" title="${tip}"></button>`;
+          return `<button type="button" class="hm-cell lv${lv}${d.date === today ? ' today' : ''}" data-date="${d.date}" title="${tip}" aria-label="${tip}"></button>`;
         }).join('')}
       </div>
     </div>`).join('');
@@ -2723,7 +2723,7 @@ function openHealthReport() {
   // 每一条后面挂一个「忽略」，误报就别再报了
   const withIgnore = (inner, kind, id, label) => `<div class="health-item">
     ${inner}
-    <button type="button" class="health-ignore" data-health-ignore="${esc(healthKey(kind, id))}" data-health-label="${esc(label)}" title="忽略这一条（以后不再提示）">×</button>
+    <button type="button" class="health-ignore" data-health-ignore="${esc(healthKey(kind, id))}" data-health-label="${esc(label)}" title="忽略这一条（以后不再提示）" aria-label="忽略这一条">×</button>
   </div>`;
 
   const outlierRows = r.outliers.map((c) => {
@@ -2784,7 +2784,7 @@ function openHealthReport() {
         <span id="healthIgnoredTitle">已忽略</span>
         <span style="flex:1"></span>
         <button class="btn btn-sm btn-text" id="healthRestoreAll">全部恢复</button>
-        <button class="icon-btn sm" id="healthIgnoredClose" title="收起">${ico('x')}</button>
+        <button class="icon-btn sm" id="healthIgnoredClose" title="收起" aria-label="收起">${ico('x')}</button>
       </div>
       <div class="proof-ignored-list" id="healthIgnoredList"></div>
     </div>
@@ -2923,7 +2923,7 @@ async function openProof() {
         <span id="proofIgnoredTitle">已忽略</span>
         <span style="flex:1"></span>
         <button class="btn btn-sm btn-text" id="proofRestoreAll">全部恢复</button>
-        <button class="icon-btn sm" id="proofIgnoredClose" title="收起">${ico('x')}</button>
+        <button class="icon-btn sm" id="proofIgnoredClose" title="收起" aria-label="收起">${ico('x')}</button>
       </div>
       <div class="proof-ignored-list" id="proofIgnoredList"></div>
     </div>
@@ -3203,7 +3203,7 @@ function volGroupEl(ul, vid, group) {
       <button class="vol-toggle" type="button">${ico('chev-down')}</button>
       <span class="vol-name">${v ? esc(volumeTitle(vid)) : '未分卷'}</span>
       <span class="vol-stat">${group.chapters.length} 章 · ${fmtWords(words)} 字</span>
-      <button class="mini-act" data-a="vmenu" type="button" title="本卷操作">${ico('more')}</button>
+      <button class="mini-act" data-a="vmenu" type="button" title="本卷操作" aria-label="本卷操作">${ico('more')}</button>
     </div>
     <ul class="vol-items"></ul>`;
   const toggle = () => toggleVol(vid);
@@ -4445,7 +4445,7 @@ function makeVolHead({ vid, group, open }) {
       <button class="vol-toggle" type="button">${ico('chev-down')}</button>
       <span class="vol-name">${v ? esc(volumeTitle(vid)) : '未分卷'}</span>
       <span class="vol-stat">${group.chapters.length} 章 · ${fmtWords(words)} 字</span>
-      <button class="mini-act" data-a="vmenu" type="button" title="本卷操作">${ico('more')}</button>
+      <button class="mini-act" data-a="vmenu" type="button" title="本卷操作" aria-label="本卷操作">${ico('more')}</button>
     </div>`;
   const toggle = () => toggleVol(vid);
   li.querySelector('.vol-toggle').addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
@@ -4472,15 +4472,15 @@ function makeChapterItem(c, i, { filtered = false, group = null } = {}) {
   ].filter(Boolean).join(' · ');
   const w = wordsOf(c);
   const moveButtons = filtered ? '' : `
-      <button class="mini-act" data-a="up" title="上移">${ico('chev-up')}</button>
-      <button class="mini-act" data-a="down" title="下移">${ico('chev-down')}</button>`;
+      <button class="mini-act" data-a="up" title="上移" aria-label="上移">${ico('chev-up')}</button>
+      <button class="mini-act" data-a="down" title="下移" aria-label="下移">${ico('chev-down')}</button>`;
   li.innerHTML = `
     <span class="ci-no">${i + 1}</span>
     <span class="ci-title">${esc(c.title || '未命名')}</span>
     <span class="ci-words">${openRevs ? `<span class="ci-rev" title="${openRevs} 项待改">${openRevs}</span>` : ''}${c.memory ? '<button type="button" class="ci-mem" data-a="memory" title="查看本章记忆" aria-label="查看本章记忆"></button>' : ''}${w || ''}</span>
     <span class="ci-act">${moveButtons}
-      <button class="mini-act" data-a="menu" title="分卷 / 本章操作">${ico('more')}</button>
-      <button class="mini-act del" data-a="del" title="删除本章">${ico('x')}</button>
+      <button class="mini-act" data-a="menu" title="分卷 / 本章操作" aria-label="分卷 / 本章操作">${ico('more')}</button>
+      <button class="mini-act del" data-a="del" title="删除本章" aria-label="删除本章">${ico('x')}</button>
     </span>`;
   li.addEventListener('click', (e) => {
     const act = e.target.closest('.mini-act, .ci-mem')?.dataset.a;
@@ -6473,7 +6473,7 @@ function openAnnotationModal(selectedText, range) {
     <p class="modal-sub">选中文本：<code>${esc(selectedText.slice(0, 80))}${selectedText.length > 80 ? '…' : ''}</code></p>
     <div class="field-label">高亮颜色
       <div class="annotation-colors" id="annoColors">
-        ${ANNOTATION_COLORS.map(c => `<button type="button" class="anno-color-btn${c.id === 'yellow' ? ' on' : ''}" data-color="${c.id}" style="background:${c.bg};border-color:${c.border};color:${c.text}" title="${c.name}"><svg class="ico"><use href="#i-highlight" /></svg></button>`).join('')}
+        ${ANNOTATION_COLORS.map(c => `<button type="button" class="anno-color-btn${c.id === 'yellow' ? ' on' : ''}" data-color="${c.id}" style="background:${c.bg};border-color:${c.border};color:${c.text}" title="${c.name}" aria-label="${c.name}"><svg class="ico"><use href="#i-highlight" /></svg></button>`).join('')}
       </div>
     </div>
     <label class="field-label">批注内容
@@ -6629,7 +6629,7 @@ function editAnnotation(ch, annotationId) {
     <p class="modal-sub">原文：<code>${esc(anno.text.slice(0, 80))}${anno.text.length > 80 ? '…' : ''}</code></p>
     <div class="field-label">高亮颜色
       <div class="annotation-colors" id="annoColors">
-        ${ANNOTATION_COLORS.map(c => `<button type="button" class="anno-color-btn${c.id === anno.color ? ' on' : ''}" data-color="${c.id}" style="background:${c.bg};border-color:${c.border};color:${c.text}" title="${c.name}"><svg class="ico"><use href="#i-highlight" /></svg></button>`).join('')}
+        ${ANNOTATION_COLORS.map(c => `<button type="button" class="anno-color-btn${c.id === anno.color ? ' on' : ''}" data-color="${c.id}" style="background:${c.bg};border-color:${c.border};color:${c.text}" title="${c.name}" aria-label="${c.name}"><svg class="ico"><use href="#i-highlight" /></svg></button>`).join('')}
       </div>
     </div>
     <label class="field-label">批注内容
@@ -8219,8 +8219,8 @@ function renderCorkboard() {
     <div class="scene-card${validateScene(sc) ? '' : ' scene-warn'}" data-index="${i}" draggable="true">
       <div class="scene-handle" title="拖拽排序">${ico('grip')}</div>
       <div class="scene-actions">
-        <button class="scene-gen" title="生成正文" data-index="${i}">${ico('spark')}</button>
-        <button class="scene-dup" title="复制" data-index="${i}">${ico('copy')}</button>
+        <button class="scene-gen" title="生成正文" aria-label="生成正文" data-index="${i}">${ico('spark')}</button>
+        <button class="scene-dup" title="复制" aria-label="复制" data-index="${i}">${ico('copy')}</button>
         <button class="scene-del" title="删除">${ico('x')}</button>
       </div>
       <div class="scene-header">
