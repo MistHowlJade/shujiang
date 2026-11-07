@@ -3242,7 +3242,7 @@ function volGroupEl(ul, vid, group) {
   const words = group.chapters.reduce((s, c) => s + wordsOf(c), 0);
   li.innerHTML = `
     <div class="vol-head" title="${open ? '点击收起这一卷' : '点击展开这一卷'}">
-      <button class="vol-toggle" type="button">${ico('chev-down')}</button>
+      <button class="vol-toggle" type="button" title="展开 / 收起这一卷" aria-label="展开或收起这一卷">${ico('chev-down')}</button>
       <span class="vol-name">${v ? esc(volumeTitle(vid)) : '未分卷'}</span>
       <span class="vol-stat">${group.chapters.length} 章 · ${fmtWords(words)} 字</span>
       <button class="mini-act" data-a="vmenu" type="button" title="本卷操作" aria-label="本卷操作">${ico('more')}</button>
@@ -4484,7 +4484,7 @@ function makeVolHead({ vid, group, open }) {
   li.dataset.vid = vid;
   li.innerHTML = `
     <div class="vol-head" title="${open ? '点击收起这一卷' : '点击展开这一卷'}">
-      <button class="vol-toggle" type="button">${ico('chev-down')}</button>
+      <button class="vol-toggle" type="button" title="展开 / 收起这一卷" aria-label="展开或收起这一卷">${ico('chev-down')}</button>
       <span class="vol-name">${v ? esc(volumeTitle(vid)) : '未分卷'}</span>
       <span class="vol-stat">${group.chapters.length} 章 · ${fmtWords(words)} 字</span>
       <button class="mini-act" data-a="vmenu" type="button" title="本卷操作" aria-label="本卷操作">${ico('more')}</button>
