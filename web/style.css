@@ -139,6 +139,22 @@ h1, h2, h3 { letter-spacing: -.021em; }
   stroke-linecap: round; stroke-linejoin: round;
 }
 
+.skip-link {
+  position: fixed; left: 14px; top: 14px; z-index: 9999;
+  padding: 8px 14px; border-radius: var(--r-md);
+  border: 1px solid var(--border-2);
+  background: var(--surface-2); color: var(--text-1);
+  font-size: 13px; outline: none;
+  transform: translateY(-160%);
+  transition: transform 180ms var(--ease), border-color 180ms var(--ease);
+}
+.skip-link:focus {
+  transform: translateY(0);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg), 0 0 0 1.5px var(--accent);
+}
+main:focus { outline: none; }
+
 /* ==========================================================================
    骨架
    ========================================================================== */
