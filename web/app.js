@@ -13489,6 +13489,7 @@ function cmdkSource() {
   });
   const op = (label, icon, run, hint) => out.push({ g: '操作', label, icon, run, hint });
   op('一键开书', 'spark', () => { setView('shelf'); openQuickStartModal(); }, '一句话生成全书');
+  op('新手指南', 'help', () => openHelpModal(), '?');
   op('新建作品', 'plus', () => openNewNovelModal(), 'N');
   op('回收站', 'trash', () => openTrash());
   op('全局检索', 'search', () => openGlobalSearch(), 'Ctrl+Shift+F');
