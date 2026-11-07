@@ -1807,6 +1807,19 @@ kbd {
   .outline-extra { flex-direction: column; }
 }
 
+.help-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.help-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 12px; }
+.help-list li {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: var(--r-md); background: var(--surface-2);
+}
+.help-list .ico { width: 18px; height: 18px; flex: 0 0 auto; color: var(--accent); stroke-width: 1.8; margin-top: 2px; }
+.help-list b { display: block; margin-bottom: 3px; font-size: 13px; color: var(--text-1); }
+.help-list span { font-size: 11.5px; line-height: 1.65; color: var(--text-3); }
+.help-note { margin-top: 14px; font-size: 11px; color: var(--text-4); }
+.help-kbd { display: inline-flex; gap: 2px; }
+
 /* ==========================================================================
    设置
    ========================================================================== */

@@ -195,6 +195,35 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ============================================================
+ * 9.5 新手指南
+ * ============================================================
+ * 一眼看完「这个工具怎么从零开始」：先写哪一步、点哪个按钮、
+ * 结果落在哪，以及工作中最常碰上的两个误会。
+ */
+function openHelpModal() {
+  showModal(`
+    <div class="help-head">
+      <h3>新手指南：只用 30 秒</h3>
+      <button class="icon-btn sm" id="helpClose" title="关闭" aria-label="关闭"><svg class="ico"><use href="#i-x" /></svg></button>
+    </div>
+    <p class="modal-sub">这是书匠最常见的几条路。先挑一条试用，之后随时可以回来看。</p>
+    <ol class="help-list">
+      <li><svg class="ico"><use href="#i-spark" /></svg><div><b>一键开书</b><span>只有一句想法也不怕：写下想法后，AI 会自动起书名、设计人物、铺全书大纲、生成并写进第一章的初稿。</span></div></li>
+      <li><svg class="ico"><use href="#i-pen" /></svg><div><b>手动新建</b><span>想自己写？书架点「手动新建」，建好书后第一章已经预备好了，直接敲字。想让 AI 起稿时再点「用 AI 写初稿」。</span></div></li>
+      <li><svg class="ico"><use href="#i-upload" /></svg><div><b>导入旧稿</b><span>有现成的 .txt / .md / .docx？书架空状态点「导入已有稿子」，按「第X章」自动切分。</span></div></li>
+      <li><svg class="ico"><use href="#i-search" /></svg><div><b>选中任意段落</b><span>润色、扩写、精简、按指令改写，结果左右对照，确认后才替换原文。</span></div></li>
+      <li><svg class="ico"><use href="#i-copy" /></svg><div><b>AI 结果不会自动写进正文</b><span>生成后满意再点「追加到正文」或「插入光标处」。没采用不会污染原稿，可以随时丢弃。</span></div></li>
+      <li><svg class="ico"><use href="#i-shield" /></svg><div><b>担心 AI 写得不像？</b><span>任何 AI 生成结果，不会替你定稿。设定库和大纲随时可以改，成稿之前书匠不会替你按下「完成」。</span></div></li>
+    </ol>
+    <p class="help-note">作品、设定、密钥只保存在本机 <code>data/</code> 目录，不会上传云端。Topbar 右上角的主题按钮随时可以换明暗。</p>
+    <div class="modal-foot"><button class="btn btn-primary" id="helpOk">知道了</button></div>`, (box) => {
+    box.querySelector('#helpClose').onclick = closeModal;
+    box.querySelector('#helpOk').onclick = closeModal;
+  });
+}
+$('#helpBtn').addEventListener('click', openHelpModal);
+
+/* ============================================================
  * 1. 接口封装
  * ============================================================ */
 const api = {
