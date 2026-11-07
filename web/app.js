@@ -185,6 +185,8 @@ function closeModal() {
   const box = $('#modal');
   const fn = box._onClose;
   box._onClose = null;
+  // 统一回收「打开章节目标」时挂上的展开状态
+  $('#chWords')?.setAttribute('aria-expanded', 'false');
   try { fn?.(); } catch (err) { console.warn('[modal] onClose 出错', err); }
   $('#modalMask').hidden = true;
   box.innerHTML = '';
@@ -3448,6 +3450,7 @@ function openChapterTargetModal(index) {
   const n = S.novel;
   const ch = n?.chapters[index];
   if (!ch) return toast('先打开一章', 'err');
+  $('#chWords')?.setAttribute('aria-expanded', 'true');
   const words = wordsOf(ch);
   const currentTarget = targetOf(ch);
   const defaultTarget = Math.max(0, Math.floor(Number(n.meta?.targetWordsPerChapter) || 0));
