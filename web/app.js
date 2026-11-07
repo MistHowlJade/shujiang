@@ -920,6 +920,7 @@ function openTrash() {
       btn.disabled = true;
       try {
         await api.del(`/api/trash/${encodeURIComponent(item.trashId)}`);
+        clearReaderProgress(item.id);   // 彻底删除也要清本机读完进度，免得留下孤儿记录
         await load();
         toast(`已彻底删除《${item.title}》`);
       } catch (err) {
@@ -953,6 +954,7 @@ function openTrash() {
       clearBtn.disabled = true;
       try {
         await api.del('/api/trash');
+        for (const item of items) clearReaderProgress(item.id);   // 同上：清空回收站顺带清阅读进度
         qEl.value = '';
         lastQuery = '';
         await load();
@@ -3279,29 +3281,6 @@ function toggleAllVolumes() {
   renderStudio();
 }
 
-/** 建一个分卷分组容器，返回往里放章节的 <ul> */
-function volGroupEl(ul, vid, group) {
-  const v = volumeById(vid);
-  const open = isVolOpen(vid);
-  const li = document.createElement('li');
-  li.className = `vol-group${open ? '' : ' closed'}`;
-  const words = group.chapters.reduce((s, c) => s + wordsOf(c), 0);
-  li.innerHTML = `
-    <div class="vol-head" title="${open ? '点击收起这一卷' : '点击展开这一卷'}">
-      <button class="vol-toggle" type="button" title="展开 / 收起这一卷" aria-label="展开或收起这一卷">${ico('chev-down')}</button>
-      <span class="vol-name">${v ? esc(volumeTitle(vid)) : '未分卷'}</span>
-      <span class="vol-stat">${group.chapters.length} 章 · ${fmtWords(words)} 字</span>
-      <button class="mini-act" data-a="vmenu" type="button" title="本卷操作" aria-label="本卷操作">${ico('more')}</button>
-    </div>
-    <ul class="vol-items"></ul>`;
-  const toggle = () => toggleVol(vid);
-  li.querySelector('.vol-toggle').addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
-  li.querySelector('.vol-head').addEventListener('click', (e) => { if (!e.target.closest('.mini-act')) toggle(); });
-  li.querySelector('[data-a="vmenu"]').addEventListener('click', (e) => { e.stopPropagation(); openVolumeGroupMenu(e.currentTarget, vid, group); });
-  ul.appendChild(li);
-  return li.querySelector('.vol-items');
-}
-
 /** 只改卷归属：走单独的接口，避免整本回传时把正在编辑的正文一起覆盖掉 */
 async function saveChapterVolumes(sets) {
   const n = S.novel;
@@ -3807,7 +3786,7 @@ function gotoSettingsVolume(vid) {
   flashBibleTarget(() => {
     const block = $$('#volList .vol-block').find((el) => el.dataset.volId === vid) || $$('#volList .vol-block')[i];
     // 卷可能很长，滚到卷标题而不是整卷中心，否则标题会被顶到视口外
-    return block?.querySelector('.vol-head') || block;
+    return block?.querySelector('.vol-block-head') || block;
   });
 }
 
@@ -5040,19 +5019,6 @@ function renderBibleVirtualList(listEl, scrollTop, listKey) {
       }
     }
   }
-}
-
-/** 清理设定库虚拟列表状态 */
-function cleanupBibleVirtualList(listEl) {
-  const vl = S.bibleVl;
-  if (vl.scrollHandler) {
-    listEl.removeEventListener('scroll', vl.scrollHandler);
-    vl.scrollHandler = null;
-  }
-  vl.enabled = false;
-  vl.items = [];
-  vl.renderItem = null;
-  vl.listEl = null;
 }
 
 function renderStudio({ list = true } = {}) {
@@ -8110,21 +8076,6 @@ function scopeForCheck() {
   };
 }
 
-function renderIssues(text) {
-  const box = $('#checkBox');
-  const arr = parseJsonLoose(text);
-  if (!Array.isArray(arr)) { box.innerHTML = mdLite(text); return; }
-  if (!arr.length) { box.innerHTML = '<div class="status-ok">✓ 没有发现明显冲突。</div>'; return; }
-  const lvl = (l) => (/严重/.test(l) ? 'severe' : /中等/.test(l) ? 'mid' : 'light');
-  box.innerHTML = arr.map((it) => `
-    <div class="issue ${lvl(it.level)}">
-      <div class="is-head"><b>${esc(it.level || '提示')}</b><span>${esc(it.type || '')}</span></div>
-      ${it.location ? `<div class="is-loc">${esc(it.location)}</div>` : ''}
-      <div class="is-problem">${esc(it.problem || '')}</div>
-      ${it.suggestion ? `<div class="is-fix">→ ${esc(it.suggestion)}</div>` : ''}
-    </div>`).join('');
-}
-
 function renderConsistencyReport(report) {
   const box = $('#checkBox');
   const ignoredList = Array.isArray(S.novel?.meta?.consistencyIgnored) ? S.novel.meta.consistencyIgnored : [];
@@ -9755,7 +9706,7 @@ function renderOutlineTab(host, n) {
       block.dataset.volId = v.id || '';
       block.dataset.volIndex = String(vi);
       block.innerHTML = `
-        <div class="vol-head">
+        <div class="vol-block-head">
           <span class="dim small">第 ${vi + 1} 卷</span>
           <input class="input" data-vk="name" value="${esc(v.name || '')}" placeholder="卷名" style="max-width:220px" />
           <input class="input" data-vk="desc" value="${esc(v.desc || '')}" placeholder="本卷定位与主要冲突" />

@@ -1067,9 +1067,7 @@ kbd {
 .chapter-empty-hint span { display: block; margin-top: 4px; font-size: 10.5px; color: var(--text-4); }
 
 /* --- 分卷分组：卷标题 + 折叠的章节 --- */
-.vol-group { margin-bottom: 1px; }
-
-/* 虚拟滚动用的卷标题行（扁平结构，无 vol-group 包裹） */
+/* 设定库虚拟列表卷标题（扁平结构，无分组包裹） */
 .vol-row-head { margin-bottom: 1px; }
 .vol-row-head.closed .vol-toggle { transform: rotate(-90deg); }
 
@@ -1086,7 +1084,6 @@ kbd {
   transition: transform var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 .vol-head:hover .vol-toggle { color: var(--text-2); }
-.vol-group.closed .vol-toggle { transform: rotate(-90deg); }
 .vol-toggle .ico { width: 13px; height: 13px; }
 .vol-name {
   font-size: 11.5px; font-weight: 600; color: var(--text-2);
@@ -1095,13 +1092,8 @@ kbd {
 .vol-stat { font-size: 10.5px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .vol-head .mini-act { opacity: 0; }
 .vol-head:hover .mini-act, .vol-head:focus-within .mini-act { opacity: 1; }
-.vol-items { list-style: none; margin: 0; padding: 0 0 3px 12px; }
-.vol-group.closed .vol-items { display: none; }
-.vol-items .chapter-item { padding-left: 6px; }
-.vol-row-head .vol-head:hover { background: var(--surface-2); }
-.vol-row-head .vol-head:hover .vol-toggle { color: var(--text-2); }
 .chapter-item.has-vol { padding-left: 18px; }
-.bible-block.flash, .chapter-item.flash, .outline-row.flash, .entry.flash, .vol-head.flash { animation: flashRing 1.3s var(--ease); border-radius: var(--r-sm); }
+.bible-block.flash, .chapter-item.flash, .outline-row.flash, .entry.flash, .vol-head.flash, .vol-block-head.flash { animation: flashRing 1.3s var(--ease); border-radius: var(--r-sm); }
 @keyframes flashRing {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
   15%, 60% { box-shadow: 0 0 0 2px var(--accent-line); }
@@ -1281,7 +1273,6 @@ kbd {
 .sel-toolbar button[data-op="annotate"]:hover { background: #fff3bf; color: #5c4b00; }
 
 /* 批注/高亮侧边栏 */
-.annotation-sidebar { padding: 4px 0; }
 .annotation-list { display: flex; flex-direction: column; gap: 8px; }
 .annotation-item {
   padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-md);
@@ -1481,12 +1472,8 @@ kbd {
   border-radius: var(--r-md); overflow: hidden;
 }
 .issue::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--text-4); }
-.issue.severe::before { background: var(--danger); }
-.issue.mid::before { background: var(--warning); }
 .issue .is-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .issue .is-head b { font-size: 11px; font-weight: 600; }
-.issue.severe .is-head b { color: var(--danger); }
-.issue.mid .is-head b { color: var(--warning); }
 .issue .is-head span {
   padding: 0 6px; border: 1px solid var(--border); border-radius: var(--r-full);
   font-size: 10.5px; color: var(--text-4);
@@ -1495,8 +1482,6 @@ kbd {
   margin: 6px 0; padding-left: 9px; border-left: 2px solid var(--border-2);
   font-size: 11.5px; color: var(--text-3); font-style: italic;
 }
-.issue .is-problem { font-size: 12.5px; line-height: 1.68; }
-.issue .is-fix { margin-top: 6px; font-size: 12px; line-height: 1.68; color: var(--success); }
 .issue .ignored-badge {
   display: inline-block;
   margin-left: 8px;
@@ -1792,12 +1777,9 @@ kbd {
   margin-bottom: 12px; padding: 13px 15px;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg);
 }
-.vol-head { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; }
-.vol-head > .dim.small { flex: 0 0 auto; white-space: nowrap; }
-.vol-head .vol-tag {
-  flex: 0 0 auto; padding: 2px 9px; border-radius: var(--r-full);
-  font-size: 11px; color: var(--accent-hover); background: var(--accent-bg);
-}
+/* 设定库「分卷大纲」编辑器用的卷标题行（跟章节列表的 .vol-head 是两套，别混用） */
+.vol-block-head { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; }
+.vol-block-head > .dim.small { flex: 0 0 auto; white-space: nowrap; }
 .outline-row {
   display: grid;
   grid-template-columns: 58px minmax(110px, .9fr) 1.15fr 1.3fr minmax(130px, .9fr);
@@ -1851,7 +1833,6 @@ kbd {
 .help-list b { display: block; margin-bottom: 3px; font-size: 13px; color: var(--text-1); }
 .help-list span { font-size: 11.5px; line-height: 1.65; color: var(--text-3); }
 .help-note { margin-top: 14px; font-size: 11px; color: var(--text-4); }
-.help-kbd { display: inline-flex; gap: 2px; }
 
 /* ==========================================================================
    设置
