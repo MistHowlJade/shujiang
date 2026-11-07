@@ -355,43 +355,21 @@ export const TASKS = {
 
   /* ---------- 灵感 ---------- */
   inspiration: {
-    expect: 'json',
-    temperature: 1.0,
-    maxTokens: 3000,
-    build({ payload }) {
-      const genre = String(payload?.genre || '').trim() || '都市';
-      const kw = String(payload?.keywords || '').trim();
-      return {
-        messages: [
-          sys('你是一位深谙当前中文网文市场风向的编辑，懂起点、番茄、七猫、晋江等平台的读者口味与推荐位逻辑，擅长把“什么能火”翻译成可以动笔的设定。'),
-          user(
-            `给出 8 个「${genre}」题材的开书灵感${kw ? `，关键词「${kw}」` : ''}。每个灵感必须面向当下读者偏好，卖点清晰（金手指/人设反差/核心钩子）。
-只返回 JSON 数组，不要任何说明文字、不要 markdown 代码块。每个元素结构：
-{"title":"书名候选（7字以内）","hook":"一句话金手指/核心卖点（30字以内）","persona":"主角人设一句话","opening":"第一章从哪里开（触发事件，一句话）","audience":"谁会追这本、看它图什么"}
-要求：8 个方向互不雷同；不要都是重生/系统/穿书套路，用得住才用，用得套就换一种包装；每个都要支撑 10 万+ 字的追读。`,
-          ),
-        ],
-      };
-    },
-  },
-
-  /* ---------- 热门题材 ---------- */
-  hotgenres: {
-    expect: 'json',
-    temperature: 0.7,
+    expect: 'text',
+    temperature: 0.9,
     maxTokens: 2500,
     build({ payload }) {
-      const kw = String(payload?.keywords || '').trim();
+      const req = String(payload?.req || '').trim();
       const online = payload?.online !== false;
+      const history = (Array.isArray(payload?.history) ? payload.history : [])
+        .slice(-8)
+        .filter((m) => m && typeof m === 'object')
+        .map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '').slice(0, 4000) }));
       return {
         messages: [
-          sys('你是一位深谙中文网文平台（起点中文网、番茄小说、七猫、晋江文学城）的榜单编辑，分得清类别榜、畅销榜与新书榜。'),
-          user(
-            `${online ? '请联网搜索' : '基于你的知识'}当前各平台最热的 10 个题材方向${kw ? `，偏向「${kw}」` : ''}。
-只返回 JSON 数组，不要任何说明文字、不要 markdown 代码块。每个元素结构：
-{"rank": 1, "genre": "题材名（可以是组合，如「都市+种田」）", "why": "为什么火（一句话，带榜单或读者行为依据）", "platforms": "哪个平台最火（起点/番茄/七猫/晋江，可多个）", "fit": "适合灌进灵感生成的题材词（一个词）", "ideas": "两个可以直接开的点子，用顿号分隔"}
-要求：10 个互不雷同；优先真实榜单靠前的组合；不要空谈套路名，要具体到「在什么组合里火」。`,
-          ),
+          sys('你是一位深谙中文网文（起点/番茄/七猫/晋江）的开书编辑，懂市场风向，也懂写作。用户会随便聊：问榜、要灵感、要大纲、要人设——你按用户的话来，别锁格式；联网参数开着就真的联网搜索，没开就基于记忆回答并说明。可以拉家常、可以发散、可以唱反调，别敷衍。'),
+          ...history,
+          { role: 'user', content: req || (online ? '现在什么火？给我推荐几个能写的方向。' : '给我推荐几个现在能写的方向。') },
         ],
       };
     },
@@ -517,7 +495,6 @@ export const TEMPLATE_SLOTS = [
   { key: 'analyzeStyle', task: 'style', label: '提取文风', vars: ['text'] },
   { key: 'generateSceneProse', task: 'chapter', label: '生成场景正文', vars: ['pov', 'location', 'time', 'characters', 'summary', 'hook', 'target', 'tone', 'req'] },
   { key: 'inspiration', task: 'inspiration', label: '灵感', vars: ['req'] },
-  { key: 'hotgenres', task: 'hotgenres', label: '热门题材', vars: ['req'] },
 ];
 
 export function buildTask(taskName, ctx) {

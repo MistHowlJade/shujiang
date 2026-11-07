@@ -1422,160 +1422,107 @@ function openQuickStartModal() {
   });
 }
 
-/* ---------------- AI 灵感 ---------------- */
-const INSPIRATION_GENRES = ['都市', '仙侠', '玄幻', '种田', '无限流', '悬疑', '言情', '末世', '科幻', '历史', '轻小说', '轻喜'];
+/* ---------------- AI 灵感（对话式） ---------------- */
+const INSPIRATION_SUGGESTIONS = [
+  '现在什么火，给我推荐几个能写的方向',
+  '联网搜热门榜，只看番茄',
+  '我想写个种田文，主角是个大夫，给我发散几个设定',
+  '悬疑+职场怎么组合，给我几个点子',
+];
 
 function openInspirationModal() {
   if (!quickStartModel()) return openQuickStartSetup();
 
   const provider = quickStartModel();
+  const onlineEnabled = () => {
+    const cur = (S.config?.providers || []).find((p) => p.id === S.config?.activeProviderId);
+    return !!(cur && cur.extraBody && Object.keys(cur.extraBody).length);
+  };
+  const history = [];
   showModal(`
     <h3>AI 灵感 · 当下风向</h3>
-    <p class="modal-sub">想知道现在流行什么、写什么能火？选一个题材（或者自己打关键词），让 AI 按当前中文网文风向给你 8 个开书灵感。每个都能直接拿来开书。</p>
-    <div class="insp-genres" id="insGenres" role="group" aria-label="题材方向">
-      ${INSPIRATION_GENRES.map((g, i) => `<button type="button" class="chip insp-genre" data-genre="${esc(g)}">${esc(g)}</button>`).join('')}
+    <p class="modal-sub">随便聊：现在什么火、你想写什么、给我推几个方向——AI 按你的话来，不锁题材、不锁格式；联网参数开着就会真的联网搜${'（没开就按记忆回答）'}。</p>
+    <div class="insp-suggest" id="insSuggest">
+      ${INSPIRATION_SUGGESTIONS.map((t) => `<button type="button" class="chip insp-sug">${esc(t)}</button>`).join('')}
     </div>
-    <p class="insp-picked" id="insPicked" hidden>已选榜单：<b></b><button type="button" class="linklike" id="insClearPick">清除</button></p>
-    <label class="field-label">关键词<span class="field-hint">可选，如“穿书 女主 手撕绿茶”</span></label>
-    <input id="insKeywords" class="input" maxlength="60" autocomplete="off" placeholder="想要的元素关键词（可选）" />
-    <div class="tip qs-tip">${ico('spark')}<span>用的是你配的模型（<code>${esc(provider.providerName)} · ${esc(provider.model)}</code>）。不联网参数就是普通大模型；配了之后「联网·热门榜」会拿实时榜。</span></div>
-    <button type="button" class="btn insp-hotbtn" id="insHot">${ico('bulb')}联网·热门榜（当前什么火）</button>
+    <div class="insp-chat" id="insChatLog" aria-live="polite"></div>
+    <label class="field-label" for="insChatInput">想聊点什么</label>
+    <textarea id="insChatInput" class="input" rows="2" maxlength="500" placeholder="问一句、丢个方向、或者天南地北都行…"></textarea>
+    <div class="tip qs-tip">${ico('spark')}<span>模型：<code>${esc(provider.providerName)} · ${esc(provider.model)}</code>　联网：${onlineEnabled() ? '开' : '关'}</span></div>
     <div class="modal-foot">
-      <button class="btn btn-text" id="insCancel">取消</button>
-      <button class="btn btn-primary" id="insGen">${ico('bulb')}生成 8 个灵感</button>
-    </div>
-    <div class="insp-hotlist" id="insHotList" hidden></div>
-    <div class="insp-results" id="insResults" hidden></div>`, (box) => {
-    let genre = INSPIRATION_GENRES[0];
-    let picked = '';
-    const genreBtns = [...box.querySelectorAll('.insp-genre')];
-    const pickedEl = box.querySelector('#insPicked');
-    const pickedName = pickedEl.querySelector('b');
-    const markGenre = () => {
-      genreBtns.forEach((b) => b.classList.toggle('on', !picked && b.dataset.genre === genre));
-      pickedEl.hidden = !picked;
-      if (picked) pickedName.textContent = picked;
-    };
-    genreBtns.forEach((btn, i) => {
-      btn.classList.toggle('on', i === 0);
-      btn.addEventListener('click', () => {
-        genre = btn.dataset.genre;
-        picked = '';
-        markGenre();
-      });
-    });
-    box.querySelector('#insClearPick').addEventListener('click', () => { picked = ''; markGenre(); });
-    const kwEl = box.querySelector('#insKeywords');
-    const genBtn = box.querySelector('#insGen');
-    const resultsEl = box.querySelector('#insResults');
+      <button class="btn btn-text" id="insCancel">关闭</button>
+      <button class="btn" id="insClear">清空对话</button>
+      <button class="btn btn-primary" id="insSend">${ico('spark')}发送</button>
+    </div>`, (box) => {
+    const logEl = box.querySelector('#insChatLog');
+    const inputEl = box.querySelector('#insChatInput');
+    const sendBtn = box.querySelector('#insSend');
+    const clearBtn = box.querySelector('#insClear');
     box.querySelector('#insCancel').onclick = closeModal;
-    kwEl.focus();
-    kwEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); gen(); }
-    });
+    box.querySelectorAll('#insSuggest .insp-sug').forEach((btn) => btn.addEventListener('click', () => {
+      inputEl.value = btn.textContent;
+      inputEl.focus();
+    }));
+    inputEl.focus();
 
-    const activeGenre = () => picked || genre;
-    const useIdea = (item) => {
-      const idea = `${item.title}——${item.hook}。${item.persona}`.trim().slice(0, 180);
-      const gNow = activeGenre();
+    const scrollDown = () => { logEl.scrollTop = logEl.scrollHeight; };
+
+    const useThis = (text) => {
       closeModal();
       openQuickStartModal();
       const qs = document.querySelector('#qsIdea');
-      if (qs) { qs.value = idea; qs.dispatchEvent(new Event('input')); }
-      const g = document.querySelector('#qsGenre');
-      if (g) g.value = gNow;
+      if (qs) { qs.value = String(text || '').slice(0, 170); qs.dispatchEvent(new Event('input')); }
       document.querySelector('#qsIdea')?.focus();
     };
 
-    const hotList = box.querySelector('#insHotList');
-    const hotBtn = box.querySelector('#insHot');
-    hotBtn.addEventListener('click', async () => {
-      hotBtn.disabled = true;
-      const orig = hotBtn.innerHTML;
-      hotBtn.textContent = '正在搜索…';
-      hotList.hidden = false;
-      const curProvider = (S.config?.providers || []).find((p) => p.id === S.config?.activeProviderId);
-      const online = !!(curProvider && curProvider.extraBody && Object.keys(curProvider.extraBody).length);
-      hotList.innerHTML = online
-        ? '<p class="dim">正在联网搜各平台热门榜，几秒钟…</p>'
-        : '<p class="dim">未给服务商配联网参数——本次按模型记忆作答，可能已过时（设置→服务商→联网搜索可打开）</p>';
-      try {
-        const text = await streamAI({ task: 'hotgenres', payload: { online } });
-        const parsed = parseJsonLoose(text);
-        const list = (Array.isArray(parsed) ? parsed : parsed?.items || parsed?.genres || [])
-          .filter((x) => x && typeof x === 'object' && (x.genre || x.title))
-          .slice(0, 10);
-        if (!list.length) {
-          hotList.innerHTML = `<p class="qs-error">没拿到结构化榜单，原文前 200 字：${esc(String(text).slice(0, 200))}</p>`;
-          return;
-        }
-        hotList.innerHTML = `<h3 style="margin-top:16px">当下 10 个最热方向</h3>` +
-          list.map((x, i) => `<div class="hot-row">
-            <span class="hot-rank">${i + 1}</span>
-            <div class="hot-main">
-              <b>${esc(x.genre || '?')}</b>
-              <p class="hot-why">${esc(x.why || '')}</p>
-              <p class="hot-meta"><span>火 · ${esc(x.platforms || '-')}</span>${x.fit ? `<span>题材词：${esc(x.fit)}</span>` : ''}${x.ideas ? `<span>点子：${esc(x.ideas)}</span>` : ''}</p>
-            </div>
-            <button type="button" class="btn btn-sm hot-use">用这个</button>
-          </div>`).join('');
-        hotList.querySelectorAll('.hot-use').forEach((btn, i) => {
-          btn.addEventListener('click', () => {
-            picked = String(list[i].genre || picked).trim();
-            markGenre();
-            gen();
-          });
-        });
-      } catch (err) {
-        hotList.innerHTML = `<p class="qs-error">热门榜失败：${esc(err?.message || String(err))}</p>`;
-      } finally {
-        hotBtn.disabled = false;
-        hotBtn.innerHTML = orig;
-      }
-    });
+    const renderBubble = (role, text) => {
+      const div = document.createElement('div');
+      div.className = `insp-bubble ${role}`;
+      div.textContent = text;
+      logEl.appendChild(div);
+      scrollDown();
+      return div;
+    };
 
-    const gen = async () => {
-      const keywords = kwEl.value.trim();
-      genBtn.disabled = true;
-      const origLabel = genBtn.innerHTML;
-      genBtn.textContent = '正在请编辑出灵感…';
-      resultsEl.hidden = false;
-      resultsEl.innerHTML = '<p class="dim">正在读懂你的关键词、翻当前风向，大概需要几秒钟…</p>';
+    const send = async () => {
+      const req = inputEl.value.trim();
+      if (!req) { inputEl.focus(); return; }
+      inputEl.value = '';
+      history.push({ role: 'user', content: req });
+      renderBubble('user', req);
+      const bubble = renderBubble('assistant', '…');
+      bubble.classList.add('pending');
+      sendBtn.disabled = true;
+      let acc = '';
       try {
-        const g = activeGenre();
-        const text = await streamAI({ task: 'inspiration', payload: { genre: g, keywords } });
-        const parsed = parseJsonLoose(text);
-        const list = (Array.isArray(parsed) ? parsed : parsed?.inspirations || parsed?.list || [])
-          .filter((x) => x && typeof x === 'object' && (x.title || x.hook))
-          .slice(0, 8);
-        if (!list.length) {
-          resultsEl.innerHTML = `<p class="qs-error">模型没给出结构化结果，原文前 300 字：${esc(text.slice(0, 300))}</p>`;
-          return;
-        }
-        resultsEl.innerHTML = `
-          <h3 style="margin-top:18px">给你 8 个灵感 <span class="dim small" style="font-weight:400">（${esc(activeGenre())}${keywords ? ` · ${esc(keywords)}` : ''}）</span></h3>
-          <div class="insp-grid">
-            ${list.map((x) => `
-              <div class="insp-card">
-                <b class="insp-title">${esc(x.title || '无题')}</b>
-                <p class="insp-hook">${esc(x.hook || '')}</p>
-                <p class="insp-meta"><span>人设</span>${esc(x.persona || '')}</p>
-                <p class="insp-meta"><span>开篇</span>${esc(x.opening || '')}</p>
-                <p class="insp-meta"><span>谁看</span>${esc(x.audience || '')}</p>
-                <button type="button" class="btn btn-sm insp-use">用这个开书 →</button>
-              </div>`).join('')}
-          </div>`;
-        resultsEl.querySelectorAll('.insp-card').forEach((card, i) => {
-          card.querySelector('.insp-use').addEventListener('click', () => useIdea(list[i]));
+        await streamAI({ task: 'inspiration', payload: { req, history, online: onlineEnabled() } }, {
+          onDelta: (delta) => { acc += delta; bubble.textContent = acc; bubble.classList.remove('pending'); scrollDown(); },
         });
+        const reply = acc.trim() || '（模型没给出内容，换个问法再试试）';
+        bubble.textContent = reply;
+        bubble.classList.remove('pending');
+        history.push({ role: 'assistant', content: reply });
+        const useBtn = document.createElement('button');
+        useBtn.type = 'button';
+        useBtn.className = 'insp-use-mini';
+        useBtn.textContent = '用这段开书 →';
+        useBtn.addEventListener('click', () => useThis(reply));
+        bubble.appendChild(useBtn);
+        scrollDown();
       } catch (err) {
-        resultsEl.innerHTML = `<p class="qs-error">灵感生成失败：${esc(err?.message || String(err))}</p>`;
+        bubble.textContent = `生成失败：${err?.message || String(err)}`;
+        bubble.classList.remove('pending');
+        bubble.classList.add('error');
       } finally {
-        genBtn.disabled = false;
-        genBtn.innerHTML = '再来一批';
+        sendBtn.disabled = false;
+        inputEl.focus();
       }
     };
-    genBtn.onclick = gen;
+    sendBtn.onclick = send;
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+    });
+    clearBtn.onclick = () => { history.length = 0; logEl.innerHTML = ''; inputEl.focus(); };
   }, { wide: true });
 }
 
