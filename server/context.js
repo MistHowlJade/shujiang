@@ -158,6 +158,13 @@ export function buildContext(novel, opts = {}) {
   ].filter(Boolean).join('\n');
   push('全书总纲', topBits, true);
 
+  // 尚未揭示给读者的设定：提示 AI 不要在正文里揭露这些
+  const shadowedBits = [
+    ...(novel.bible?.characters || []).filter((c) => c.visibility === 'shadowed').map((c) => `人物·${c.name}：尚未揭示，此事不要向读者揭露`),
+    ...(novel.bible?.world || []).filter((w) => w.visibility === 'shadowed').map((w) => `设定·${w.name}：尚未揭示，此事不要向读者揭露`),
+  ];
+  if (shadowedBits.length) push('尚未揭示（不要写出真相）', shadowedBits.join('\n'), true);
+
   // 锁定设定：必须始终带上，不受 budget 影响
   const lockedBits = [
     ...(novel.bible?.characters || []).filter((c) => c.locked).map((c) => `人物·${c.name}（${c.role || ''}）：${c.personality || ''}${c.goal ? `；目标：${c.goal}` : ''}${c.flaw ? `；缺陷：${c.flaw}` : ''}${c.speech ? `；说话：${c.speech}` : ''}`),

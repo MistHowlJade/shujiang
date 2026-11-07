@@ -1632,6 +1632,14 @@ kbd {
 .entry .lock-btn:hover { background: var(--surface-3); color: var(--accent-hover); }
 .entry .lock-btn.on { color: var(--accent-hover); background: var(--accent-bg); }
 .entry .lock-btn .ico { width: 13px; height: 13px; }
+.entry .vis-btn {
+  width: 26px; height: 26px; flex: 0 0 auto; display: grid; place-items: center;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-4); cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+.entry .vis-btn:hover { background: var(--surface-3); color: var(--text-1); }
+.entry .vis-btn.on { color: var(--text-1); }
+.entry .vis-btn .ico { width: 13px; height: 13px; }
 .entry.entry--locked { border-color: var(--accent-line); }
 .entry.entry--locked .fields { opacity: .55; }
 .entry.entry--locked .fields input,

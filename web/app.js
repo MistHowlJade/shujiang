@@ -10564,6 +10564,7 @@ function renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache) {
       <input class="input" data-key="role" value="${esc(c.role || '')}" placeholder="主角 / 配角 / 反派" style="max-width:150px" ${c.locked ? 'disabled' : ''} />
       <span style="flex:1"></span>
       <button class="lock-btn${c.locked ? ' on' : ''}" title="${c.locked ? '取消锁定' : '锁定后 AI 生成不可改变此人设定'}" aria-label="${c.locked ? '取消锁定' : '锁定'}">${ico('lock')}</button>
+      <button class="vis-btn${(c.visibility || '') === 'shadowed' ? ' on' : ''}" title="${(c.visibility || '') === 'shadowed' ? '改为已揭示' : '尚未揭示（伏笔中）'}" aria-label="${(c.visibility || '') === 'shadowed' ? '改为已揭示' : '尚未揭示（伏笔中）'}">${ico((c.visibility || '') === 'shadowed' ? 'eye-off' : 'eye')}</button>
       <button class="del" title="删除" ${c.locked ? 'disabled' : ''}>${ico('trash')}</button>
     </div>
     <div class="entry-locked-note" ${c.locked ? '' : 'hidden'}>已锁定，AI 生成不会改动此设定</div>
@@ -10582,6 +10583,26 @@ function renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache) {
     ${field('关系（每行一条：对象|关系|备注）', 'relText', { relText: (c.relations || []).map((r) => `${r.to}|${r.type || ''}|${r.note || ''}`).join('\n') }, { area: true, rows: 2 })}
     <div class="char-appear-slot">${characterIndexHtml(c, i, charIndex, mentionIndex, stateCache)}</div>`;
   bindFields(div, c, () => saveNovelPart({ bible: n.bible }));
+  // 揭示位切换
+  div.querySelector('.vis-btn').addEventListener('click', () => {
+    const now = c.visibility === 'shadowed' ? 'shown' : 'shadowed';
+    c.visibility = now;
+    const btn = div.querySelector('.vis-btn');
+    btn.classList.toggle('on', now === 'shadowed');
+    const use = btn.querySelector('use');
+    if (use) use.setAttribute('href', '#' + (now === 'shadowed' ? 'i-eye-off' : 'i-eye'));
+    saveNovelPart({ bible: n.bible });
+  });
+  // 揭示位切换
+  div.querySelector('.vis-btn').addEventListener('click', () => {
+    const now = w.visibility === 'shadowed' ? 'shown' : 'shadowed';
+    w.visibility = now;
+    const btn = div.querySelector('.vis-btn');
+    btn.classList.toggle('on', now === 'shadowed');
+    const use = btn.querySelector('use');
+    if (use) use.setAttribute('href', '#' + (now === 'shadowed' ? 'i-eye-off' : 'i-eye'));
+    saveNovelPart({ bible: n.bible });
+  });
   // 锁定切换
   div.querySelector('.lock-btn').addEventListener('click', () => {
     c.locked = !c.locked;
@@ -10738,6 +10759,7 @@ function renderWorldEntry(w, i, n, mentionIndex, mentionCache, stateCache) {
       <input class="input" data-key="category" value="${esc(w.category || '')}" placeholder="分类：地理/势力/力量体系/规则/物品" style="max-width:240px" ${w.locked ? 'disabled' : ''} />
       <span style="flex:1"></span>
       <button class="lock-btn${w.locked ? ' on' : ''}" title="${w.locked ? '取消锁定' : '锁定后 AI 生成不可改变此条目'}" aria-label="${w.locked ? '取消锁定' : '锁定'}">${ico('lock')}</button>
+      <button class="vis-btn${(w.visibility || '') === 'shadowed' ? ' on' : ''}" title="${(w.visibility || '') === 'shadowed' ? '改为已揭示' : '尚未揭示（伏笔中）'}" aria-label="${(w.visibility || '') === 'shadowed' ? '改为已揭示' : '尚未揭示（伏笔中）'}">${ico((w.visibility || '') === 'shadowed' ? 'eye-off' : 'eye')}</button>
       <button class="del" title="删除" ${w.locked ? 'disabled' : ''}>${ico('trash')}</button>
     </div>
     <div class="entry-locked-note" ${w.locked ? '' : 'hidden'}>已锁定，AI 生成不会改动此设定</div>
