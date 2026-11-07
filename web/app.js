@@ -163,6 +163,18 @@ function showModal(html, onMount, opts = {}) {
   box.innerHTML = html;
   // 弹窗是同一个容器复用的，不重置的话新弹窗会沿用上一个的滚动位置
   box.scrollTop = 0;
+  // 动态内容的每一弹窗都要把 dialog 语义带上，让屏幕阅读器也能知道是弹窗
+  const h3 = box.querySelector('h3');
+  if (h3) {
+    h3.id = 'modalTitle';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-labelledby', 'modalTitle');
+  } else {
+    box.removeAttribute('role');
+    box.removeAttribute('aria-modal');
+    box.removeAttribute('aria-labelledby');
+  }
   // 关掉弹窗时能回调一次（模型对比要用它停掉还在跑的流）
   box._onClose = opts.onClose || null;
   mask.hidden = false;
