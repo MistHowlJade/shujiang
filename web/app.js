@@ -1422,7 +1422,172 @@ function openQuickStartModal() {
   });
 }
 
-/* ---------------- AI 灵感（对话式） ---------------- */
+/* ---------------- 对话助手 ---------------- */
+const CHAT_KEY = 'shu.chatHistory.v1';
+let chatHistory = [];
+let chatStreaming = false;
+
+function chatTabOpen() {
+  const q = document.querySelector('#assistTabs [data-tab="chat"]');
+  if (q && !q.classList.contains('on')) q.click();
+}
+
+function renderChatLog() {
+  const log = document.querySelector('#chatLog');
+  if (!log) return;
+  log.innerHTML = '';
+  chatHistory.forEach((msg, i) => {
+    const div = document.createElement('div');
+    div.className = `chat-bubble ${msg.role}`;
+    div.textContent = msg.content;
+    log.appendChild(div);
+    if (msg.role === 'assistant' && msg.content.trim()) {
+      const actions = document.createElement('div');
+      actions.className = 'chat-actions';
+      actions.innerHTML = `<button class="btn btn-sm btn-primary" data-chat-action="apply" data-idx="${i}">应用到正文</button><button class="btn btn-sm btn-text" data-chat-action="copy" data-idx="${i}">复制</button><button class="btn btn-sm btn-text" data-chat-action="regenerate" data-idx="${i}">再来一次</button>`;
+      log.appendChild(actions);
+    }
+  });
+  log.scrollTop = log.scrollHeight;
+}
+
+function chatAppendMessage(role, content) {
+  chatHistory.push({ role, content });
+  renderChatLog();
+}
+
+function chatRegenerate() {
+  if (chatStreaming) return;
+  const lastUser = [...chatHistory].reverse().findIndex((m) => m.role === 'user');
+  if (lastUser === -1) return;
+  const userIdx = chatHistory.length - 1 - lastUser;
+  // 删除最后一个 assistant 回复
+  while (chatHistory.length && chatHistory[chatHistory.length - 1].role === 'assistant') {
+    chatHistory.pop();
+  }
+  renderChatLog();
+  chatSend(chatHistory[userIdx].content, false);
+}
+
+function chatApplyToContent(fullText, mode) {
+  const el = document.querySelector('#chContent');
+  if (!el) return;
+  const current = el.value;
+  let newText;
+  if (mode === 'append') {
+    newText = (current.trimEnd() + '\n\n' + fullText.trim()).trimStart();
+  } else if (mode === 'replace') {
+    newText = fullText.trim();
+  } else if (mode === 'insert') {
+    const pos = el.selectionStart;
+    newText = current.slice(0, pos) + (current.slice(0, pos).endsWith('\n') ? '' : '\n') + fullText.trim() + (current.slice(pos).startsWith('\n') ? '' : '\n') + current.slice(pos);
+  } else {
+    return;
+  }
+  el.value = newText;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+async function chatSend(text, focusInput = true) {
+  if (!S.novel) return toast('先打开一部作品', 'err');
+  const req = text.trim();
+  if (!req || chatStreaming) return;
+  chatStreaming = true;
+  const input = document.querySelector('#chatInput');
+  if (input) input.value = '';
+  chatHistory = chatHistory.filter((m) => m.role !== 'pending');
+  chatAppendMessage('user', req);
+  // 插入一个 pending 气泡
+  const pendingIdx = chatHistory.length;
+  chatAppendMessage('assistant', '…');
+  const bubble = document.querySelector(`#chatLog .chat-bubble:last-of-type`);
+  if (bubble) bubble.classList.add('pending');
+  let acc = '';
+  const providerName = S.config?.providers?.[0]?.name || '模型';
+  try {
+    await streamAI({
+      task: 'chat',
+      novelId: S.novel?.id,
+      chapterId: S.chapterId,
+      payload: {
+        req,
+        history: chatHistory.slice(0, pendingIdx).map((m) => ({ role: m.role, content: m.content })),
+      },
+    }, {
+      onDelta: (delta) => {
+        acc += delta;
+        const live = document.querySelector(`#chatLog .chat-bubble:last-of-type`);
+        if (live) { live.textContent = acc; live.classList.remove('pending'); }
+      },
+    });
+    if (!acc.trim()) {
+      chatHistory[pendingIdx].content = '（模型没给出内容，换个说法试试）';
+      chatHistory[pendingIdx].role = 'assistant';
+    } else {
+      chatHistory[pendingIdx].content = acc.trim();
+      chatHistory[pendingIdx].role = 'assistant';
+    }
+    renderChatLog();
+  } catch (err) {
+    chatHistory[pendingIdx].content = `生成失败：${err?.message || String(err)}`;
+    chatHistory[pendingIdx].role = 'assistant';
+    renderChatLog();
+  } finally {
+    chatStreaming = false;
+    if (focusInput && document.querySelector('#chatInput')) {
+      document.querySelector('#chatInput').focus();
+    }
+  }
+}
+
+function chatInit() {
+  const input = document.querySelector('#chatInput');
+  const sendBtn = document.querySelector('#chatSend');
+  const log = document.querySelector('#chatLog');
+  if (!input || !sendBtn || !log) return;
+  const saved = localStorage.getItem(CHAT_KEY);
+  if (saved) {
+    try { chatHistory = JSON.parse(saved).slice(-20); renderChatLog(); } catch { chatHistory = []; }
+  }
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing && !e.shiftKey) { e.preventDefault(); chatSend(input.value); }
+  });
+  sendBtn.addEventListener('click', () => chatSend(input.value));
+  // 清空对话
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); input.blur(); }
+  });
+  log.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-chat-action]');
+    if (!btn) return;
+    const idx = Number(btn.dataset.idx);
+    const msg = chatHistory[idx];
+    if (!msg) return;
+    const action = btn.dataset.chatAction;
+    if (action === 'apply') {
+      chatApplyToContent(msg.content, 'append');
+      toast('已附加到正文', 'ok');
+    } else if (action === 'copy') {
+      navigator.clipboard.writeText(msg.content).then(() => toast('已复制', 'ok'));
+    } else if (action === 'regenerate') {
+      chatRegenerate();
+    }
+  });
+  // 建议 chips
+  $$('#chatSuggest .chip').forEach((btn) => btn.addEventListener('click', () => {
+    const req = btn.dataset.chatSuggest || btn.textContent.trim();
+    chatSend(req);
+  }));
+  // 对话历史持久化到 localStorage（排除生成失败的气泡）
+  window.addEventListener('beforeunload', () => {
+    try {
+      const clean = chatHistory.filter((m) => !(m.role === 'assistant' && String(m.content).startsWith('生成失败：'))).slice(-20);
+      localStorage.setItem(CHAT_KEY, JSON.stringify(clean));
+    } catch {}
+  });
+}
+
+
 const INSPIRATION_SUGGESTIONS = [
   '现在什么火，给我推荐几个能写的方向',
   '联网搜热门榜，只看番茄',
@@ -14334,6 +14499,7 @@ async function boot() {
   }
   applyPaper(S.config?.ui?.editor);
   sprintInit();
+  chatInit();
   renderThemeIcon();
   try { await loadNovels(); } catch { S.novels = []; }
   refreshTrashCount();

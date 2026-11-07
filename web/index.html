@@ -274,6 +274,7 @@
               <button data-tab="context" id="tabAssistContext" role="tab" aria-selected="false" aria-controls="paneAssistContext" tabindex="-1">资料</button>
               <button data-tab="scenes" id="tabAssistScenes" role="tab" aria-selected="false" aria-controls="paneAssistScenes" tabindex="-1">场景</button>
               <button data-tab="annotations" id="tabAssistAnnotations" role="tab" aria-selected="false" aria-controls="paneAssistAnnotations" tabindex="-1">批注</button>
+              <button data-tab="chat" id="tabAssistChat" role="tab" aria-selected="false" aria-controls="paneAssistChat" tabindex="-1">对话</button>
             </div>
 
             <div class="assist-body">
@@ -408,6 +409,22 @@
                   </div>
                   <p class="dim small">在正文选中文字，点工具栏的高亮图标添加批注。点列表项可跳转到对应位置。</p>
                   <div id="annotationSidebar"></div>
+                </div>
+              </div>
+              <!-- 对话 -->
+              <div class="assist-pane" data-pane="chat" role="tabpanel" id="paneAssistChat" aria-labelledby="tabAssistChat">
+                <div class="chat-panel">
+                  <div class="chat-log" id="chatLog" aria-live="polite"></div>
+                  <div class="chat-suggest" id="chatSuggest">
+                    <button class="chip" data-chat-suggest="续写当前章，给个悬念钩子">续写当前章</button>
+                    <button class="chip" data-chat-suggest="把这章改成更冷的风格">换个风格</button>
+                    <button class="chip" data-chat-suggest="总结这章，存进记忆">总结本章</button>
+                    <button class="chip" data-chat-suggest="帮我写下一章的初稿">生成下一章</button>
+                  </div>
+                  <div class="chat-input-row">
+                    <textarea id="chatInput" class="input chat-input" rows="2" maxlength="500" placeholder="说说你想干什么…"></textarea>
+                    <button class="btn btn-primary" id="chatSend" aria-label="发送"><svg class="ico"><use href="#i-spark" /></svg></button>
+                  </div>
                 </div>
               </div>
             </div>

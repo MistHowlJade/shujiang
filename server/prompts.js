@@ -55,6 +55,7 @@ function packBlock(pack) {
 const BASE_SYSTEM = `你是一位经验丰富的中文小说作者，擅长长篇连载创作。你写作时严格遵守作者给出的世界观、人物设定与既定剧情，绝不擅自改动设定，也绝不重复已写过的事件。`;
 
 function head(novel, pack) {
+  if (!novel) return pack ? `作品资料（设定库）:\n${packBlock(pack)}` : '';
   return [
     `【作品】《${novel.title}》${novel.genre ? ` · ${novel.genre}` : ''}`,
     styleBlock(novel),
@@ -370,6 +371,36 @@ export const TASKS = {
           sys('你是一位深谙中文网文（起点/番茄/七猫/晋江）的开书编辑，懂市场风向，也懂写作。用户会随便聊：问榜、要灵感、要大纲、要人设——你按用户的话来，别锁格式；联网参数开着就真的联网搜索，没开就基于记忆回答并说明。可以拉家常、可以发散、可以唱反调，别敷衍。'),
           ...history,
           { role: 'user', content: req || (online ? '现在什么火？给我推荐几个能写的方向。' : '给我推荐几个现在能写的方向。') },
+        ],
+      };
+    },
+  },
+
+  /* ---------- 对话助手 ---------- */
+  chat: {
+    expect: 'text',
+    temperature: 0.9,
+    maxTokens: 3500,
+    build({ novel, chapter, pack, payload }) {
+      const req = String(payload?.req || '').trim();
+      const history = (Array.isArray(payload?.history) ? payload.history : [])
+        .slice(-10)
+        .filter((m) => m && typeof m === 'object')
+        .map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '').slice(0, 4000) }));
+      const chCtx = chapter
+        ? '\n当前章节：第 ' + chapter.no + ' 章「' + (chapter.title || '') + '」（' +
+          (chapter.stage === 'draft' ? '草稿' : chapter.stage === 'done' ? '定稿' : '修订中') +
+          '）\n\n正文节选：\n"""\n' + String(chapter.content || '').slice(0, 2000) + '\n"""'
+        : '';
+      return {
+        messages: [
+          sys(
+            '你是《' + (novel?.title || '无题') + '》的 AI 写作搭档。你了解作品的全部设定——人物、世界观、大纲、风格偏好。你不需要问作者“你想怎么处理”，直接动手写——缺什么写什么。写正文、写对话、写章纲都可以。作者会决定是否采用。',
+            head(novel, pack),
+            chCtx ? '\n' + chCtx : '',
+          ),
+          ...history,
+          { role: 'user', content: req || '续写当前章，给个悬念钩子。' },
         ],
       };
     },
