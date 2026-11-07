@@ -13,6 +13,7 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win --x64",
     "mock": "node dev/mock-openai.js",
+    "test": "node dev/lib-test.mjs",
     "regress": "node dev/regress.mjs",
     "check-refs": "node dev/check-refs.mjs",
     "perf": "node dev/perf.mjs"

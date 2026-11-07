@@ -1,0 +1,44 @@
+name: 回归测试
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 单元测试（lib 层，585 项）
+        run: npm test
+
+      - name: 模块引用自检
+        run: npm run check-refs
+
+      - name: 启动书匠并跑回归（281 项）
+        shell: pwsh
+        run: |
+          $env:SHU_DATA_DIR = '.tmp-ci-data'
+          $proc = Start-Process -FilePath node -ArgumentList 'server/server.js' -PassThru -NoNewWindow
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8848/api/novels -TimeoutSec 2 | Out-Null
+                $ok = $true
+                break
+              } catch { }
+            }
+            if (-not $ok) { throw '书匠服务 60 秒内未启动' }
+            node dev/regress.mjs
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }
