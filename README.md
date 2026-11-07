@@ -819,8 +819,8 @@ electron-builder.yml   桌面版打包配置（nsis + portable，不含 data/too
 
 **下载页：[github.com/MistHowlJade/shujiang/releases](https://github.com/MistHowlJade/shujiang/releases)**
 
-- `书匠-Setup-1.0.0.exe`：向导式安装版（可选安装目录，当前用户安装，不需要管理员权限；桌面与开始菜单都有快捷方式）
-- `书匠-Portable-1.0.0.exe`：单文件便携版，解压即用/U 盘随身，不用安装
+- `ShuJiang-Setup-1.0.0.exe`：向导式安装版（可选安装目录，当前用户安装，不需要管理员权限；桌面与开始菜单都有快捷方式）
+- `ShuJiang-Portable-1.0.0.exe`：单文件便携版，解压即用/U 盘随身，不用安装
 - 这两个包**没有代码签名证书**，第一次运行时 Windows SmartScreen 会拦一下：点「更多信息 → 仍要运行」即可。（签名需要正式的证书，暂未购买）
 - 安装/卸载不会动你的作品：用户数据在 `%APPDATA%\书匠\data`，卸载时默认保留
 
@@ -831,7 +831,7 @@ npm install            # 只装两个 build 依赖：electron、electron-builder
 npm run desktop        # 直接预览桌面版（等同 electron .）
 npm run icon           # 重新生成 build/icon.png / build/icon.ico（改过设计后）
 npm run pack           # 只打包到 dist/win-unpacked（不生成安装包）
-npm run dist           # 完整产物：dist\书匠-Setup-1.0.0.exe + dist\书匠-Portable-1.0.0.exe
+npm run dist           # 完整产物：dist\ShuJiang-Setup-1.0.0.exe + dist\ShuJiang-Portable-1.0.0.exe
 ```
 
 实现方式（`electron/main.mjs`）：单进程，把原有的零依赖本地服务端直接内嵌进 Electron 的 Node 里跑，动态找一个空闲端口，窗口打开它；单实例运行，重复双击只会聚焦已有窗口；外部链接一律不放行，只允许访问本应用地址；菜单栏默认隐藏（`Alt` 可调出）。数据目录优先尊重 `SHU_DATA_DIR` 环境变量，否则用 `%APPDATA%\书匠\data`——安装目录不会被写入任何文件。
