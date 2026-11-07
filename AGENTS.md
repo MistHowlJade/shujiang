@@ -75,6 +75,8 @@ npm run regress                  # 回归
 npm test                         # lib-test（lib 层单元测试）
 npm run perf                     # 性能压测
 npm run check-refs               # 模块引用自检（import 缺谁、哪里缺了）
+# 往隔离目录播种虚构示例作品《雪岭问剑》，用于重新生成 README 截图：
+SHU_DATA_DIR=.tmp-demo-data tools\node\node.exe dev\seed-demo.mjs
 tools\node\node.exe dev\regress.mjs   # Windows 下直接跑 regress
 ```
 
