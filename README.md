@@ -1,5 +1,7 @@
 # 书匠 · AI 长篇小说创作台
 
+[![回归测试](https://github.com/MistHowlJade/shujiang/workflows/%E5%9B%9E%E5%BD%92%E6%B5%8B%E8%AF%95/badge.svg)](https://github.com/MistHowlJade/shujiang/actions)
+
 一个**完全跑在自己电脑上**的中文长篇小说写作台。浏览器打开 `http://127.0.0.1:8848` 使用，作品、设定、密钥全部存在本机 `data/` 目录，不经过任何第三方服务器。
 
 - 零依赖：不装 npm 包，`Node` 内置模块 + 原生 ES Module，删掉文件夹即卸载干净
