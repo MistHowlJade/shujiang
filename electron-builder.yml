@@ -1,0 +1,54 @@
+# 书匠 · electron-builder 配置（Windows 优先）
+# 全部开源免费，零第三方运行时依赖随包分发的只有 Electron 自带的 Chromium。
+
+appId: site.shujiang.app
+productName: 书匠
+copyright: © 2026 书匠 · AI 长篇小说创作台
+
+directories:
+  output: dist
+
+# 项目里没有运行时依赖（服务端用 Node 内置模块），所以不打 node_modules；
+# 也不打 data/（用户数据）、tools/（便携 Node，给源码模式用的）、dev/（开发自检）。
+files:
+  - web/**
+  - server/**
+  - electron/**
+  - build/icon.png
+  - build/icon.ico
+  - package.json
+
+# 不做 asar 打包：服务端要以文件路径读 web/ 和 data/，保持普通目录布局最稳。
+asar: false
+
+# 这个项目的 GitHub 不可达，用 npmmirror 镜像拿 Electron 运行时；
+# 缓存放在项目 .cache/ 里，不碰 C:\Users\…\AppData 下面的任何地方。
+electronDownload:
+  mirror: https://npmmirror.com/mirrors/electron/
+  cache: D:/项目/shu/.cache/electron-cache
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  icon: build/icon.ico
+
+nsis:
+  oneClick: false                 # 向导式安装，允许选目录
+  allowToChangeInstallationDirectory: true
+  perMachine: false               # 当前用户安装，不需要管理员权限
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 书匠
+  deleteAppDataOnUninstall: false # 卸载时保留用户数据，别把作品删了
+
+portable:
+  artifactName: 书匠-Portable-${version}.${ext}
+
+# 发布到 GitHub Releases 时，electron-builder 认得 "github"，
+# 这里先不写死仓库信息，发布用手工提供的 token/仓库参数。
+publish: []
+
+artifactName: 书匠-Setup-${version}.${ext}

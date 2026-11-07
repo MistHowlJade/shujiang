@@ -14,7 +14,7 @@
 
 空书架会直接给你三个入口，并各自说明适合的情况：**一键开书**（只有一句话，AI 先铺好）、**手动新建**（先自己写）、**导入旧稿**（有 `.txt` / `.md` / `.docx`，按章切开）。
 
-> `启动.bat` 只是源码目录里的开发启动器，后面打包成桌面软件时可以删掉。
+> `启动.bat` 只是源码模式的开发启动器，不需要它；桌面版见文末「桌面版（Windows）」。
 
 命令行方式：
 
@@ -794,6 +794,8 @@ web/
     goal.js    全书目标进度、完稿预测与统计面板的目标区块
     submit.js  交稿检查（空章节 / 定稿 / 篇幅门槛 / 材料齐不齐）
     paper.js   稿纸排版（字号 / 行距 / 字体，纯计算）
+electron/
+  main.mjs     桌面版主进程（单进程内嵌服务端，自动找空闲端口，单实例）
 dev/
   mock-openai.js      假模型调试服务（可选，不联网）
   regress.mjs         回归自检（改完代码跑一遍）
@@ -802,9 +804,47 @@ dev/
   perf.mjs            性能压测（配合 gen-large-novel.js）
   gen-large-novel.js  生成大稿用于性能测试（120 章 × 3000 字只需几秒）
   inspect-epub.mjs    解开导出的 EPUB 看内部结构（封面 / opf / 目录）
+  make-icon.mjs       手绘图标 → build/icon.png / build/icon.ico（零依赖）
 tools/node/    项目内便携 Node 运行时（可删，改用系统 Node）
-package.json   npm scripts 收纳（start / regress / check-refs…），零依赖，没有东西要装
+build/         应用图标（icon.png / icon.ico 多尺寸，已提交）
+package.json   npm scripts 收纳（start / desktop / pack / dist / regress…）
+electron-builder.yml   桌面版打包配置（nsis + portable，不含 data/tools，asar 关闭）
 ```
+
+## 桌面版（Windows）
+
+应用可以打包成 Windows 桌面程序：一个 `.exe` 打头阵的自包含窗口，服务端直接内嵌，不需要装 Node、不需要留命令行窗口，数据照样只在本机。
+
+### 从发布页下载（给不想装环境的人）
+
+- `书匠-Setup-1.0.0.exe`：向导式安装版（可选安装目录，当前用户安装，不需要管理员权限；桌面与开始菜单都有快捷方式）
+- `书匠-Portable-1.0.0.exe`：单文件便携版，解压即用/U 盘随身，不用安装
+- 这两个包**没有代码签名证书**，第一次运行时 Windows SmartScreen 会拦一下：点「更多信息 → 仍要运行」即可。（签名需要正式的证书，暂未购买）
+- 安装/卸载不会动你的作品：用户数据在 `%APPDATA%\书匠\data`，卸载时默认保留
+
+### 自己从源码构建
+
+```bat
+npm install            # 只装两个 build 依赖：electron、electron-builder
+npm run desktop        # 直接预览桌面版（等同 electron .）
+npm run icon           # 重新生成 build/icon.png / build/icon.ico（改过设计后）
+npm run pack           # 只打包到 dist/win-unpacked（不生成安装包）
+npm run dist           # 完整产物：dist\书匠-Setup-1.0.0.exe + dist\书匠-Portable-1.0.0.exe
+```
+
+实现方式（`electron/main.mjs`）：单进程，把原有的零依赖本地服务端直接内嵌进 Electron 的 Node 里跑，动态找一个空闲端口，窗口打开它；单实例运行，重复双击只会聚焦已有窗口；外部链接一律不放行，只允许访问本应用地址；菜单栏默认隐藏（`Alt` 可调出）。数据目录优先尊重 `SHU_DATA_DIR` 环境变量，否则用 `%APPDATA%\书匠\data`——安装目录不会被写入任何文件。
+
+> 设计取舍：刻意**不用** asar 打包，服务端按普通文件路径读 `web/` 和 `data/`，零配置出错率最低；代价是安装目录里文件全可见，反正这本来就是开源作品。
+
+### 桌面版常见问题
+
+**SmartScreen 拦住了怎么办？** 见上文，点「更多信息 → 仍要运行」。如果嫌麻烦，可以从便携版开始：Portable 同样会被拦，但不用装。
+
+**作品在哪？** 安装版在 `%APPDATA%\书匠\data`；源码模式（`npm start` / `启动.bat`）在项目 `data/`。两个目录互不相通，互不覆盖。想搬家：把老 `data/` 整个复制到新目录，或设环境变量 `SHU_DATA_DIR` 指过去。
+
+**为什么包这么大（~110–120 MB）？** 打进去的只有 Electron 自带的 Chromium——这是全世界做桌面应用都要付的固定成本。应用本身 1 MB 不到。
+
+---
 
 ## 常见问题
 

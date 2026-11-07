@@ -6,7 +6,9 @@ import { randomUUID } from 'node:crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(__dirname, '..');
-export const DATA_DIR = path.join(ROOT, 'data');
+// 数据目录默认在项目里（data/），可以用 SHU_DATA_DIR 换到别的地方。
+// 桌面安装版会把它指到用户的 AppData 目录，避免往安装目录写文件。
+export const DATA_DIR = process.env.SHU_DATA_DIR ? path.resolve(process.env.SHU_DATA_DIR) : path.join(ROOT, 'data');
 export const NOVELS_DIR = path.join(DATA_DIR, 'novels');
 export const TRASH_DIR = path.join(DATA_DIR, 'trash');
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
