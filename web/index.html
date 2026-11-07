@@ -264,11 +264,11 @@
           <!-- 助手栏 -->
           <aside class="pane-assist" id="assistPane" aria-label="助手面板">
             <div class="segmented" id="assistTabs" role="tablist" aria-label="助手页签" aria-orientation="horizontal">
-              <button data-tab="write" id="tabAssistWrite" class="on" role="tab" aria-selected="true" aria-controls="paneAssistWrite">写作</button>
-              <button data-tab="check" id="tabAssistCheck" role="tab" aria-selected="false" aria-controls="paneAssistCheck">检查</button>
-              <button data-tab="context" id="tabAssistContext" role="tab" aria-selected="false" aria-controls="paneAssistContext">资料</button>
-              <button data-tab="scenes" id="tabAssistScenes" role="tab" aria-selected="false" aria-controls="paneAssistScenes">场景</button>
-              <button data-tab="annotations" id="tabAssistAnnotations" role="tab" aria-selected="false" aria-controls="paneAssistAnnotations">批注</button>
+              <button data-tab="write" id="tabAssistWrite" class="on" role="tab" aria-selected="true" aria-controls="paneAssistWrite" tabindex="0">写作</button>
+              <button data-tab="check" id="tabAssistCheck" role="tab" aria-selected="false" aria-controls="paneAssistCheck" tabindex="-1">检查</button>
+              <button data-tab="context" id="tabAssistContext" role="tab" aria-selected="false" aria-controls="paneAssistContext" tabindex="-1">资料</button>
+              <button data-tab="scenes" id="tabAssistScenes" role="tab" aria-selected="false" aria-controls="paneAssistScenes" tabindex="-1">场景</button>
+              <button data-tab="annotations" id="tabAssistAnnotations" role="tab" aria-selected="false" aria-controls="paneAssistAnnotations" tabindex="-1">批注</button>
             </div>
 
             <div class="assist-body">

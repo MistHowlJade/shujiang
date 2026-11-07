@@ -7713,6 +7713,8 @@ function showAssistTab(name) {
     const on = x.dataset.tab === name;
     x.classList.toggle('on', on);
     x.setAttribute('aria-selected', String(on));
+    // 标准 tablist 语义：只有当前页签在 Tab 顺序里
+    x.setAttribute('tabindex', on ? '0' : '-1');
   });
   $$('.assist-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === name));
   if (name === 'scenes') renderCorkboard();
