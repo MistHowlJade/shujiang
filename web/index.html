@@ -290,19 +290,19 @@
                     <label class="field-label">模型<input id="genModel" class="input" placeholder="默认" /></label>
                   </div>
                   <div class="btn-row">
-                    <button class="btn btn-primary btn-block" id="genChapterBtn"><svg class="ico"><use href="#i-spark" /></svg>生成本章</button>
+                    <button class="btn btn-primary btn-block" id="genChapterBtn" title="按章纲写初稿；不会覆盖原文，满意后再采用"><svg class="ico"><use href="#i-spark" /></svg>生成本章</button>
                   </div>
                   <div class="btn-row">
-                    <button class="btn" id="contBtn"><svg class="ico"><use href="#i-pen" /></svg>续写</button>
-                    <button class="btn btn-danger-ghost" id="stopBtn" hidden><svg class="ico"><use href="#i-stop" /></svg>停止</button>
+                    <button class="btn" id="contBtn" title="从当前正文接着写；没有正文时等同于「生成本章」"><svg class="ico"><use href="#i-pen" /></svg>续写</button>
+                    <button class="btn btn-danger-ghost" id="stopBtn" hidden title="停止本次生成，已生成的内容会保留"><svg class="ico"><use href="#i-stop" /></svg>停止</button>
                   </div>
                   <div class="btn-row">
                     <button class="btn btn-block" id="cmpBtn" title="同一段上下文跑两个模型，并排看，选一个采用"><svg class="ico"><use href="#i-columns" /></svg>对比模型</button>
                   </div>
                   <div class="btn-row wrap">
-                    <button class="btn btn-sm btn-text" data-quick="memory"><svg class="ico"><use href="#i-refresh" /></svg>存章节记忆</button>
-                    <button class="btn btn-sm btn-text" data-quick="batchMemory">批量补记忆</button>
-                    <button class="btn btn-sm btn-text" data-quick="summarize">生成概要</button>
+                    <button class="btn btn-sm btn-text" data-quick="memory" title="把本章的人物 / 伏笔 / 状态存下来，生成后续章节时会自动带上"><svg class="ico"><use href="#i-refresh" /></svg>存章节记忆</button>
+                    <button class="btn btn-sm btn-text" data-quick="batchMemory" title="把还没存记忆的章节批量补上；会逐章调用模型">批量补记忆</button>
+                    <button class="btn btn-sm btn-text" data-quick="summarize" title="给本章写一句概要，方便之后快速定位">生成概要</button>
                     <button class="btn btn-sm btn-text" data-quick="titles">起名</button>
                   </div>
                 </div>
@@ -347,11 +347,11 @@
                     <option value="bible">只查设定库自相矛盾</option>
                   </select>
                   <div class="btn-row">
-                    <button class="btn btn-primary" id="consistencyBtn"><svg class="ico"><use href="#i-shield" /></svg>一致性检查</button>
-                    <button class="btn" id="reviewBtn"><svg class="ico"><use href="#i-stamp" /></svg>责编评审</button>
+                    <button class="btn btn-primary" id="consistencyBtn" title="按人物、时间线、伏笔、口吻，找明显矛盾"><svg class="ico"><use href="#i-shield" /></svg>一致性检查</button>
+                    <button class="btn" id="reviewBtn" title="让模型从编辑视角指出可读性问题，而不是抠错字"><svg class="ico"><use href="#i-stamp" /></svg>责编评审</button>
                   </div>
                   <div class="btn-row">
-                    <button class="btn btn-danger-ghost btn-block" id="stopBtn2" hidden><svg class="ico"><use href="#i-stop" /></svg>停止</button>
+                    <button class="btn btn-danger-ghost btn-block" id="stopBtn2" hidden title="停止本次生成，已生成的内容会保留"><svg class="ico"><use href="#i-stop" /></svg>停止</button>
                   </div>
                 </div>
                 <div class="section-head"><span>结果</span></div>
