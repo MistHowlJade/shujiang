@@ -505,6 +505,19 @@ function setView(v) {
   if (v === 'bible') { renderBible(); loadStats(); }
   if (v === 'shelf') { renderShelf(); loadStats(); }
   if (v === 'settings') renderSettings();
+  syncDocumentTitle();
+}
+function syncDocumentTitle() {
+  const base = '书匠';
+  if (S.view === 'studio') {
+    document.title = S.novel ? `${S.novel.title} · ${base}` : `工作台 · ${base}`;
+  } else if (S.view === 'bible') {
+    document.title = S.novel ? `${S.novel.title} · 设定库 · ${base}` : `设定库 · ${base}`;
+  } else if (S.view === 'settings') {
+    document.title = `设置 · ${base}`;
+  } else {
+    document.title = '书匠 · AI 长篇小说创作台';
+  }
 }
 $$('#topnav .tab').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
 $('#brandHome').addEventListener('click', () => setView('shelf'));
@@ -4369,6 +4382,7 @@ function renderTopbarActions() {
     : '';
   mid.innerHTML = `<button type="button" class="top-export" title="导出这部作品">${ico('book')}《${esc(S.novel.title)}》<span class="dim-text">${S.novel.chapters.length} 章 · ${fmtWords(total)} 字</span>${goalTag}${ico('download')}</button>`;
   mid.onclick = exportBook;
+  syncDocumentTitle();
 }
 
 /** 字数胶囊：同时显示单章目标的完成度，点击可改目标 */
