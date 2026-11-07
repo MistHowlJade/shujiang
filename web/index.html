@@ -112,7 +112,7 @@
             <span class="stat-slot" id="shelfStats"></span>
             <div class="field-inline">
               <svg class="ico"><use href="#i-search" /></svg>
-              <input id="shelfSearch" placeholder="搜索书名 / 类型 / 标签" title="搜索书名 / 类型 / 标签；按 / 快速定位，Esc 清空" />
+              <input id="shelfSearch" placeholder="搜索书名 / 类型 / 标签" aria-label="搜索书名、类型或标签" title="搜索书名 / 类型 / 标签；按 / 快速定位，Esc 清空" />
               <button class="icon-btn sm shelf-search-clear" id="shelfSearchClear" title="清除搜索" aria-label="清除搜索" hidden><svg class="ico"><use href="#i-x" /></svg></button>
             </div>
             <button class="btn" id="globalSearchBtn" title="在所有作品的正文和章节标题中检索（Ctrl+Shift+F）"><svg class="ico"><use href="#i-search" /></svg><span>全局检索</span></button>
@@ -206,7 +206,7 @@
               </div>
             </div>
             <div class="editor-head">
-              <input id="chTitle" class="ch-title" placeholder="章节标题" />
+              <input id="chTitle" class="ch-title" placeholder="章节标题" aria-label="章节标题" />
               <div class="pane-tools">
                 <select id="chStage" class="stage-select" aria-label="本章状态" title="章节状态：草稿 / 修改中 / 定稿" disabled>
                   <option value="draft">草稿</option>
@@ -223,7 +223,7 @@
               </div>
             </div>
             <div class="editor-wrap">
-              <textarea id="chContent" class="editor" spellcheck="false" placeholder="在这里写正文，或者用右侧助手生成……&#10;&#10;选中任意段落后会弹出快捷菜单：润色 / 扩写 / 精简 / 改写。"></textarea>
+              <textarea id="chContent" class="editor" spellcheck="false" aria-label="正文" placeholder="在这里写正文，或者用右侧助手生成……&#10;&#10;选中任意段落后会弹出快捷菜单：润色 / 扩写 / 精简 / 改写。"></textarea>
               <div class="sel-toolbar" id="selToolbar" hidden>
                 <button data-op="polish">润色</button>
                 <button data-op="expand">扩写</button>
@@ -286,7 +286,7 @@
                 </div>
                 <div class="card">
                   <label class="field-label">本章要求<span class="field-hint">留空则按章纲推进</span></label>
-                  <textarea id="genReq" class="textarea" rows="3" placeholder="例：主角第一次进宗门大比，遇上宿敌，只暴露一半实力，结尾被长老注意到。"></textarea>
+                  <textarea id="genReq" class="textarea" rows="3" aria-label="本章要求（留空则按章纲推进）" placeholder="例：主角第一次进宗门大比，遇上宿敌，只暴露一半实力，结尾被长老注意到。"></textarea>
                   <div class="field-row">
                     <label class="field-label">目标字数<input id="genWords" class="input" type="number" value="3000" min="300" step="100" /></label>
                     <label class="field-label">模型<input id="genModel" class="input" placeholder="默认" /></label>
@@ -333,7 +333,7 @@
                     <button type="button" class="btn btn-sm btn-text rev-all" id="revAll" title="查看全书修订清单">全书</button>
                   </div>
                   <div class="rev-add">
-                    <input class="input" id="revInput" maxlength="240" placeholder="记一条要改的地方，回车添加" autocomplete="off" />
+                    <input class="input" id="revInput" maxlength="240" placeholder="记一条要改的地方，回车添加" autocomplete="off" aria-label="记一条要改的地方" />
                     <button class="btn btn-sm btn-primary" id="revAdd"><svg class="ico"><use href="#i-plus" /></svg>添加</button>
                   </div>
                   <p class="rev-hint">先在正文里选中要改的句子，再添加；之后点引文就能跳回原处。</p>
@@ -525,7 +525,7 @@
           <div class="card">
             <div class="card-head"><h2>拆书 · 提取文风</h2></div>
             <p class="desc">粘贴一段你喜欢的文字，让模型提炼出可直接用于写作的文风规则，再一键写进当前作品的文风档案。</p>
-            <textarea id="styleSample" class="textarea" rows="6" placeholder="粘贴样本文本（几千字效果最好）……"></textarea>
+            <textarea id="styleSample" class="textarea" rows="6" aria-label="文风样本文本" placeholder="粘贴样本文本（几千字效果最好）……"></textarea>
             <div class="btn-row">
               <button class="btn" id="analyzeStyleBtn"><svg class="ico"><use href="#i-spark" /></svg>提取文风</button>
               <button class="btn btn-primary" id="applyStyleBtn" hidden>写入当前作品</button>
@@ -549,9 +549,7 @@
               <button class="btn btn-sm btn-text" id="promptImportBtn" title="导入提示词模板"><svg class="ico"><use href="#i-upload" /></svg>导入模板</button>
             </div>
             <p class="desc">自定义各任务的 AI 提示词模板。留空即使用内置模板；模板里可用 <code>${变量名}</code> 引用当前上下文（如 <code>${novel.title}</code>、<code>${chapter.title}</code>、<code>${target}</code>）。保存后立即生效。</p>
-            <div class="field-label">
-              <select class="select" id="promptTaskSelect"></select>
-            </div>
+            <label class="field-label">任务<select class="select" id="promptTaskSelect" aria-label="提示词模板任务"></select></label>
             <div class="field-label">
               <label>系统提示词 (System)</label>
               <textarea id="promptSystem" class="textarea" rows="6" placeholder="留空则使用内置系统提示词。定义 AI 的角色与行为准则……"></textarea>

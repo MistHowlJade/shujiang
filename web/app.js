@@ -11458,7 +11458,7 @@ function renderSettings() {
     div.className = 'provider';
     div.innerHTML = `
       <div class="provider-top">
-        <input class="input" data-pk="name" value="${esc(p.name || '')}" placeholder="名称" style="max-width:180px" />
+        <input class="input" data-pk="name" value="${esc(p.name || '')}" placeholder="名称" aria-label="服务商名称" style="max-width:180px" />
         <label class="radio-pill" title="设为默认使用的服务商">
           <input type="radio" name="activeProvider" ${cfg.activeProviderId === p.id ? 'checked' : ''} data-active="1" /> 默认
         </label>
