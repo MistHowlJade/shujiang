@@ -4144,6 +4144,14 @@ function openChapterBoard() {
       <button class="icon-btn sm" id="kbSearchClear" title="清除搜索" aria-label="清除搜索" hidden><svg class="ico"><use href="#i-x" /></svg></button>
       <span class="hist-count" id="kbFindCount" hidden></span>
     </div>
+    <div class="kb-bulk" id="kbBulk" hidden>
+      <label class="kb-bulk-all"><input type="checkbox" id="kbSelectAll" /> 全选可见</label>
+      <span class="kb-bulk-count" id="kbBulkCount">已选 0</span>
+      <button class="btn btn-sm" id="kbBulkDone">批量标定稿</button>
+      <button class="btn btn-sm" id="kbBulkDraft">移回草稿</button>
+      <button class="btn btn-sm btn-danger-ghost" id="kbBulkDelete">删除选中</button>
+      <button class="btn btn-sm btn-text" id="kbBulkClear">取消选择</button>
+    </div>
     <div class="kb-overview">
       <div class="kb-bar" id="kbBar" aria-hidden="true"></div>
       <div class="kb-legend" id="kbLegend"></div>
@@ -4162,6 +4170,7 @@ function openChapterBoard() {
     const findCount = box.querySelector('#kbFindCount');
     const volIds = effVolumeIds();
     let searchText = '';
+    const selected = new Set();
     let dragging = false;
     let dragEndedAt = 0;
 
@@ -4287,6 +4296,7 @@ function openChapterBoard() {
       article.role = 'button';
       article.setAttribute('aria-label', `第 ${r.index + 1} 章 ${r.title}`);
       article.innerHTML = `
+        <input type="checkbox" class="kb-check" aria-label="选择第 ${r.index + 1} 章"${selected.has(r.id) ? ' checked' : ''} />
         <div class="kb-card-top">
           <span class="kb-no">${r.index + 1}</span>
           <span class="kb-card-title">${esc(r.title)}</span>
@@ -4390,6 +4400,12 @@ function openChapterBoard() {
         const id = card.dataset.id;
         const index = Number(card.dataset.index);
         const stageSelect = $('.kb-stage', card);
+        const checkEl = card.querySelector('.kb-check');
+        checkEl?.addEventListener('change', () => {
+          if (checkEl.checked) selected.add(card.dataset.id);
+          else selected.delete(card.dataset.id);
+          syncBulkBar();
+        });
         card.addEventListener('dragstart', (e) => {
           dragging = true;
           e.dataTransfer.effectAllowed = 'move';
@@ -4403,12 +4419,12 @@ function openChapterBoard() {
           $$('.kb-col.drop', board).forEach((el) => el.classList.remove('drop'));
         });
         card.addEventListener('click', (e) => {
-          if (e.target.closest('select')) return;
+          if (e.target.closest('select, .kb-check')) return;
           if (dragging || Date.now() - dragEndedAt < 220) return;
           openCard(id);
         });
         card.addEventListener('keydown', (e) => {
-          if (e.target.closest('select')) return;
+          if (e.target.closest('select, .kb-check')) return;
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             openCard(id);
@@ -4447,6 +4463,74 @@ function openChapterBoard() {
         if (scrolls[stage]) listEl.scrollTop = scrolls[stage];
       });
 
+      // —— 批量选择：工具条、勾选态同步、批量操作 ——
+      const bulkEl = box.querySelector('#kbBulk');
+      const bulkCount = box.querySelector('#kbBulkCount');
+      const selectAllEl = box.querySelector('#kbSelectAll');
+      const visibleIds = () => BOARD_STAGES.flatMap((s) => buildBoardRows(s)).map((r) => r.id);
+      const syncCardCheckStates = () => $$('.kb-card', board).forEach((card) => {
+        const el = card.querySelector('.kb-check');
+        if (el) el.checked = selected.has(card.dataset.id);
+      });
+      const syncBulkBar = () => {
+        const ids = visibleIds();
+        const visSel = ids.filter((id) => selected.has(id)).length;
+        bulkCount.textContent = `已选 ${selected.size}`;
+        bulkEl.hidden = selected.size === 0;
+        selectAllEl.checked = ids.length > 0 && visSel === ids.length;
+        selectAllEl.indeterminate = visSel > 0 && visSel < ids.length;
+      };
+      const bulkSetStage = (stage) => {
+        const ids = [...selected];
+        if (!ids.length) return;
+        let changed = 0;
+        ids.forEach((id) => {
+          const i = n.chapters.findIndex((c) => c.id === id);
+          if (i >= 0 && stageOf(n.chapters[i]) !== stage) {
+            n.chapters[i].stage = stage;
+            markChapterDirty(n.chapters[i]);
+            changed++;
+          }
+        });
+        selected.clear();
+        if (changed) { renderStudio(); toast(`已把 ${changed} 章设为${STAGE_LABEL[stage]}`, 'ok'); }
+        render({ resetScroll: true });
+        syncBulkBar();
+      };
+      box.querySelector('#kbBulkDone').addEventListener('click', () => bulkSetStage('done'));
+      box.querySelector('#kbBulkDraft').addEventListener('click', () => bulkSetStage('draft'));
+      box.querySelector('#kbBulkClear').addEventListener('click', () => {
+        selected.clear();
+        syncCardCheckStates();
+        syncBulkBar();
+      });
+      selectAllEl.addEventListener('change', () => {
+        const ids = visibleIds();
+        ids.forEach((id) => { if (selectAllEl.checked) selected.add(id); else selected.delete(id); });
+        syncCardCheckStates();
+        syncBulkBar();
+      });
+      box.querySelector('#kbBulkDelete').addEventListener('click', async () => {
+        const ids = [...selected];
+        if (!ids.length) return;
+        if (!confirm(`删除选中的 ${ids.length} 章？\n正文、章纲关联会一起清理，版本备份保留。`)) return;
+        for (const id of ids) {
+          try {
+            const { novel } = await api.del(`/api/novels/${S.novel.id}/chapters/${id}`);
+            S.novel = novel;
+            S.unsaved.delete(id);
+          } catch (err) {
+            toast(`删除失败：${err?.message || String(err)}`, 'err');
+            return;
+          }
+        }
+        toast(`已删除 ${ids.length} 章`, 'ok');
+        selected.clear();
+        closeModal();
+        renderStudio();
+        loadNovels();
+      });
+
       // 拖放目标列（非虚拟滚动时用 listEl，虚拟滚动时用 col）
       $$('.kb-col', board).forEach((col) => {
         const stage = col.dataset.stage;
@@ -4468,6 +4552,7 @@ function openChapterBoard() {
           if (index >= 0) applyStage(index, stage);
         });
       });
+      syncBulkBar();
     };
 
     const clearSearch = (focus = true) => {
@@ -9761,7 +9846,10 @@ function renderOutlineTab(host, n) {
       </div>
     </div>
     <div class="bible-block outline-volumes">
-      <h2>分卷与章纲</h2>
+      <div class="vol-head-row">
+        <h2 style="margin:0">分卷与章纲</h2>
+        <span class="outline-progress" id="outlineProgress" hidden><span class="progress"><i></i></span><span class="outline-progress-text"></span></span>
+      </div>
       ${bibleSearchBar('outline', '搜索章纲：卷名 / 章节名 / 场景 / 事件 / 人物 / 钩子')}
       <div id="volList"></div>
     </div>`;
@@ -9790,6 +9878,33 @@ function renderOutlineTab(host, n) {
   const vl = $('#volList', host);
 
   const renderVolumes = () => {
+    // 全书大纲进度条：章纲总数 / 已写 / 已定稿（按章节 outlineId 关联）
+    const progressOf = (() => {
+      const entries = [];
+      for (const v of n.outline.volumes) for (const o of (v.chapters || [])) entries.push(o);
+      if (!entries.length) return null;
+      const byOutline = new Map();
+      for (const ch of (n.chapters || [])) if (ch.outlineId) byOutline.set(ch.outlineId, ch);
+      let written = 0, done = 0;
+      for (const e of entries) {
+        const ch = e.id ? byOutline.get(e.id) : null;
+        if (ch) { written++; if (stageOf(ch) === 'done') done++; }
+      }
+      return { total: entries.length, written, done };
+    })();
+    const progEl = host.querySelector('#outlineProgress');
+    if (progEl) {
+      if (progressOf) {
+        progEl.hidden = false;
+        const pct = Math.round((progressOf.done / progressOf.total) * 100);
+        const bar = progEl.querySelector('i');
+        if (bar) bar.style.width = `${pct}%`;
+        const text = progEl.querySelector('.outline-progress-text');
+        if (text) text.textContent = `定稿 ${progressOf.done}/${progressOf.total} 章 · 已写 ${progressOf.written} · ${pct}%`;
+      } else {
+        progEl.hidden = true;
+      }
+    }
     const query = bibleSearchValue('outline');
     const active = !!query.trim();
     const totalChapters = n.outline.volumes.reduce((sum, v) => sum + (Array.isArray(v.chapters) ? v.chapters.length : 0), 0);
@@ -9824,6 +9939,7 @@ function renderOutlineTab(host, n) {
       block.dataset.volIndex = String(vi);
       block.innerHTML = `
         <div class="vol-block-head">
+          <button class="vol-grip" draggable="true" data-vol-index="${vi}" title="拖动调整卷的顺序" aria-label="拖动调整卷的顺序">${ico('grip')}</button>
           <span class="dim small">第 ${vi + 1} 卷</span>
           <input class="input" data-vk="name" value="${esc(v.name || '')}" placeholder="卷名" style="max-width:220px" />
           <input class="input" data-vk="desc" value="${esc(v.desc || '')}" placeholder="本卷定位与主要冲突" />
@@ -9871,6 +9987,7 @@ function renderOutlineTab(host, n) {
         row.dataset.chapterIndex = String(ci);
         row.innerHTML = `
           <span class="dim small" title="双击左侧标签可删除这条章纲">第 ${ci + 1} 章</span>
+          <button class="outline-grip" draggable="true" data-id="${esc(c.id || '')}" data-vol-index="${vi}" data-index="${ci}" title="拖动排序" aria-label="拖动排序">${ico('grip')}</button>
           <input class="input" data-ck="title" value="${esc(c.title || '')}" placeholder="章节名" />
           <textarea class="input" data-ck="scene" placeholder="场景 / 地点">${esc(c.scene || '')}</textarea>
           <textarea class="input" data-ck="summary" placeholder="核心事件">${esc(c.summary || '')}</textarea>
@@ -9893,6 +10010,97 @@ function renderOutlineTab(host, n) {
       vl.appendChild(block);
     });
   };
+
+  // —— 大纲拖拽排序（章纲 / 分卷）—— 过滤态下不允许拖，避免误排 ——
+  let dragData = null;
+  const clearDropMarks = () => vl.querySelectorAll('.drop-before,.drop-after,.dragging')
+    .forEach((el) => el.classList.remove('drop-before', 'drop-after', 'dragging'));
+  const clearInsertMarks = () => vl.querySelectorAll('.drop-before,.drop-after')
+    .forEach((el) => el.classList.remove('drop-before', 'drop-after'));
+  const midBefore = (el, clientY) => {
+    const r = el.getBoundingClientRect();
+    return (clientY - r.top) < r.height / 2;
+  };
+  const searchActive = () => !!bibleSearchValue('outline').trim();
+
+  vl.addEventListener('dragstart', (e) => {
+    if (searchActive()) { e.preventDefault(); return; }
+    const row = e.target.closest('.outline-row');
+    const block = e.target.closest('.vol-block');
+    const chapterGrip = e.target.closest('.outline-grip');
+    const volGrip = e.target.closest('.vol-grip');
+    if (chapterGrip && row) {
+      dragData = { kind: 'chapter', volIndex: Number(chapterGrip.dataset.volIndex), index: Number(chapterGrip.dataset.index) };
+      e.dataTransfer.setData('text/plain', JSON.stringify(dragData));
+      e.dataTransfer.effectAllowed = 'move';
+      row.classList.add('dragging');
+    } else if (volGrip && block) {
+      dragData = { kind: 'volume', volIndex: Number(volGrip.dataset.volIndex) };
+      e.dataTransfer.setData('text/plain', JSON.stringify(dragData));
+      e.dataTransfer.effectAllowed = 'move';
+      block.classList.add('dragging');
+    } else {
+      dragData = null;
+    }
+  });
+
+  vl.addEventListener('dragover', (e) => {
+    if (!dragData) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    clearInsertMarks();
+    const row = e.target.closest('.outline-row');
+    const block = e.target.closest('.vol-block');
+    if (dragData.kind === 'chapter') {
+      if (row) row.classList.add(midBefore(row, e.clientY) ? 'drop-before' : 'drop-after');
+      else if (block) block.classList.add('drop-after');
+    } else if (dragData.kind === 'volume') {
+      if (block && e.target.closest('.vol-block-head')) {
+        block.classList.add(midBefore(block, e.clientY) ? 'drop-before' : 'drop-after');
+      }
+    }
+  });
+
+  vl.addEventListener('drop', (e) => {
+    if (!dragData) return;
+    e.preventDefault();
+    const data = dragData;
+    dragData = null;
+    const row = e.target.closest('.outline-row');
+    const block = e.target.closest('.vol-block');
+    const volumes = n.outline.volumes;
+    if (data.kind === 'chapter') {
+      const fromVol = volumes[data.volIndex];
+      const targetVolIndex = row ? Number(row.dataset.volIndex) : block ? Number(block.dataset.volIndex) : -1;
+      const targetVol = targetVolIndex >= 0 ? volumes[targetVolIndex] : null;
+      if (!fromVol || !targetVol) { clearDropMarks(); return; }
+      const [ch] = fromVol.chapters.splice(data.index, 1);
+      targetVol.chapters = targetVol.chapters || [];
+      let insertAt = targetVol.chapters.length;
+      if (row) {
+        insertAt = Number(row.dataset.chapterIndex) + (row.classList.contains('drop-after') ? 1 : 0);
+        if (data.volIndex === targetVolIndex && data.index < insertAt) insertAt -= 1;
+      }
+      targetVol.chapters.splice(insertAt, 0, ch);
+      clearDropMarks();
+      renderVolumes();
+      saveNovelPart({ outline: n.outline });
+      return;
+    }
+    if (data.kind === 'volume' && block) {
+      const from = volumes[data.volIndex];
+      if (!from) { clearDropMarks(); return; }
+      const [vol] = volumes.splice(data.volIndex, 1);
+      let insertAt = Number(block.dataset.volIndex) + (block.classList.contains('drop-after') ? 1 : 0);
+      if (data.volIndex < insertAt) insertAt -= 1;
+      volumes.splice(insertAt, 0, vol);
+      clearDropMarks();
+      renderVolumes();
+      saveNovelPart({ outline: n.outline });
+    }
+  });
+
+  vl.addEventListener('dragend', () => { dragData = null; clearDropMarks(); });
 
   bindBibleSearch(host, 'outline', renderVolumes);
   renderVolumes();

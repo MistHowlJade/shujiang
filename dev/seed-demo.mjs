@@ -169,6 +169,13 @@ const volumes = [
     chapters: [8, 9, 10, 11, 12, 13, 14].map((n) => ({ id: newId('o'), title: chapters.find((c) => c.no === n).title, chapterId: chapters.find((c) => c.no === n).id })),
   },
 ];
+// 章节 → 章纲 的规范链接（chapter.outlineId = 章纲条目 id），应用里用这条链算进度
+for (const v of volumes) {
+  for (const o of v.chapters) {
+    const ch = chapters.find((c) => c.id === o.chapterId);
+    if (ch) ch.outlineId = o.id;
+  }
+}
 
 const totalWords = chapters.reduce((s, c) => s + c.words, 0);
 const novel = {

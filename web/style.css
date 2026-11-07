@@ -962,7 +962,7 @@ kbd {
   border: 1px dashed var(--border-2); border-radius: var(--r-md);
 }
 .kb-card {
-  padding: 9px 10px; border-radius: var(--r-md);
+  position: relative; padding: 9px 10px; border-radius: var(--r-md);
   background: var(--surface-1); border: 1px solid var(--border);
   cursor: grab; outline: none; user-select: none;
   transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease),
@@ -973,7 +973,21 @@ kbd {
 .kb-card.on { border-color: var(--accent-line); background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }
 .kb-card.dragging { opacity: .42; }
 .kb-card:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
-.kb-card-top { display: flex; align-items: baseline; gap: 7px; }
+.kb-bulk {
+  display: flex; align-items: center; gap: 10px; margin: 0 0 10px;
+  padding: 6px 10px; border: 1px solid var(--accent-line); border-radius: var(--r-md);
+  background: var(--accent-bg); font-size: 12px; color: var(--text-2);
+}
+.kb-bulk-all { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.kb-bulk-all input { accent-color: var(--accent); margin: 0; cursor: pointer; }
+.kb-bulk-count { font-variant-numeric: tabular-nums; color: var(--accent-hover); font-weight: 500; }
+.kb-bulk .btn { flex: none; }
+
+.kb-card-top { display: flex; align-items: baseline; gap: 7px; padding-right: 22px; }
+.kb-check {
+  position: absolute; top: 8px; right: 8px; width: 15px; height: 15px;
+  accent-color: var(--accent); cursor: pointer; margin: 0;
+}
 .kb-no { flex: 0 0 auto; color: var(--text-4); font-size: 10px; font-variant-numeric: tabular-nums; }
 .kb-card-title { flex: 1; min-width: 0; color: var(--text-1); font-size: 12px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
 .kb-card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; color: var(--text-3); font-size: 10px; }
@@ -1777,10 +1791,34 @@ kbd {
 /* 设定库「分卷大纲」编辑器用的卷标题行（跟章节列表的 .vol-head 是两套，别混用） */
 .vol-block-head { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; }
 .vol-block-head > .dim.small { flex: 0 0 auto; white-space: nowrap; }
+
+/* —— 大纲拖拽排序 —— */
+.vol-grip, .outline-grip {
+  cursor: grab; color: var(--text-4); user-select: none; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: none; padding: 2px; border-radius: var(--r-sm);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.vol-grip:hover, .outline-grip:hover { color: var(--text-2); background: var(--surface-2); }
+.vol-grip:active, .outline-grip:active { cursor: grabbing; }
+.vol-grip svg { width: 13px; height: 13px; }
+.outline-grip { grid-area: grip; margin-top: 6px; }
+.outline-row.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.outline-row.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.outline-row.dragging { opacity: .45; }
+.vol-block.drop-before .vol-block-head { box-shadow: inset 0 3px 0 var(--accent); border-radius: var(--r-sm); }
+.vol-block.drop-after .vol-block-head { box-shadow: inset 0 -3px 0 var(--accent); border-radius: var(--r-sm); }
+.vol-block.dragging { opacity: .45; }
+
+/* —— 大纲进度条 —— */
+.outline-progress { display: flex; align-items: center; gap: 10px; margin: 2px 0 10px; font-size: 11.5px; color: var(--text-3); }
+.outline-progress .progress { flex: 1; max-width: 340px; height: 6px; border-radius: var(--r-full); background: var(--surface-3); overflow: hidden; }
+.outline-progress .progress i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width var(--dur) var(--ease); }
+.vol-head-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
 .outline-row {
   display: grid;
-  grid-template-columns: 58px minmax(110px, .9fr) 1.15fr 1.3fr minmax(130px, .9fr);
-  grid-template-areas: "no title scene summary extra";
+  grid-template-columns: 58px 14px minmax(110px, .9fr) 1.15fr 1.3fr minmax(130px, .9fr);
+  grid-template-areas: "no grip title scene summary extra";
   gap: 7px; align-items: start; margin-bottom: 7px;
 }
 .outline-row > span {
@@ -1798,22 +1836,22 @@ kbd {
 .outline-extra .input { min-height: 34px; font-size: 12.5px; }
 @media (max-width: 1100px) {
   .outline-row {
-    grid-template-columns: 46px minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: 46px 14px minmax(0, 1fr) minmax(0, 1fr);
     grid-template-areas:
-      "no title title"
-      "no scene summary"
-      "no extra extra";
+      "no grip title title"
+      "no grip scene summary"
+      "no grip extra extra";
   }
   .outline-extra { flex-direction: row; }
 }
 @media (max-width: 720px) {
   .outline-row {
-    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-columns: 40px 14px minmax(0, 1fr);
     grid-template-areas:
-      "no title"
-      "no scene"
-      "no summary"
-      "no extra";
+      "no grip title"
+      "no grip scene"
+      "no grip summary"
+      "no grip extra";
   }
   .outline-row > span { font-size: 10px; }
   .outline-extra { flex-direction: column; }
