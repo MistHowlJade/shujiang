@@ -3766,6 +3766,14 @@ function openMergeChapterModal(index) {
   });
 }
 
+/** 定位时让目标闪一下：滚到视口（可跳过，虚拟列表先自己定位）并临时加 .flash */
+function flashEl(el, { block = 'center', ms = 1400, scroll = true } = {}) {
+  if (!el) return;
+  if (scroll) el.scrollIntoView({ block });
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), ms);
+}
+
 /** 设定库渲染是异步的（切页签会先拉一次最新作品），目标元素可能要等几帧才出现 */
 function flashBibleTarget(find, attempt = 0) {
   const el = find();
@@ -3773,9 +3781,7 @@ function flashBibleTarget(find, attempt = 0) {
     if (attempt < 20) requestAnimationFrame(() => flashBibleTarget(find, attempt + 1));
     return;
   }
-  el.scrollIntoView({ block: 'center' });
-  el.classList.add('flash');
-  setTimeout(() => el.classList.remove('flash'), 1400);
+  flashEl(el);
 }
 
 function gotoSettingsVolume(vid) {
@@ -9977,7 +9983,7 @@ function openChapterFromIndex(id) {
   selectChapter(ch.id);
   requestAnimationFrame(() => {
     const row = chapterRow(ch.id);
-    if (row) { row.scrollIntoView({ block: 'nearest' }); row.classList.add('flash'); setTimeout(() => row.classList.remove('flash'), 1200); }
+    if (row) flashEl(row, { block: 'nearest', ms: 1200 });
   });
 }
 
@@ -10333,9 +10339,7 @@ function focusCharacterCard(characterId, attempt = 0) {
     if (attempt < 3) requestAnimationFrame(() => focusCharacterCard(characterId, attempt + 1));
     return false;
   }
-  if (!virtual) card.scrollIntoView({ block: 'center' });
-  card.classList.add('flash');
-  setTimeout(() => card.classList.remove('flash'), 1400);
+  flashEl(card, { scroll: !virtual });
   return true;
 }
 
@@ -11032,9 +11036,7 @@ function focusTimelineEntry(entryId, attempt = 0) {
     if (attempt < 3) requestAnimationFrame(() => focusTimelineEntry(entryId, attempt + 1));
     return false;
   }
-  if (!virtual) entry.scrollIntoView({ block: 'center' });
-  entry.classList.add('flash');
-  setTimeout(() => entry.classList.remove('flash'), 1400);
+  flashEl(entry, { scroll: !virtual });
   entry.querySelector('input[data-key="time"]')?.focus();
   return true;
 }
