@@ -7128,6 +7128,9 @@ async function runModelCompare(picks, task) {
           S.outMd = md;
           S.outModel = s.label;
           renderOut();
+          // 采用之后直接把「写进正文」滚到眼前，不用再找输出区在哪
+          showAssistTab('write');
+          revealOutput({ toActions: true });
           closeModal();
           toast('已采用这个结果，可以用「追加到正文 / 替换正文」了', 'ok');
         };
