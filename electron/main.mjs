@@ -6,6 +6,7 @@ import { app, BrowserWindow } from 'electron';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { resolveDataDir } from './data-dir.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -45,8 +46,8 @@ if (!gotLock) {
 }
 
 async function start() {
-  // 安装版把数据放在用户 AppData；显式指定了 SHU_DATA_DIR 就尊重它
-  const dataDir = process.env.SHU_DATA_DIR || path.join(app.getPath('userData'), 'data');
+  // 数据目录：默认跟本体走（zip 解压目录 / 便携版 exe 旁边的 data/）；老用户不迁移
+  const dataDir = resolveDataDir({ isPackaged: app.isPackaged, execPath: process.execPath, userDataPath: app.getPath('userData'), sourceRoot: ROOT });
   process.env.SHU_DATA_DIR = dataDir;
   const port = await getFreePort();
   process.env.SHU_PORT = String(port);
