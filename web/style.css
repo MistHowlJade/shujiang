@@ -643,7 +643,7 @@ kbd {
   color: var(--text-1); cursor: pointer;
   transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
-.empty-option:hover { border-color: var(--border-2); background: var(--surface-3); transform: translateY(-1px); }
+.empty-option:hover { border-color: var(--border-2); background: var(--surface-3); transform: translateY(-1px); box-shadow: var(--sh-2); }
 .empty-option:active { transform: translateY(0); }
 .empty-option:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-bg), 0 0 0 1.5px var(--accent); }
 .empty-option .ico { width: 24px; height: 24px; stroke-width: 1.6; color: var(--accent); }
