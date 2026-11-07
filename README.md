@@ -817,6 +817,8 @@ electron-builder.yml   桌面版打包配置（nsis + portable，不含 data/too
 
 ### 从发布页下载（给不想装环境的人）
 
+**下载页：[github.com/MistHowlJade/shujiang/releases](https://github.com/MistHowlJade/shujiang/releases)**
+
 - `书匠-Setup-1.0.0.exe`：向导式安装版（可选安装目录，当前用户安装，不需要管理员权限；桌面与开始菜单都有快捷方式）
 - `书匠-Portable-1.0.0.exe`：单文件便携版，解压即用/U 盘随身，不用安装
 - 这两个包**没有代码签名证书**，第一次运行时 Windows SmartScreen 会拦一下：点「更多信息 → 仍要运行」即可。（签名需要正式的证书，暂未购买）
