@@ -263,17 +263,17 @@
 
           <!-- 助手栏 -->
           <aside class="pane-assist" id="assistPane" aria-label="助手面板">
-            <div class="segmented" id="assistTabs">
-              <button data-tab="write" class="on">写作</button>
-              <button data-tab="check">检查</button>
-              <button data-tab="context">资料</button>
-              <button data-tab="scenes">场景</button>
-              <button data-tab="annotations">批注</button>
+            <div class="segmented" id="assistTabs" role="tablist" aria-label="助手页签">
+              <button data-tab="write" id="tabAssistWrite" class="on" role="tab" aria-selected="true" aria-controls="paneAssistWrite">写作</button>
+              <button data-tab="check" id="tabAssistCheck" role="tab" aria-selected="false" aria-controls="paneAssistCheck">检查</button>
+              <button data-tab="context" id="tabAssistContext" role="tab" aria-selected="false" aria-controls="paneAssistContext">资料</button>
+              <button data-tab="scenes" id="tabAssistScenes" role="tab" aria-selected="false" aria-controls="paneAssistScenes">场景</button>
+              <button data-tab="annotations" id="tabAssistAnnotations" role="tab" aria-selected="false" aria-controls="paneAssistAnnotations">批注</button>
             </div>
 
             <div class="assist-body">
               <!-- 写作 -->
-              <div class="assist-pane on" data-pane="write">
+              <div class="assist-pane on" data-pane="write" role="tabpanel" id="paneAssistWrite" aria-labelledby="tabAssistWrite">
                 <div class="card chapter-outline-card" id="chapterOutlineCard" hidden>
                   <div class="co-head">
                     <span class="co-title">本章章纲</span>
@@ -325,7 +325,7 @@
               </div>
 
               <!-- 检查 -->
-              <div class="assist-pane" data-pane="check">
+              <div class="assist-pane" data-pane="check" role="tabpanel" id="paneAssistCheck" aria-labelledby="tabAssistCheck">
                 <div class="card revision-card" id="revisionCard" hidden>
                   <div class="card-head">
                     <h3>本章修订</h3>
@@ -361,7 +361,7 @@
               </div>
 
               <!-- 资料 -->
-              <div class="assist-pane" data-pane="context">
+              <div class="assist-pane" data-pane="context" role="tabpanel" id="paneAssistContext" aria-labelledby="tabAssistContext">
                 <div class="tip">
                   <svg class="ico"><use href="#i-info" /></svg>
                   <span>每次生成都会按相关度自动挑选设定与前情喂给模型。这里能看到实际发出去的内容，也可以改完再发。</span>
@@ -375,7 +375,7 @@
               </div>
 
               <!-- 场景拆解 / 幕布 -->
-              <div class="assist-pane" data-pane="scenes">
+              <div class="assist-pane" data-pane="scenes" role="tabpanel" id="paneAssistScenes" aria-labelledby="tabAssistScenes">
                 <div class="card">
                   <div class="card-head">
                     <h3>场景卡片</h3>
@@ -395,7 +395,7 @@
               </div>
 
               <!-- 批注/高亮 -->
-              <div class="assist-pane" data-pane="annotations">
+              <div class="assist-pane" data-pane="annotations" role="tabpanel" id="paneAssistAnnotations" aria-labelledby="tabAssistAnnotations">
                 <div class="card">
                   <div class="card-head">
                     <h3>批注与高亮</h3>

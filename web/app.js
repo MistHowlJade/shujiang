@@ -7680,7 +7680,11 @@ $$('#assistTabs button').forEach((b) => b.addEventListener('click', () => {
   showAssistTab(b.dataset.tab);
 }));
 function showAssistTab(name) {
-  $$('#assistTabs button').forEach((x) => x.classList.toggle('on', x.dataset.tab === name));
+  $$('#assistTabs button').forEach((x) => {
+    const on = x.dataset.tab === name;
+    x.classList.toggle('on', on);
+    x.setAttribute('aria-selected', String(on));
+  });
   $$('.assist-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === name));
   if (name === 'scenes') renderCorkboard();
   if (name === 'check') renderRevisionCard();
