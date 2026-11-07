@@ -236,6 +236,19 @@ const STYLE = `## 叙事视角与人称
 
 const SUMMARY = '谢迟夜里携剑前往青石巷，被脸上带疤的青衫人拦路试探。对方以「剑出得了鞘吗」相问，谢迟答「出不了，但够用」，得以放行。他进入巷底小院，见一女子在枯井边补衣，女子转述了师傅留下的口信，要他想通之后回来烧掉这个院子。';
 
+const HOTGENRES = [
+  { rank: 1, genre: '都市+种田', why: '种田文常驻起点/番茄分类榜前三，「苟+摆烂+低调致富」是最近半年最稳的扑火方向', platforms: '起点/番茄', fit: '都市', ideas: '返乡种果园的落魄少爷，体系里只有一个「天不亮就打烊」的关门时间规则' },
+  { rank: 2, genre: '玄幻+苟道', why: '"苟一手"类新书多次进新书榜，读者疲劳感低、续航强', platforms: '起点', fit: '玄幻', ideas: '穿成灵气最稀薄的角落洞天的杂役弟子，靠「别人都不来」稳步变强' },
+  { rank: 3, genre: '都市+系统', why: '系统文新书真空期后重回榜；番茄推荐位给了大量系统流', platforms: '番茄/七猫', fit: '都市', ideas: '全是吐槽役的系统商务包，专门替宿主拒掉不靠谱的任务' },
+  { rank: 4, genre: '无限流+轻喜', why: '无限流持续有爆款（诡秘余温），但轻喜化改编门槛低、追读佳', platforms: '起点/番茄', fit: '无限流', ideas: '副本通关评分低到被系统惩罚，却意外靠填表拿到SSS评价' },
+  { rank: 5, genre: '悬疑+社会派', why: '悬疑新锐增长，社会派（偏现实议题）起点月票有声音有奖励', platforms: '起点/晋江', fit: '悬疑', ideas: '专接小区邻里纠纷的小侦探，每起案子都牵出一桩更大的沉默' },
+  { rank: 6, genre: '仙侠+反套路', why: '仙侠赛道长青，反套路包装的流量明显，但同质化严重——得靠作者签名卖点', platforms: '起点/番茄', fit: '仙侠', ideas: '剑宗最平庸的圣子，唯一拿手的是从来不比赛只观礼' },
+  { rank: 7, genre: '末世+囤货', why: '末世流常青，但换了「超市囤货」「农场经营」玩法在番茄长尾稳定', platforms: '番茄/七猫', fit: '末世', ideas: '末世首日他没跑，先把自家小超市的货架重新摆了一遍' },
+  { rank: 8, genre: '历史+争霸', why: '历史类受众男女双盘，番茄女频+起点男频互卡，改朝换代剧情可塑性强', platforms: '起点/番茄', fit: '历史', ideas: '穿成燕云十六州的小书吏，靠「从不敢忤逆」一路做到首府' },
+  { rank: 9, genre: '言情+职场', why: '晋江/番茄女频双料，职场+豪门组合点击率稳，适合女频作者切入', platforms: '晋江/番茄', fit: '言情', ideas: '集团最低调的法律顾问，法院判决书见证了她隐忍三十年的每一步' },
+  { rank: 10, genre: '科幻+地球流', why: '地球流+末世科幻在起点三江榜持续上榜，硬科幻入口降低，更易写', platforms: '起点', fit: '科幻', ideas: '近地轨道坠毁的冷冻飞船货物清单里，有一件不该出现在地球上的东西' },
+];
+
 const INSPIRATIONS = [
   {
     "title": "剑来小城",
@@ -345,6 +358,7 @@ function decide(text) {
   if (has('分卷大纲')) return 'outline';
   if (has('审稿意见')) return 'review';
   if (has('文风档案')) return 'style';
+  if (has('最热的 10') || has('热门榜')) return 'hotgenres';
   if (has('开书灵感') || has('灵感')) return 'inspiration';
   if (has('8 个书名')) return 'titles';
   if (has('概括这一章')) return 'summary';
@@ -373,6 +387,8 @@ function buildReply(text, model = '') {
       return { kind, content: REVIEW };
     case 'style':
       return { kind, content: STYLE };
+    case 'hotgenres':
+      return { kind, content: JSON.stringify(HOTGENRES) };
     case 'inspiration':
       return { kind, content: JSON.stringify(INSPIRATIONS) };
     case 'titles':

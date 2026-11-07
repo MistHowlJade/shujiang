@@ -1973,6 +1973,20 @@ kbd {
 .insp-meta { margin: 0; font-size: 11px; color: var(--text-3); line-height: 1.6; display: flex; gap: 8px; }
 .insp-meta span { flex: none; color: var(--text-4); }
 .insp-use { margin-top: auto; align-self: flex-start; }
+.insp-picked { margin: 8px 0 0; font-size: 11.5px; color: var(--text-2); }
+.insp-picked b { color: var(--accent-hover); }
+.linklike { background: none; border: none; padding: 0 2px; color: var(--text-3); cursor: pointer; text-decoration: underline; font: inherit; }
+.linklike:hover { color: var(--text-1); }
+.insp-hotbtn { align-self: flex-start; margin-top: 12px; }
+.insp-hotlist { margin-top: 14px; max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 12px; }
+.hot-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.hot-row:last-child { border-bottom: none; }
+.hot-rank { flex: none; width: 22px; font-size: 12px; font-weight: 600; color: var(--text-4); padding-top: 2px; text-align: center; }
+.hot-main { flex: 1; min-width: 0; }
+.hot-main b { font-size: 12.5px; color: var(--text-1); }
+.hot-why { margin: 2px 0 0; font-size: 11px; color: var(--text-3); line-height: 1.6; }
+.hot-meta { margin: 2px 0 0; font-size: 10.5px; color: var(--text-4); display: flex; flex-wrap: wrap; gap: 8px; }
+.hot-use { align-self: center; flex: none; }
 
 /* 接模型：没有服务商 / 没有 Key / 没有模型，分情况给下一步 */
 .qs-setup-steps { display: flex; flex-direction: column; gap: 9px; margin: 16px 0 18px; }

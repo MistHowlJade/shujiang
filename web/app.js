@@ -1435,23 +1435,36 @@ function openInspirationModal() {
     <div class="insp-genres" id="insGenres" role="group" aria-label="题材方向">
       ${INSPIRATION_GENRES.map((g, i) => `<button type="button" class="chip insp-genre" data-genre="${esc(g)}">${esc(g)}</button>`).join('')}
     </div>
+    <p class="insp-picked" id="insPicked" hidden>已选榜单：<b></b><button type="button" class="linklike" id="insClearPick">清除</button></p>
     <label class="field-label">关键词<span class="field-hint">可选，如“穿书 女主 手撕绿茶”</span></label>
     <input id="insKeywords" class="input" maxlength="60" autocomplete="off" placeholder="想要的元素关键词（可选）" />
-    <div class="tip qs-tip">${ico('spark')}<span>用的是你配的模型（<code>${esc(provider.providerName)} · ${esc(provider.model)}</code>），1 次请求。</span></div>
+    <div class="tip qs-tip">${ico('spark')}<span>用的是你配的模型（<code>${esc(provider.providerName)} · ${esc(provider.model)}</code>）。不联网参数就是普通大模型；配了之后「联网·热门榜」会拿实时榜。</span></div>
+    <button type="button" class="btn insp-hotbtn" id="insHot">${ico('bulb')}联网·热门榜（当前什么火）</button>
     <div class="modal-foot">
       <button class="btn btn-text" id="insCancel">取消</button>
       <button class="btn btn-primary" id="insGen">${ico('bulb')}生成 8 个灵感</button>
     </div>
+    <div class="insp-hotlist" id="insHotList" hidden></div>
     <div class="insp-results" id="insResults" hidden></div>`, (box) => {
     let genre = INSPIRATION_GENRES[0];
+    let picked = '';
     const genreBtns = [...box.querySelectorAll('.insp-genre')];
+    const pickedEl = box.querySelector('#insPicked');
+    const pickedName = pickedEl.querySelector('b');
+    const markGenre = () => {
+      genreBtns.forEach((b) => b.classList.toggle('on', !picked && b.dataset.genre === genre));
+      pickedEl.hidden = !picked;
+      if (picked) pickedName.textContent = picked;
+    };
     genreBtns.forEach((btn, i) => {
       btn.classList.toggle('on', i === 0);
       btn.addEventListener('click', () => {
         genre = btn.dataset.genre;
-        genreBtns.forEach((b) => b.classList.toggle('on', b === btn));
+        picked = '';
+        markGenre();
       });
     });
+    box.querySelector('#insClearPick').addEventListener('click', () => { picked = ''; markGenre(); });
     const kwEl = box.querySelector('#insKeywords');
     const genBtn = box.querySelector('#insGen');
     const resultsEl = box.querySelector('#insResults');
@@ -1461,16 +1474,61 @@ function openInspirationModal() {
       if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); gen(); }
     });
 
+    const activeGenre = () => picked || genre;
     const useIdea = (item) => {
       const idea = `${item.title}——${item.hook}。${item.persona}`.trim().slice(0, 180);
+      const gNow = activeGenre();
       closeModal();
       openQuickStartModal();
       const qs = document.querySelector('#qsIdea');
       if (qs) { qs.value = idea; qs.dispatchEvent(new Event('input')); }
       const g = document.querySelector('#qsGenre');
-      if (g && genre !== '全部') g.value = genre;
+      if (g) g.value = gNow;
       document.querySelector('#qsIdea')?.focus();
     };
+
+    const hotList = box.querySelector('#insHotList');
+    const hotBtn = box.querySelector('#insHot');
+    hotBtn.addEventListener('click', async () => {
+      hotBtn.disabled = true;
+      const orig = hotBtn.innerHTML;
+      hotBtn.textContent = '正在搜索…';
+      hotList.hidden = false;
+      hotList.innerHTML = '<p class="dim">正在联网搜各平台热门榜，几秒钟…</p>';
+      try {
+        const text = await streamAI({ task: 'hotgenres', payload: {} });
+        const parsed = parseJsonLoose(text);
+        const list = (Array.isArray(parsed) ? parsed : parsed?.items || parsed?.genres || [])
+          .filter((x) => x && typeof x === 'object' && (x.genre || x.title))
+          .slice(0, 10);
+        if (!list.length) {
+          hotList.innerHTML = `<p class="qs-error">没拿到结构化榜单，原文前 200 字：${esc(String(text).slice(0, 200))}</p>`;
+          return;
+        }
+        hotList.innerHTML = `<h3 style="margin-top:16px">当下 10 个最热方向</h3>` +
+          list.map((x, i) => `<div class="hot-row">
+            <span class="hot-rank">${i + 1}</span>
+            <div class="hot-main">
+              <b>${esc(x.genre || '?')}</b>
+              <p class="hot-why">${esc(x.why || '')}</p>
+              <p class="hot-meta"><span>火 · ${esc(x.platforms || '-')}</span>${x.fit ? `<span>题材词：${esc(x.fit)}</span>` : ''}${x.ideas ? `<span>点子：${esc(x.ideas)}</span>` : ''}</p>
+            </div>
+            <button type="button" class="btn btn-sm hot-use">用这个</button>
+          </div>`).join('');
+        hotList.querySelectorAll('.hot-use').forEach((btn, i) => {
+          btn.addEventListener('click', () => {
+            picked = String(list[i].genre || picked).trim();
+            markGenre();
+            gen();
+          });
+        });
+      } catch (err) {
+        hotList.innerHTML = `<p class="qs-error">热门榜失败：${esc(err?.message || String(err))}</p>`;
+      } finally {
+        hotBtn.disabled = false;
+        hotBtn.innerHTML = orig;
+      }
+    });
 
     const gen = async () => {
       const keywords = kwEl.value.trim();
@@ -1480,7 +1538,8 @@ function openInspirationModal() {
       resultsEl.hidden = false;
       resultsEl.innerHTML = '<p class="dim">正在读懂你的关键词、翻当前风向，大概需要几秒钟…</p>';
       try {
-        const text = await streamAI({ task: 'inspiration', payload: { genre, keywords } });
+        const g = activeGenre();
+        const text = await streamAI({ task: 'inspiration', payload: { genre: g, keywords } });
         const parsed = parseJsonLoose(text);
         const list = (Array.isArray(parsed) ? parsed : parsed?.inspirations || parsed?.list || [])
           .filter((x) => x && typeof x === 'object' && (x.title || x.hook))
@@ -1490,7 +1549,7 @@ function openInspirationModal() {
           return;
         }
         resultsEl.innerHTML = `
-          <h3 style="margin-top:18px">给你 8 个灵感 <span class="dim small" style="font-weight:400">（${esc(genre)}${keywords ? ` · ${esc(keywords)}` : ''}）</span></h3>
+          <h3 style="margin-top:18px">给你 8 个灵感 <span class="dim small" style="font-weight:400">（${esc(activeGenre())}${keywords ? ` · ${esc(keywords)}` : ''}）</span></h3>
           <div class="insp-grid">
             ${list.map((x) => `
               <div class="insp-card">
@@ -11580,10 +11639,45 @@ function renderSettings() {
       </div>
       <label class="field-label">已知模型<span class="field-hint">逗号分隔，可留空由接口拉取</span></label>
       <input class="input" data-pk="models" value="${esc((p.models || []).join(', '))}" />
+      <label class="field-label">联网搜索<span class="field-hint">模型替你联网读热门榜——先在这里勾选，再去书架用「AI 灵感」里的「联网·热门榜」，不填就是不联网</span></label>
+      <select class="input" data-pk="searchPreset">
+        <option value="">不联网</option>
+        <option value='{"enable_search": true}'>通义千问 · enable_search</option>
+        <option value='{"tools": [{"google_search": {}}]}'>Gemini · google_search</option>
+        <option value='{"plugins": [{"id": "web"}]}'>OpenRouter · web 插件</option>
+        <option value="__custom">自定义 JSON…</option>
+      </select>
+      <input class="input" data-pk="searchCustom" placeholder='自定义 JSON，如 {"enable_search": true}' autocomplete="off" hidden />
+      <div class="dim-text status-msg" data-search-msg></div>
       <div class="dim-text status-msg" data-msg></div>`;
+    const searchPreset = div.querySelector('[data-pk="searchPreset"]');
+    const searchCustom = div.querySelector('[data-pk="searchCustom"]');
+    const searchMsg = div.querySelector('[data-search-msg]');
+    const presetOfCfg = (x) => x && typeof x === 'object' ? JSON.stringify(x) : '';
+    const presetStr = JSON.stringify(presetOfCfg(p.extraBody));
+    const presetOptions = ['', '{"enable_search": true}', '{"tools": [{"google_search": {}}]}', '{"plugins": [{"id": "web"}]}'];
+    if (!presetStr || presetOptions.includes(presetStr)) searchPreset.value = presetStr;
+    else { searchPreset.value = '__custom'; searchCustom.hidden = false; searchCustom.value = JSON.stringify(p.extraBody); }
+    const applySearch = () => {
+      const v = searchPreset.value;
+      if (v === '__custom') { searchCustom.hidden = false; searchMsg.textContent = '粘贴一段 JSON，例如 {"enable_search": true}（通义千问）或 {"tools": [{"google_search": {}}]}（Gemini）'; return; }
+      searchCustom.hidden = true;
+      searchMsg.textContent = '';
+      if (!v) { delete p.extraBody; return; }
+      try { p.extraBody = JSON.parse(v); } catch { delete p.extraBody; }
+    };
+    searchPreset.addEventListener('change', applySearch);
+    searchCustom.addEventListener('input', () => {
+      const v = searchCustom.value.trim();
+      if (!v) { delete p.extraBody; searchMsg.textContent = ''; return; }
+      try { p.extraBody = JSON.parse(v); searchMsg.textContent = '已保存联网参数'; searchMsg.className = 'status-ok'; }
+      catch { searchMsg.textContent = '不是合法的 JSON（例：{"enable_search": true}）'; searchMsg.className = 'status-err'; }
+    });
+
     div.querySelectorAll('[data-pk]').forEach((el) => el.addEventListener('input', () => {
       const k = el.dataset.pk;
       if (k === 'models') p.models = el.value.split(/[,，\n]/).map((x) => x.trim()).filter(Boolean);
+      else if (k === 'searchPreset' || k === 'searchCustom') { /* 上面单独处理 */ }
       else p[k] = el.value;
     }));
     div.querySelector('[data-active]').addEventListener('change', () => {

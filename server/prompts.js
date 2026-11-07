@@ -374,6 +374,28 @@ export const TASKS = {
       };
     },
   },
+
+  /* ---------- 热门题材 ---------- */
+  hotgenres: {
+    expect: 'json',
+    temperature: 0.7,
+    maxTokens: 2500,
+    build({ payload }) {
+      const kw = String(payload?.keywords || '').trim();
+      const online = payload?.online !== false;
+      return {
+        messages: [
+          sys('你是一位深谙中文网文平台（起点中文网、番茄小说、七猫、晋江文学城）的榜单编辑，分得清类别榜、畅销榜与新书榜。'),
+          user(
+            `${online ? '请联网搜索' : '基于你的知识'}当前各平台最热的 10 个题材方向${kw ? `，偏向「${kw}」` : ''}。
+只返回 JSON 数组，不要任何说明文字、不要 markdown 代码块。每个元素结构：
+{"rank": 1, "genre": "题材名（可以是组合，如「都市+种田」）", "why": "为什么火（一句话，带榜单或读者行为依据）", "platforms": "哪个平台最火（起点/番茄/七猫/晋江，可多个）", "fit": "适合灌进灵感生成的题材词（一个词）", "ideas": "两个可以直接开的点子，用顿号分隔"}
+要求：10 个互不雷同；优先真实榜单靠前的组合；不要空谈套路名，要具体到「在什么组合里火」。`,
+          ),
+        ],
+      };
+    },
+  },
 };
 
 // 段落级任务的公共构造：把「选中文本」当作用户消息主体
@@ -495,6 +517,7 @@ export const TEMPLATE_SLOTS = [
   { key: 'analyzeStyle', task: 'style', label: '提取文风', vars: ['text'] },
   { key: 'generateSceneProse', task: 'chapter', label: '生成场景正文', vars: ['pov', 'location', 'time', 'characters', 'summary', 'hook', 'target', 'tone', 'req'] },
   { key: 'inspiration', task: 'inspiration', label: '灵感', vars: ['req'] },
+  { key: 'hotgenres', task: 'hotgenres', label: '热门题材', vars: ['req'] },
 ];
 
 export function buildTask(taskName, ctx) {
