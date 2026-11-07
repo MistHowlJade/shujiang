@@ -1064,6 +1064,7 @@ kbd {
 .mini-act.del:hover { background: var(--danger-bg); color: var(--danger); }
 .mini-act .ico { width: 12.5px; height: 12.5px; }
 .chapter-empty { padding: 28px 14px; text-align: center; font-size: 12px; color: var(--text-3); line-height: 1.9; }
+.chapter-empty-hint span { display: block; margin-top: 4px; font-size: 10.5px; color: var(--text-4); }
 
 /* --- 分卷分组：卷标题 + 折叠的章节 --- */
 .vol-group { margin-bottom: 1px; }

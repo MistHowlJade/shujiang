@@ -4621,7 +4621,7 @@ function renderChapterList(n, stageLabels) {
     const filtered = !!S.stageFilter || searchActive;
     ul.innerHTML = filtered
       ? `<li class="chapter-empty">没有匹配的章节<br><button type="button" class="btn btn-sm btn-text" id="chapterEmptyClear">清除搜索与筛选</button></li>`
-      : `<li class="chapter-empty">还没有章节<br>点上方 ＋ 新建一章</li>`;
+      : `<li class="chapter-empty chapter-empty-hint">还没有章节<br><span>点上方 ＋，有大纲就按章纲建下一章</span></li>`;
     if (filtered) {
       ul.querySelector('#chapterEmptyClear')?.addEventListener('click', () => {
         S.stageFilter = '';
