@@ -1214,6 +1214,10 @@ kbd {
   font-family: var(--ed-font); font-size: var(--ed-size); line-height: var(--ed-lh); letter-spacing: .2px;
 }
 .editor::placeholder { color: var(--text-3); font-family: var(--font-ui); font-size: 13px; line-height: 1.9; }
+@media (min-width: 1440px) {
+  .editor { max-width: 880px; }
+  .app.focus-mode .editor { max-width: 900px; }
+}
 
 /* 无章节 / 无作品时的稿纸空态：盖住编辑器，避免「输入了却没地方存」 */
 .editor-wrap.is-empty .editor { visibility: hidden; }
