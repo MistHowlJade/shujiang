@@ -3895,7 +3895,9 @@ async function deleteVolume(vid) {
 
 /* --- 小浮层菜单：卷与章节操作共用 --- */
 let popEl = null;
+let popAnchor = null;
 function closePop() {
+  if (popAnchor) { popAnchor.setAttribute('aria-expanded', 'false'); popAnchor = null; }
   if (popEl) { popEl.remove(); popEl = null; }
 }
 function showPop(anchor, items) {
@@ -3917,6 +3919,8 @@ function showPop(anchor, items) {
   el.style.left = `${Math.max(8, Math.min(r.left - 6, window.innerWidth - el.offsetWidth - 10))}px`;
   el.style.top = `${Math.max(8, Math.min(r.bottom + 4, window.innerHeight - el.offsetHeight - 10))}px`;
   popEl = el;
+  popAnchor = anchor || null;
+  if (popAnchor) popAnchor.setAttribute('aria-expanded', 'true');
 }
 document.addEventListener('mousedown', (e) => { if (popEl && !popEl.contains(e.target)) closePop(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePop(); });
