@@ -2571,7 +2571,8 @@ function statsHeatmap(days, goal, today) {
           if (!d) return '<i class="hm-cell empty"></i>';
           const lv = level(d);
           const tip = `${d.date}　${fmtWords(d.words)} 字${goal ? `　目标 ${fmtWords(goal)}` : ''}　点击看当天明细`;
-          return `<button type="button" class="hm-cell lv${lv}${d.date === today ? ' today' : ''}" data-date="${d.date}" title="${tip}" aria-label="${tip}"></button>`;
+          const aria = `${d.date}，${fmtWords(d.words)} 字`;
+          return `<button type="button" class="hm-cell lv${lv}${d.date === today ? ' today' : ''}" data-date="${d.date}" title="${tip}" aria-label="${aria}"></button>`;
         }).join('')}
       </div>
     </div>`).join('');
