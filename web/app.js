@@ -712,7 +712,7 @@ function renderShelf() {
         }
         await loadNovels(); renderShelf(); refreshTrashCount(); toast('已移入回收站');
       } catch (err) {
-        toast(`移入回收站失败：${err.message || '未知错误'}`, 'err');
+        toast(`移入回收站失败：${errMsg(err)}`, 'err');
       }
     });
     grid.appendChild(div);
@@ -850,11 +850,7 @@ function openTrash() {
         ? (q ? `找到 ${visible.length} / ${items.length} 部作品` : `共 ${items.length} 部作品`)
         : '';
       // 换搜索词回到第一条；恢复 / 彻底删除后的刷新保持原位。
-      const paint = (html) => {
-        const keep = listEl.scrollTop;
-        listEl.innerHTML = html;
-        listEl.scrollTop = queryChanged ? 0 : keep;
-      };
+      const paint = (html) => paintKeepingScroll(listEl, html, queryChanged);
       if (!items.length) {
         paint(`<div class="trash-empty">${ico('trash')}<b>回收站是空的</b>删除的作品会先放在这里，之后可以恢复。</div>`);
         return;
@@ -896,7 +892,7 @@ function openTrash() {
         items = [];
         countEl.textContent = '';
         qClear.hidden = !qEl.value.trim();
-        listEl.innerHTML = `<div class="find-empty">读取失败：${esc(err.message || '未知错误')}</div>`;
+        listEl.innerHTML = `<div class="find-empty">读取失败：${esc(errMsg(err))}</div>`;
         clearBtn.disabled = true;
       }
     };
@@ -911,7 +907,7 @@ function openTrash() {
         toast(`已恢复《${item.title}》`, 'ok');
       } catch (err) {
         btn.disabled = false;
-        toast(`恢复失败：${err.message || '未知错误'}`, 'err');
+        toast(`恢复失败：${errMsg(err)}`, 'err');
       }
     };
 
@@ -925,7 +921,7 @@ function openTrash() {
         toast(`已彻底删除《${item.title}》`);
       } catch (err) {
         btn.disabled = false;
-        toast(`彻底删除失败：${err.message || '未知错误'}`, 'err');
+        toast(`彻底删除失败：${errMsg(err)}`, 'err');
       }
     };
 
@@ -962,7 +958,7 @@ function openTrash() {
         toast('回收站已清空');
       } catch (err) {
         clearBtn.disabled = false;
-        toast(`清空失败：${err.message || '未知错误'}`, 'err');
+        toast(`清空失败：${errMsg(err)}`, 'err');
       }
     };
 
@@ -1065,7 +1061,7 @@ async function restoreNovelBackup(file) {
       try { await api.del(`/api/novels/${created.id}?permanent=1`); } catch {}
       try { await loadNovels(); renderShelf(); } catch {}
     }
-    toast(`恢复失败：${err.message || '未知错误'}`, 'err');
+    toast(`恢复失败：${errMsg(err)}`, 'err');
     return;
   } finally {
     if (btn) {
@@ -3766,6 +3762,16 @@ function openMergeChapterModal(index) {
   });
 }
 
+/** 接口报错统一兜底文案 */
+const errMsg = (err) => err?.message || '未知错误';
+
+/** 列表重渲染：换了搜索词回到顶部，否则保住原滚动位置 */
+function paintKeepingScroll(listEl, html, queryChanged) {
+  const keep = listEl.scrollTop;
+  listEl.innerHTML = html;
+  listEl.scrollTop = queryChanged ? 0 : keep;
+}
+
 /** 定位时让目标闪一下：滚到视口（可跳过，虚拟列表先自己定位）并临时加 .flash */
 function flashEl(el, { block = 'center', ms = 1400, scroll = true } = {}) {
   if (!el) return;
@@ -5191,7 +5197,7 @@ async function saveChapterNow(id = S.chapterId) {
     if (!S.unsaved.has(id)) return false;
     const firstFailure = !S.saveErr;
     S.savingId = null;
-    S.saveErr = err.message || '未知错误';
+    S.saveErr = errMsg(err);
     refreshSavePill();
     scheduleSaveRetry();
     // 只在「第一次失败」时弹提示，免得自动重试把屏幕刷满
@@ -9458,7 +9464,7 @@ async function restoreBibleTrash(rec) {
     toast(`已恢复${BIBLE_TRASH_KINDS[rec.section]?.label || '条目'}「${rec.name || '未命名'}」`, 'ok');
     return true;
   } catch (err) {
-    toast(`恢复失败：${err.message || '未知错误'}`, 'err');
+    toast(`恢复失败：${errMsg(err)}`, 'err');
     return false;
   }
 }
@@ -12427,7 +12433,7 @@ function exportBook() {
           const res = await api.put(`/api/novels/${S.novel.id}`, { meta: part });
           S.novel.meta = res.novel?.meta || { ...S.novel.meta, ...part };
         } catch (err) {
-          toast(`封面设置没存上：${err.message || '未知错误'}`, 'err');
+          toast(`封面设置没存上：${errMsg(err)}`, 'err');
         }
       };
       // 版式与配色清单：只取一次
@@ -12465,7 +12471,7 @@ function exportBook() {
           refreshCover();
           toast('封面已换好', 'ok');
         } catch (err) {
-          toast(`换封面失败：${err.message || '未知错误'}`, 'err');
+          toast(`换封面失败：${errMsg(err)}`, 'err');
         }
       };
       coverReset.onclick = async () => {
@@ -12475,7 +12481,7 @@ function exportBook() {
           refreshCover();
           toast('已改回自动生成的封面', 'ok');
         } catch (err) {
-          toast(`改不回去：${err.message || '未知错误'}`, 'err');
+          toast(`改不回去：${errMsg(err)}`, 'err');
         }
       };
       const total = S.novel.chapters.length;
@@ -12882,7 +12888,7 @@ async function openSnapshotDiff(snap, query = '') {
       toast(`已恢复本章正文到 ${fmtDate(snap.ts)} 的版本`, 'ok');
     } catch (err) {
       restoreBtn.disabled = false;
-      toast(`恢复失败：${err.message || '未知错误'}`, 'err');
+      toast(`恢复失败：${errMsg(err)}`, 'err');
     }
   };
 
@@ -12930,11 +12936,7 @@ async function openHistory(presetWord = '') {
       const queryChanged = q !== lastQuery;
       lastQuery = q;
       // 换搜索词要回到第一条命中；同一查询的刷新（比如刚备份）保持原位。
-      const paint = (html) => {
-        const keep = listEl.scrollTop;
-        listEl.innerHTML = html;
-        listEl.scrollTop = queryChanged ? 0 : keep;
-      };
+      const paint = (html) => paintKeepingScroll(listEl, html, queryChanged);
       const list = filterSnapshotsBySearch(all, q, dateText);
       clearEl.hidden = !q;
       if (!all.length) {
@@ -13072,7 +13074,7 @@ async function jumpToGlobalHit(novelId, chapterId, start, len) {
       ta.scrollTop = Math.max(0, editorCaretTop(ta, start) - ta.clientHeight * 0.32);
     }, 80);
   } catch (err) {
-    toast(`打开失败：${err.message || '未知错误'}`, 'err');
+    toast(`打开失败：${errMsg(err)}`, 'err');
   }
 }
 
@@ -13094,7 +13096,7 @@ async function jumpToGlobalTitle(novelId, chapterId) {
       title.select();
     }, 80);
   } catch (err) {
-    toast(`打开失败：${err.message || '未知错误'}`, 'err');
+    toast(`打开失败：${errMsg(err)}`, 'err');
   }
 }
 
@@ -13230,7 +13232,7 @@ async function openGlobalSearch(presetWord = '') {
         if (mine !== seq || !listEl.isConnected) return;
         cursor.setActive(false);
         sumEl.textContent = '';
-        listEl.innerHTML = `<div class="find-empty">检索失败：${esc(err.message || '未知错误')}</div>`;
+        listEl.innerHTML = `<div class="find-empty">检索失败：${esc(errMsg(err))}</div>`;
       }
     };
 
