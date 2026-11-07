@@ -8,6 +8,21 @@
 
 ---
 
+## 界面一览
+
+> 演示作品为虚构仙侠《雪岭问剑》，仅用于展示，不含任何真实数据。
+
+<p align="center">
+  <img src="docs/screenshots/shelf.jpeg" alt="书架：作品卡片、日更进度与全书目标" width="49%">
+  <img src="docs/screenshots/studio.jpeg" alt="工作台：正文编辑、字数与章节目标" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/bible-overview.jpeg" alt="设定库·大纲：全书控制、一句话故事与梗概" width="49%">
+  <img src="docs/screenshots/characters.jpeg" alt="设定库·人物：人物卡与关系" width="49%">
+</p>
+
+---
+
 ## 快速开始
 
 双击 **`启动.bat`**，浏览器会自动打开创作台。关闭那个黑窗口就是停止服务。服务已经在运行时再双击，只会重新打开浏览器，不会启动第二个实例去重复写 `data/`。
