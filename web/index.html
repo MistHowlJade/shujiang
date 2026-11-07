@@ -66,14 +66,14 @@
 
   <!-- ================= 左侧导航 ================= -->
   <aside class="rail">
-    <button class="rail-logo" id="brandHome" title="书匠 · 回到书架">
+    <button class="rail-logo" id="brandHome" title="书匠 · 回到书架" aria-label="书匠 · 回到书架">
       <svg class="ico"><use href="#i-book-open" /></svg>
     </button>
     <nav class="rail-nav" id="topnav">
-      <button class="tab" data-view="shelf"><svg class="ico"><use href="#i-book" /></svg><span>书架</span></button>
-      <button class="tab" data-view="studio"><svg class="ico"><use href="#i-pen" /></svg><span>工作台</span></button>
-      <button class="tab" data-view="bible"><svg class="ico"><use href="#i-layers" /></svg><span>设定库</span></button>
-      <button class="tab rail-bottom" data-view="settings"><svg class="ico"><use href="#i-settings" /></svg><span>设置</span></button>
+      <button class="tab" data-view="shelf" aria-label="书架"><svg class="ico"><use href="#i-book" /></svg><span>书架</span></button>
+      <button class="tab" data-view="studio" aria-label="工作台"><svg class="ico"><use href="#i-pen" /></svg><span>工作台</span></button>
+      <button class="tab" data-view="bible" aria-label="设定库"><svg class="ico"><use href="#i-layers" /></svg><span>设定库</span></button>
+      <button class="tab rail-bottom" data-view="settings" aria-label="设置"><svg class="ico"><use href="#i-settings" /></svg><span>设置</span></button>
     </nav>
   </aside>
 
@@ -89,7 +89,7 @@
       <div class="topbar-right">
         <span class="save-pill" id="savePill">已保存</span>
         <button class="icon-btn" id="focusBtn" title="专注写作（Ctrl+Alt+F）" aria-label="专注写作" aria-pressed="false"><svg class="ico"><use href="#i-focus" /></svg></button>
-        <button class="icon-btn" id="themeBtn" title="切换明暗主题"></button>
+        <button class="icon-btn" id="themeBtn" title="切换明暗主题" aria-label="切换明暗主题"></button>
       </div>
     </header>
 
@@ -157,10 +157,10 @@
               <span class="pane-title">章节</span>
               <div class="pane-tools">
                 <button class="icon-btn sm" id="addChapterBtn" title="按大纲建下一章（没有大纲则新建空白章）" aria-label="新建章节"><svg class="ico"><use href="#i-plus" /></svg></button>
-                <button class="icon-btn sm" id="findBtn" title="全书查找 / 替换（Ctrl+F）"><svg class="ico"><use href="#i-search" /></svg></button>
-                <button class="icon-btn sm" id="proofBtn" title="文字校对：标点、引号、疑似叠字（Ctrl+Alt+P）"><svg class="ico"><use href="#i-proof" /></svg></button>
-                <button class="icon-btn sm" id="historyBtn" title="版本历史：自动快照，可一键恢复到旧稿"><svg class="ico"><use href="#i-clock" /></svg></button>
-                <button class="icon-btn sm" id="importBtn" title="导入已有文稿"><svg class="ico"><use href="#i-upload" /></svg></button>
+                <button class="icon-btn sm" id="findBtn" title="全书查找 / 替换（Ctrl+F）" aria-label="全书查找 / 替换"><svg class="ico"><use href="#i-search" /></svg></button>
+                <button class="icon-btn sm" id="proofBtn" title="文字校对：标点、引号、疑似叠字（Ctrl+Alt+P）" aria-label="文字校对"><svg class="ico"><use href="#i-proof" /></svg></button>
+                <button class="icon-btn sm" id="historyBtn" title="版本历史：自动快照，可一键恢复到旧稿" aria-label="版本历史"><svg class="ico"><use href="#i-clock" /></svg></button>
+                <button class="icon-btn sm" id="importBtn" title="导入已有文稿" aria-label="导入已有文稿"><svg class="ico"><use href="#i-upload" /></svg></button>
               </div>
             </div>
             <div class="chapter-meta" id="chapterMeta"></div>
@@ -212,12 +212,12 @@
                   <option value="done">定稿</option>
                 </select>
                 <button type="button" class="chip chip-target" id="chWords" title="设置本章目标字数" aria-label="设置本章目标字数" aria-haspopup="dialog" disabled>0 字</button>
-                <button class="icon-btn sm" id="undoBtn" title="撤销（Ctrl+Z）" disabled><svg class="ico"><use href="#i-undo" /></svg></button>
-                <button class="icon-btn sm" id="redoBtn" title="重做（Ctrl+Shift+Z）" disabled><svg class="ico"><use href="#i-redo" /></svg></button>
-                <button class="icon-btn sm" id="formatBtn" title="一键排版：段落首行缩进两格"><svg class="ico"><use href="#i-indent" /></svg></button>
-                <button class="icon-btn sm" id="previewBtn" title="阅读模式（可翻章、调字号）"><svg class="ico"><use href="#i-eye" /></svg></button>
-                <button class="icon-btn sm" id="sprintBtn" title="写作冲刺计时器（Ctrl+Alt+S）" aria-pressed="false"><svg class="ico"><use href="#i-clock" /></svg></button>
-                <button class="icon-btn sm" id="healthBtn" title="全书体检：本地统计，不花 token"><svg class="ico"><use href="#i-pulse" /></svg></button>
+                <button class="icon-btn sm" id="undoBtn" title="撤销（Ctrl+Z）" aria-label="撤销" disabled><svg class="ico"><use href="#i-undo" /></svg></button>
+                <button class="icon-btn sm" id="redoBtn" title="重做（Ctrl+Shift+Z）" aria-label="重做" disabled><svg class="ico"><use href="#i-redo" /></svg></button>
+                <button class="icon-btn sm" id="formatBtn" title="一键排版：段落首行缩进两格" aria-label="一键排版"><svg class="ico"><use href="#i-indent" /></svg></button>
+                <button class="icon-btn sm" id="previewBtn" title="阅读模式（可翻章、调字号）" aria-label="阅读模式"><svg class="ico"><use href="#i-eye" /></svg></button>
+                <button class="icon-btn sm" id="sprintBtn" title="写作冲刺计时器（Ctrl+Alt+S）" aria-label="写作冲刺计时器" aria-pressed="false"><svg class="ico"><use href="#i-clock" /></svg></button>
+                <button class="icon-btn sm" id="healthBtn" title="全书体检：本地统计，不花 token" aria-label="全书体检"><svg class="ico"><use href="#i-pulse" /></svg></button>
               </div>
             </div>
             <div class="editor-wrap">
@@ -228,7 +228,7 @@
                 <button data-op="shorten">精简</button>
                 <button data-op="rewrite">改写</button>
                 <button data-op="custom">按指令…</button>
-                <button data-op="annotate" title="添加批注/高亮（选中文字后）"><svg class="ico"><use href="#i-highlight" /></svg></button>
+                <button data-op="annotate" title="添加批注/高亮（选中文字后）" aria-label="添加批注/高亮"><svg class="ico"><use href="#i-highlight" /></svg></button>
               </div>
               <div class="editor-empty" id="editorEmpty" hidden>
                 <svg class="empty-ico"><use href="#i-pen" /></svg>
