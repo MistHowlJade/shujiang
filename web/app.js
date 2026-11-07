@@ -3113,7 +3113,12 @@ function openHealthReport() {
     return withIgnore(`<button type="button" class="health-row"${attr}><span>${esc(g.name)}${role}</span><em>${meta}</em></button>`, 'gap', g.name, `人物断档：${g.name}`);
   }).join('');
 
-  const threadRows = r.staleThreads.map((t) => withIgnore(`<button type="button" class="health-row" data-health-chapter="${esc(t.latest.id)}">
+  // 已人工标记「回收」的线索不再提醒——正文里已经还回来了
+  const paidList = (Array.isArray(S.novel?.meta?.threadPaidOff) ? S.novel.meta.threadPaidOff : []);
+  const paidSet = new Set(paidList);
+  const staleUnpaid = r.staleThreads.filter((t) => !paidSet.has(t.text));
+  const paidExcluded = r.staleThreads.length - staleUnpaid.length;
+  const threadRows = staleUnpaid.map((t) => withIgnore(`<button type="button" class="health-row" data-health-chapter="${esc(t.latest.id)}">
     <span><b class="health-thread-kind">未决</b>${esc(t.text)}</span><em>第 ${t.latest.no} 章</em>
   </button>`, 'thread', t.text, `未决线索：${String(t.text || '').slice(0, 20)}`)).join('');
 
@@ -3192,9 +3197,9 @@ function openHealthReport() {
       </section>
 
       <section class="health-card wide">
-        <h4>未回收线索 <span class="health-count">${r.unresolved.length ? `${r.unresolved.length} 条未决` : '无'}</span></h4>
-        <p>从章节记忆汇总，共 ${r.unresolved.length} 条未决、${r.foreshadowing.length} 条伏笔。是否有回收仍以正文为准，越靠前说明越久没再提。</p>
-        ${threadRows ? `<div class="health-rows">${threadRows}</div>` : healthOk('章节记忆里没有未决线索。')}
+        <h4>未回收线索 <span class="health-count">${staleUnpaid.length ? `${staleUnpaid.length} 条未决` : '无'}</span></h4>
+        <p>从章节记忆汇总，共 ${r.unresolved.length} 条未决、${r.foreshadowing.length} 条伏笔${paidExcluded ? `；已标记 ${paidExcluded} 条回收，不再提醒` : ''}。是否有回收以正文为准——在「设定库 → 线索」里标记回收即可排除。</p>
+        ${threadRows ? `<div class="health-rows">${threadRows}</div>` : healthOk(paidExcluded ? `章节记忆里的未决线索都标记过回收（${paidExcluded} 条）。` : '章节记忆里没有未决线索。')}
       </section>
     </div>
     ${r.memCount < total ? `<p class="health-disclaimer">章节记忆覆盖 ${r.memCount}/${total} 章，人物断档与线索统计会受此影响；可在「线索 → 批量补记忆」补齐。</p>` : ''}
@@ -3207,7 +3212,7 @@ function openHealthReport() {
   `, (box) => {
     box.querySelector('#healthClose').onclick = closeModal;
     box.querySelector('#healthRefresh').onclick = () => openHealthReport();
-    box.querySelector('#healthCopy').onclick = () => copyHealthReport(r);
+    box.querySelector('#healthCopy').onclick = () => copyHealthReport({ ...r, staleThreads: staleUnpaid });
     box.querySelector('#healthIgnoredClose')?.addEventListener('click', () => { box.querySelector('#healthIgnoredBox').hidden = true; });
     box.querySelector('#healthRestoreAll')?.addEventListener('click', () => { saveIgnoreList([]); openHealthReport(); });
     box.querySelectorAll('[data-health-chapter]').forEach((el) => {
@@ -7358,7 +7363,10 @@ async function diagnoseOutput() {
       diagList.innerHTML = '<p class="dim">没发现明显问题，或者模型没给出清单。不等于没有问题，但至少结构层过了。</p>';
       return;
     }
-    diagList.innerHTML = list.map((item, i) => `
+    const head = list.length > 1
+      ? `<div class="diag-head"><span class="diag-count">${list.length} 个问题</span><button type="button" class="btn btn-sm btn-text" id="diagFixAll">全部修复</button></div>`
+      : '';
+    diagList.innerHTML = head + list.map((item, i) => `
       <div class="diag-item severity-${String(item.severity || 'medium').toLowerCase()}">
         <span class="diag-type">${esc(item.type || '其他')}</span>
         <div class="diag-text">${esc(item.text || '')}</div>
@@ -7368,15 +7376,18 @@ async function diagnoseOutput() {
     diagList.querySelectorAll('.diag-fix-btn').forEach((btn) => {
       btn.addEventListener('click', () => diagFixOne(list[Number(btn.dataset.idx)]));
     });
+    const allBtn = diagList.querySelector('#diagFixAll');
+    if (allBtn) allBtn.addEventListener('click', () => diagFixAll(list, allBtn));
   } catch (err) {
     diagList.innerHTML = `<p class="qs-error">诊断失败：${esc(err?.message || String(err))}</p>`;
   }
 }
 
-async function diagFixOne(item) {
-  const quote = String(item.quote || '').trim();
-  const issue = String(item.text || '').trim();
-  if (!quote) return toast('模型没给原文引用，没法修', 'err');
+/** 应用单个修复项；返回 'ok' | 'noquote'（模型没给 quote）| 'nomatch'（原文里找不到）| 'error'（流式失败，runStream 已 toast 过） */
+async function applyDiagFix(item) {
+  const quote = String(item?.quote || '').trim();
+  const issue = String(item?.text || '').trim();
+  if (!quote) return 'noquote';
   try {
     const acc = await runStream({
       task: 'rewrite',
@@ -7386,31 +7397,61 @@ async function diagFixOne(item) {
         instruction: `只修这一句/这一段，不要改其他地方——${issue}。只输出修复后的文字，不要解释。`,
         text: quote,
       },
-    });
+    }, { target: 'diag' });
     const newText = acc.trim();
-    if (!newText) return;
+    if (!newText) return 'error';
     // 三种匹配策略：精确 → 前8字 → 不匹配给出提示
     const full = S.out;
     let idx = full.indexOf(quote);
+    let span = quote.length;
     if (idx >= 0) {
-      S.out = full.slice(0, idx) + newText + full.slice(idx + quote.length);
+      // quote 不带句号而新文本带句号时，吃掉原地的句号，避免出现「。。」
+      if (newText.endsWith('。') && full.slice(idx + quote.length).startsWith('。')) span = quote.length + 1;
+      S.out = full.slice(0, idx) + newText + full.slice(idx + span);
     } else {
       const head = quote.slice(0, 8);
       idx = full.indexOf(head);
-      if (idx >= 0) {
-        const span = full.slice(idx).match(/^[^。\n]{1,200}/)?.[0] || quote;
-        S.out = full.slice(0, idx) + newText + full.slice(idx + span.length);
-      } else {
-        toast('找不到原文片段，没法应用', 'err');
-        return;
-      }
+      if (idx < 0) return 'nomatch';
+      span = full.slice(idx).match(/^[^。\n]{0,199}。?/)?.[0]?.length || quote.length;
+      S.out = full.slice(0, idx) + newText + full.slice(idx + span);
     }
     renderOut();
-    toast('已修复', 'ok');
-    diagnoseOutput();
+    return 'ok';
   } catch (err) {
-    toast(`应用失败：${err?.message || String(err)}`, 'err');
+    return 'error';
   }
+}
+
+async function diagFixOne(item) {
+  const quote = String(item?.quote || '').trim();
+  if (!quote) return toast('模型没给原文引用，没法修', 'err');
+  const res = await applyDiagFix(item);
+  if (res === 'nomatch') return toast('找不到原文片段，没法应用', 'err');
+  if (res === 'error') return; // runStream 已经 toast 过了
+  toast('已修复', 'ok');
+  diagnoseOutput();
+}
+
+/** 串行全部修复：一个一个来，每个都走同样的匹配逻辑；全部完后统一重新诊断 */
+async function diagFixAll(list, btn) {
+  const fixable = (list || []).filter((x) => String(x?.quote || '').trim());
+  if (!fixable.length) return toast('清单里没有可直接应用的修复项', 'err');
+  btn.disabled = true;
+  const original = btn.textContent;
+  let done = 0;
+  let nomatch = 0;
+  for (const item of fixable) {
+    btn.textContent = `修复中 ${done + nomatch + 1}/${fixable.length}…`;
+    // eslint-disable-next-line no-await-in-loop
+    const res = await applyDiagFix(item);
+    if (res === 'ok') done += 1;
+    else if (res === 'nomatch') nomatch += 1;
+  }
+  btn.textContent = original;
+  btn.disabled = false;
+  if (done === fixable.length) toast(`已修复 ${done} 条`, 'ok');
+  else toast(`修复了 ${done}/${fixable.length} 条${nomatch ? `，${nomatch} 条没匹配到原文` : ''}`, 'err');
+  diagnoseOutput();
 }
 
 $('#diagnoseBtn').addEventListener('click', () => {
@@ -11322,17 +11363,31 @@ function renderRelationsTab(host, n) {
 }
 
 /* ---- 线索条目渲染（供虚拟列表复用） ---- */
-function renderThreadEntry(item) {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'thread-row';
-  btn.dataset.threadCh = item.latest.id;
-  btn.title = `跳到第 ${item.latest.no} 章`;
-  btn.innerHTML = `
+function renderThreadEntry(item, n) {
+  const paidOff = Array.isArray(n?.meta?.threadPaidOff) ? n.meta.threadPaidOff : [];
+  const isPaid = Boolean(item.text) && paidOff.includes(item.text);
+  const btn = document.createElement('div');
+  btn.className = 'thread-row' + (isPaid ? ' thread-paid' : '');
+  const jump = document.createElement('button');
+  jump.type = 'button';
+  jump.className = 'thread-jump';
+  jump.dataset.threadCh = item.latest.id;
+  jump.title = `跳到第 ${item.latest.no} 章`;
+  jump.innerHTML = `
     <span class="thread-kind ${item.kind}">${THREAD_KINDS[item.kind].label}</span>
     <span class="thread-text">${esc(item.text)}</span>
     <span class="thread-meta">${threadMeta(item)}</span>
   `;
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'thread-paid-toggle' + (isPaid ? ' on' : '');
+  toggle.dataset.paidKey = item.text || '';
+  toggle.title = isPaid ? '取消标记已回收' : '标记为已回收';
+  toggle.setAttribute('aria-pressed', String(isPaid));
+  toggle.textContent = isPaid ? '已回收' : '标记回收';
+  btn.appendChild(toggle);
+  btn.appendChild(jump);
+  if (isPaid) jump.classList.add('thread-paid-text');
   return btn;
 }
 
@@ -11353,7 +11408,7 @@ function renderThreadsTab(host, n) {
         <span style="flex:1"></span>
         <button class="btn btn-sm" id="threadsBatch">${ico('refresh')}批量补记忆</button>
       </h2>
-      <p class="dim small">从每章记忆的「未决」「伏笔」自动汇总，重复的线索会合并；点一条可跳到最近提到的章节。它不替代设定库，只是把散在几十万字里的线头集中起来。线索是否已经回收，以正文为准。</p>
+      <p class="dim small">从每章记忆的「未决」「伏笔」自动汇总，重复的线索会合并；点一条可跳到最近提到的章节。「标记回收」表示这条线已经在正文里回收了——回收状态会持久保存，并从「本书体检」里的线索提醒中排除。它不替代设定库，只是把散在几十万字里的线头集中起来。</p>
       ${bibleSearchBar('threads', '搜索线索：内容 / 类型 / 章节')}
       <div class="thread-stats">
         <span class="thread-stat"><b>${counts.unresolved}</b> 条未决</span>
@@ -11379,7 +11434,7 @@ function renderThreadsTab(host, n) {
     const visible = filter === 'all' ? matched : matched.filter((t) => t.kind === filter);
     setBibleSearchCount(host, 'threads', visible.length, total);
     list.scrollTop = 0;
-    initBibleVirtualList(list, visible, (t) => renderThreadEntry(t), 'threads');
+    initBibleVirtualList(list, visible, (t) => renderThreadEntry(t, n), 'threads');
     if (!visible.length) {
       const q = bibleSearchValue('threads').trim();
       list.innerHTML = q
@@ -11402,10 +11457,29 @@ function renderThreadsTab(host, n) {
   };
 
   renderList();
-  // 点击跳转
-  list.addEventListener('click', (e) => {
-    const row = e.target.closest('.thread-row');
-    if (row) openChapterFromIndex(row.dataset.threadCh);
+  // 点击跳转 / 标记已回收
+  list.addEventListener('click', async (e) => {
+    const toggle = e.target.closest('.thread-paid-toggle');
+    if (toggle) {
+      const key = String(toggle.dataset.paidKey || '').trim();
+      if (!key) return;
+      const current = Array.isArray(n.meta?.threadPaidOff) ? [...n.meta.threadPaidOff] : [];
+      const idx = current.indexOf(key);
+      const next = idx >= 0 ? [...current.slice(0, idx), ...current.slice(idx + 1)] : [...current, key];
+      try {
+        await api.put(`/api/novels/${n.id}`, { meta: { threadPaidOff: next } });
+      } catch (err) {
+        toast(err.message, 'err');
+        return;
+      }
+      n.meta = { ...(n.meta || {}), threadPaidOff: next };
+      if (S.novel === n) S.novel.meta = n.meta;
+      toast(idx >= 0 ? '已取消「已回收」标记' : '已标记为「已回收」', 'ok');
+      renderList();
+      return;
+    }
+    const jump = e.target.closest('.thread-jump');
+    if (jump) openChapterFromIndex(jump.dataset.threadCh);
   });
 }
 

@@ -1651,6 +1651,12 @@ kbd {
 
 /* 人物出场索引 / 世界观提及索引 */
 .diag-list { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
+.diag-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  padding: 5px 10px; font-size: 11px; background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.diag-count { color: var(--text-3); }
 .diag-item {
   display: flex; align-items: baseline; gap: 8px;
   padding: 6px 10px; font-size: 11px; line-height: 1.55;
@@ -1742,15 +1748,27 @@ kbd {
 .thread-list.virtual > .vl-spacer { display: block; pointer-events: none; flex: none; }
 .thread-list.virtual > .vl-viewport { position: absolute; top: 0; left: 0; right: 0; display: flex; flex-direction: column; }
 .thread-list.virtual > .vl-viewport > .thread-row { margin-bottom: 7px; }
-.thread-row {
+.thread-row { display: flex; align-items: stretch; gap: 6px; width: 100%; }
+.thread-jump {
   display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px;
-  align-items: start; width: 100%; padding: 10px 12px;
+  align-items: start; flex: 1; min-width: 0; padding: 10px 12px;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
   color: var(--text-1); font: inherit; text-align: left; cursor: pointer;
   transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
-.thread-row:hover { border-color: var(--border-2); background: var(--surface-3); }
-.thread-row:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.thread-jump:hover { border-color: var(--border-2); background: var(--surface-3); }
+.thread-jump:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.thread-paid-toggle {
+  flex: none; align-self: center; padding: 5px 9px; border-radius: var(--r-full);
+  font-size: 10.5px; line-height: 1.6; white-space: nowrap; cursor: pointer;
+  color: var(--text-3); background: var(--surface-2); border: 1px solid var(--border);
+  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.thread-paid-toggle:hover { border-color: var(--border-2); color: var(--text-2); }
+.thread-paid-toggle:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.thread-paid-toggle.on { color: var(--accent-hover); background: var(--accent-bg); border-color: transparent; }
+.thread-row.thread-paid .thread-jump { opacity: 0.55; }
+.thread-paid-text .thread-text { text-decoration: line-through; text-decoration-color: var(--text-4); }
 .thread-kind {
   justify-self: start; padding: 1px 7px; border-radius: var(--r-full);
   font-size: 10px; line-height: 1.7; white-space: nowrap;
@@ -1762,7 +1780,7 @@ kbd {
 .thread-empty { padding: 22px 4px; color: var(--text-3); font-size: 12px; line-height: 1.85; }
 .thread-hint { margin-top: 10px; }
 @media (max-width: 720px) {
-  .thread-row { grid-template-columns: 40px minmax(0, 1fr); }
+  .thread-jump { grid-template-columns: 40px minmax(0, 1fr); }
   .thread-meta { grid-column: 2; padding-top: 0; }
 }
 

@@ -244,16 +244,16 @@ const DIAGNOSE = [
   {
     "severity": "medium",
     "type": "人物口吻",
-    "text": "沈砚前后斗试",
-    "quote": "沈砚咽了一口酒",
-    "fix": "这段他不该咽酒。"
+    "text": "谢迟的嘴硬和心虚没拉开",
+    "quote": "他只是把手按在剑柄上，那里缠着早已发黑的布条，一层压着一层，缠了整整十七圈。",
+    "fix": "加一笔身体反应，让心虚落到动作上。"
   },
   {
     "severity": "low",
     "type": "设定冲突",
-    "text": "段落与地名不符",
-    "quote": "雪落长安村",
-    "fix": "改为「雪落剑冢」。"
+    "text": "第十七圈与前文缠了十七圈重复",
+    "quote": "第十七圈是他师傅亲手系的。",
+    "fix": "压缩成一笔，不再单独成段。"
   }
 ];
 
@@ -308,6 +308,7 @@ function decide(text) {
   if (has('审稿意见')) return 'review';
   if (has('文风档案')) return 'style';
   if (has('请检查以下文字')) return 'diagnose';
+  if (has('只输出修复后的文字')) return 'rewrite';
   if (has('开书') || has('灵感') || has('什么火') || has('热门榜')) return 'inspiration';
   if (has('8 个书名')) return 'titles';
   if (has('概括这一章')) return 'summary';
@@ -338,6 +339,8 @@ function buildReply(text, model = '') {
       return { kind, content: STYLE };
     case 'diagnose':
       return { kind, content: JSON.stringify(DIAGNOSE) };
+    case 'rewrite':
+      return { kind, content: /第十七圈/.test(text) ? '师傅亲手系的最后一圈。' : '他看了一眼酒壶，没有动。' };
     case 'inspiration':
       return { kind, content: INSPIRATION_PROSE };
     case 'titles':
