@@ -60,10 +60,11 @@ export function characterKeywords(character) {
     : (typeof raw === 'string' ? raw.split(/[,，、\s]+/).filter(Boolean) : []);
 }
 
-/** 人物卡的检索别名：姓名 + 关键词，都按全名与分段展开。 */
+/** 人物卡的检索别名：姓名 + 关键词 + 别名称谓，都按全名与分段展开。 */
 export function characterAliases(character) {
   const aliases = new Set();
-  for (const value of [character?.name, ...characterKeywords(character)]) {
+  const extra = Array.isArray(character?.aliases) ? character.aliases : [];
+  for (const value of [character?.name, ...characterKeywords(character), ...extra]) {
     for (const alias of characterNameAliases(value)) aliases.add(alias);
   }
   return [...aliases];

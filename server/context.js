@@ -58,6 +58,8 @@ function fmtCharacter(c, brief = false) {
     c.secret && `秘密（读者未知/未揭晓）：${c.secret}`,
     c.speech && `说话风格：${c.speech}`,
     c.arc && `成长弧线：${c.arc}`,
+    c.aliases?.length && `别名 / 称谓：${c.aliases.join('、')}（正文里的这些称谓 = 同一个人）`,
+    c.voiceBans?.length && `口头禁用词：${c.voiceBans.join('、')}（这个人物绝不能说出口的词）`,
   ].filter(Boolean);
   if (c.relations?.length) {
     bits.push(`关系：${c.relations.map((r) => `${r.to}（${r.type || '关系'}${r.note ? `，${r.note}` : ''}）`).join('；')}`);
@@ -264,7 +266,7 @@ export function buildContext(novel, opts = {}) {
   }
 
   /* 3. 人物卡（按相关度） */
-  const chars = (novel.bible?.characters || []).map((c) => ({ c, s: score(qt, c, [(x) => x.name, (x) => x.identity, (x) => x.role]) }));
+  const chars = (novel.bible?.characters || []).map((c) => ({ c, s: score(qt, c, [(x) => x.name, (x) => x.identity, (x) => x.role, (x) => (x.aliases || []).join(' ')]) }));
   const hitChars = chars.filter((x) => x.s > 0).sort((a, b) => b.s - a.s);
   const restChars = chars.filter((x) => x.s <= 0);
   if (hitChars.length) {
@@ -281,6 +283,12 @@ export function buildContext(novel, opts = {}) {
   const otherWorlds = worlds.filter((x) => x.s <= 0).slice(0, 12);
   if (hitWorlds.length) push('相关世界观设定', hitWorlds.map((x) => fmtWorld(x.w)).join('\n'), true);
   if (otherWorlds.length) push('其他世界观速览', otherWorlds.map((x) => fmtWorld(x.w)).join('\n'));
+
+  /* 4.5 术语表（锁定用词，AI 不许换说法） */
+  const glossary = (novel.bible?.glossary || []).filter((g) => String(g?.term || '').trim());
+  if (glossary.length) {
+    push('术语表（必须统一使用这些词，不许自行换说法）', glossary.slice(0, 80).map((g) => `${g.term}：${g.meaning || ''}${g.alias?.length ? `（别名：${g.alias.join('、')}）` : ''}`).join('\n'), true);
+  }
 
   /* 5. 时间线 */
   const tl = (novel.bible?.timeline || [])

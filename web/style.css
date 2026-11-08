@@ -1983,11 +1983,48 @@ kbd {
 .genlog-tag { font-size: 9.5px; padding: 1px 6px; border-radius: var(--r-full); background: var(--surface-3); color: var(--text-3); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .genlog-error { margin-top: 6px; font-size: 10.5px; color: var(--danger); overflow-wrap: anywhere; }
 
+.sc-idle { font-size: 10px; padding: 1px 7px; border-radius: var(--r-full); background: var(--warning-bg); color: var(--warning); white-space: nowrap; }
+.stat-chip.idle { border-color: var(--warning); }
+
 /* 冲突密度（爽点档案里的第二条曲线） */
 .conflict-line { stroke: var(--warning) !important; }
 .pcv-conflict { font-size: 10px; padding: 1px 6px; border-radius: var(--r-full); border: 1px solid var(--border); color: var(--text-3); font-variant-numeric: tabular-nums; }
 .pcv-sub { font-size: 13px; color: var(--text-2); margin: 18px 0 4px; }
 .conflict-dots i.on { background: var(--warning); border-color: var(--warning); }
+
+/* 读者视角检查（毒点 / 敏感 / 断章） */
+.reader-scan-list { display: flex; flex-direction: column; gap: 8px; max-height: 52vh; overflow: auto; }
+.reader-row { border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: var(--r-md); padding: 9px 12px; background: var(--surface-2); }
+.reader-row.sev-high { border-left-color: var(--danger); }
+.reader-row.sev-med { border-left-color: var(--warning); }
+.reader-row.sev-low { border-left-color: var(--text-4); }
+.reader-top { display: flex; align-items: baseline; gap: 10px; }
+.reader-risk { flex: 0 0 auto; font-size: 11px; color: var(--warning); }
+.reader-reason { font-size: 11.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.reader-quote { margin-top: 6px; font-size: 12px; color: var(--text-3); background: var(--surface-3); border-radius: var(--r-sm); padding: 6px 8px; overflow-wrap: anywhere; }
+.reader-suggest { margin-top: 6px; font-size: 11px; color: var(--text-4); overflow-wrap: anywhere; }
+.hook-card { border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px; background: var(--surface-2); }
+.hook-better { font-size: 11px; color: var(--text-3); margin-top: 8px; padding: 8px 10px; background: var(--surface-3); border-radius: var(--r-sm); }
+
+/* 本章聚焦 */
+.focus-list { display: flex; flex-direction: column; gap: 10px; }
+.focus-row { display: grid; grid-template-columns: 84px 1fr; gap: 10px; align-items: start; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
+.focus-label { font-size: 11px; color: var(--text-4); line-height: 1.6; white-space: nowrap; }
+.focus-warn { color: var(--danger); font-size: 11.5px; overflow-wrap: anywhere; }
+.focus-cast, .focus-threads { display: flex; flex-direction: column; gap: 6px; }
+.focus-cast-row, .focus-thread-row { display: flex; align-items: baseline; gap: 8px; font-size: 11.5px; overflow-wrap: anywhere; }
+.focus-cast-row b { flex: 0 0 auto; color: var(--text-1); }
+.focus-cast-row span { color: var(--text-3); }
+.focus-thread-row span { color: var(--text-2); }
+.focus-thread-row em { margin-left: auto; font-size: 10px; color: var(--text-4); white-space: nowrap; font-style: normal; }
+
+/* 术语表 */
+.glossary-list { display: flex; flex-direction: column; gap: 6px; max-height: 52vh; overflow: auto; }
+.glossary-card { border: 1px solid var(--border); border-radius: var(--r-md); padding: 8px 12px; background: var(--surface-2); }
+.glossary-head { display: flex; align-items: baseline; gap: 10px; }
+.glossary-term { font-size: 12.5px; color: var(--text-1); }
+.glossary-alias { font-size: 10px; color: var(--text-4); overflow-wrap: anywhere; }
+.glossary-meaning { margin-top: 4px; font-size: 11px; color: var(--text-3); line-height: 1.7; overflow-wrap: anywhere; }
 
 /* 线索时间线 */
 .thread-timeline-wrap { margin-top: 10px; }

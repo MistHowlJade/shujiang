@@ -2817,17 +2817,29 @@ async function loadStats({ force = false } = {}) {
   return S.stats;
 }
 
+/** 最近几天没写了：找最后一个有字的日子，数到今天的天数（全部没写 = 999，代表断更很久） */
+function daysSinceLastWrite(days) {
+  if (!Array.isArray(days) || !days.length) return null;
+  const sorted = [...days].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const last = [...sorted].reverse().find((d) => Number(d.words) > 0);
+  if (!last) return 999;
+  return Math.max(0, Math.floor((Date.now() - new Date(`${last.date}T00:00:00`).getTime()) / 86400000));
+}
+
 function statChipHTML() {
   const st = S.stats;
   if (!st) return '';
   const goal = st.goal || 0;
   const pct = goal ? Math.min(100, Math.round((st.todayWords / goal) * 100)) : 0;
   const done = goal > 0 && st.todayWords >= goal;
-  const tip = `今日 ${fmtWords(st.todayWords)} 字${goal ? ` / 目标 ${fmtWords(goal)} 字` : ''} · 点击查看写作统计`;
-  return `<button class="stat-chip${done ? ' done' : ''}" title="${tip}">
+  const idle = daysSinceLastWrite(st.days);
+  const idleTip = idle && idle >= 3 ? `<span class="sc-idle" title="断更风险：${idle >= 999 ? '最近没动过笔' : `最近 ${idle} 天没动笔`}">${idle >= 999 ? '很久没写' : `${idle} 天没写`}</span>` : '';
+  const tip = `今日 ${fmtWords(st.todayWords)} 字${goal ? ` / 目标 ${fmtWords(goal)} 字` : ''}${idleTip ? ` · 最近 ${idle >= 999 ? '很久' : idle + ' 天'} 没动笔` : ''} · 点击查看写作统计`;
+  return `<button class="stat-chip${done ? ' done' : ''}${idleTip ? ' idle' : ''}" title="${tip}">
     <svg class="ico"><use href="#i-pen" /></svg>
     <span class="sc-num">今日 ${fmtWords(st.todayWords)} 字</span>
     ${goal ? `<span class="sc-track"><i style="width:${pct}%"></i></span>` : ''}
+    ${idleTip}
   </button>`;
 }
 
@@ -7510,6 +7522,7 @@ const GEN_TASK_LABEL = {
   consistency: '一致性检查', review: '责编评审', diagnose: '自检', anno_fix: '按批注修',
   payoff: '爽点档', inspiration: '灵感对话', outline: '大纲', characters: '人物', worldview: '世界观',
   bookcheck: '开书诊断', summarize: '概要', sceneGen: '场景正文', expandScene: '场景正文',
+  poison: '毒点检查', hook: '断章评估', sensitivity: '敏感内容提醒', memoryChapter: '章节记忆',
 };
 const genTaskLabel = (t) => GEN_TASK_LABEL[t] || String(t || '其他');
 
@@ -8566,6 +8579,10 @@ $$('[data-quick]').forEach((btn) => btn.addEventListener('click', async () => {
   if (kind === 'batchMemory') return openBatchMemory();
   if (kind === 'propagate') return openPropagationAnalysis();
   if (kind === 'payoff') return runPayoffAnalysis();
+  if (kind === 'poison') return runPoisonCheck();
+  if (kind === 'hook') return runHookCheck();
+  if (kind === 'sensitivity') return runSensitivityCheck();
+  if (kind === 'focus') return openFocusLens();
 
   const ch = currentChapter();
   if (!ch) return toast('先选一章', 'err');
@@ -10561,6 +10578,7 @@ function renderBible() {
   if (bibleTab === 'relations') return renderRelationsTab(host, n);
   if (bibleTab === 'threads') return renderThreadsTab(host, n);
   if (bibleTab === 'inspirations') return renderInspirationsTab(host, n);
+  if (bibleTab === 'glossary') return renderGlossaryTab(host, n);
   if (bibleTab === 'genlog') return renderGenLogTab(host, n);
   if (bibleTab === 'reveal') return renderRevealPlanTab(host, n);
   return renderStyleTab(host, n);
@@ -11335,6 +11353,175 @@ function paintPayoffCard(card, p, ch) {
   };
 }
 
+/* ---------- 读者视角检查：毒点 / 断章评估 / 敏感内容提醒（共享展示与错误路径） ---------- */
+const READER_SEV = { high: 'sev-high', medium: 'sev-med', low: 'sev-low' };
+
+function openReaderScanModal(title, sub) {
+  showModal(`<h3>${esc(title)}</h3>
+    <p class="modal-sub">${esc(sub)}</p>
+    <div class="reader-scan-list" id="readerScanList"><p class="dim">正在看这一章，别关窗口…</p></div>
+    <div class="modal-foot"><button class="btn btn-primary" data-action="cancel">关闭</button></div>`);
+}
+
+function paintReaderScanError(err) {
+  const box = document.querySelector('#readerScanList');
+  if (!box) return;
+  const mask = document.querySelector('#modalMask');
+  const setupOpen = mask && getComputedStyle(mask).display !== 'none';
+  box.innerHTML = setupOpen
+    ? '<p class="qs-error">这次还没发出去——先选个模型，选完再点一次就好了。</p>'
+    : `<p class="qs-error">检查失败：${esc(err?.message || String(err))}</p>`;
+}
+
+function readerRowsHtml(list, { riskLabel = true, suggest = true } = {}) {
+  return list.map((x) => `
+    <div class="reader-row ${READER_SEV[String(x.severity || 'medium').toLowerCase()] || 'sev-med'}">
+      <div class="reader-top"><b class="reader-risk">${esc(x.risk || '其他')}</b><span class="reader-reason">${esc(x.reason || '')}</span></div>
+      <div class="reader-quote">${esc(String(x.quote).slice(0, 90))}</div>
+      ${suggest && x.suggest ? `<div class="reader-suggest">建议：${esc(x.suggest)}</div>` : ''}
+    </div>`).join('');
+}
+
+async function runPoisonCheck() {
+  const ch = currentChapter();
+  if (!ch) return toast('先打开一章', 'err');
+  if (!String(ch.content || '').trim()) return toast('这一章还没有正文', 'err');
+  if (S.controller) return toast('生成中——先停一下', 'err');
+  openReaderScanModal('毒点检查 · 本章', 'AI 从读者角度找「这里会让人想退书」的点——只提示，不改原文。');
+  try {
+    const acc = await runStream({ task: 'poison', novelId: S.novel.id, chapterId: ch.id }, { target: 'diag' });
+    const box = document.querySelector('#readerScanList');
+    if (!box) return;
+    const parsed = parseJsonLoose(acc);
+    const list = (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
+      .filter((x) => x && String(x.quote || '').trim()).slice(0, 8);
+    if (!list.length) {
+      box.innerHTML = parsed == null
+        ? '<p class="qs-error">AI 没按要求返回 JSON 清单——可以换个模型再试。</p>'
+        : '<p class="health-ok">没发现明显的弃书点——接着写。</p>';
+      return;
+    }
+    box.innerHTML = readerRowsHtml(list, { suggest: true });
+  } catch (err) {
+    paintReaderScanError(err);
+  }
+}
+
+async function runSensitivityCheck() {
+  const ch = currentChapter();
+  if (!ch) return toast('先打开一章', 'err');
+  if (!String(ch.content || '').trim()) return toast('这一章还没有正文', 'err');
+  if (S.controller) return toast('生成中——先停一下', 'err');
+  openReaderScanModal('敏感内容提醒 · 本章', 'AI 圈出「可能踩线」的位置——不是判决，以你和平台判断为准；正常情节冲突不算。');
+  try {
+    const acc = await runStream({ task: 'sensitivity', novelId: S.novel.id, chapterId: ch.id }, { target: 'diag' });
+    const box = document.querySelector('#readerScanList');
+    if (!box) return;
+    const parsed = parseJsonLoose(acc);
+    const list = (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
+      .filter((x) => x && String(x.quote || '').trim()).slice(0, 8);
+    if (!list.length) {
+      box.innerHTML = parsed == null
+        ? '<p class="qs-error">AI 没按要求返回 JSON 清单——可以换个模型再试。</p>'
+        : '<p class="health-ok">没发现明显踩线的位置。</p>';
+      return;
+    }
+    box.innerHTML = readerRowsHtml(list, { suggest: false });
+  } catch (err) {
+    paintReaderScanError(err);
+  }
+}
+
+async function runHookCheck() {
+  const ch = currentChapter();
+  if (!ch) return toast('先打开一章', 'err');
+  if (!String(ch.content || '').trim()) return toast('这一章还没有正文', 'err');
+  if (S.controller) return toast('生成中——先停一下', 'err');
+  openReaderScanModal('断章评估 · 本章', 'AI 看本章结尾适不适合连载断更——读者追到这里还会不会点开下一章。');
+  try {
+    const acc = await runStream({ task: 'hook', novelId: S.novel.id, chapterId: ch.id }, { target: 'diag' });
+    const box = document.querySelector('#readerScanList');
+    if (!box) return;
+    const obj = parseJsonLoose(acc);
+    if (!obj || typeof obj !== 'object') {
+      box.innerHTML = '<p class="qs-error">AI 没按要求返回 JSON——可以换个模型再试。</p>';
+      return;
+    }
+    const score = Math.max(0, Math.min(5, Math.round(Number(obj.score) || 0)));
+    box.innerHTML = `
+      <div class="hook-card">
+        <div class="payoff-head">
+          <span class="payoff-title">断章强度</span>
+          <span class="payoff-dots" aria-label="断章强度 ${score}/5">${[0, 1, 2, 3, 4].map((i) => `<i class="${i < score ? 'on' : ''}"></i>`).join('')}</span>
+          <span class="payoff-score">${score}<small>/5</small></span>
+          <span class="payoff-type">${esc(obj.verdict || '')}</span>
+        </div>
+        ${obj.reason ? `<p class="payoff-note">${esc(obj.reason)}</p>` : ''}
+        ${obj.better ? `<p class="hook-better"><b>更好的位置：</b>${esc(obj.better)}</p>` : ''}
+      </div>`;
+  } catch (err) {
+    paintReaderScanError(err);
+  }
+}
+
+/* ---------- 本章聚焦：写之前先看一眼该注意什么 ---------- */
+function openFocusLens() {
+  const ch = currentChapter();
+  if (!ch) return toast('先打开一章', 'err');
+  const novel = S.novel;
+  const content = String(ch.content || '');
+  const words = countWords(content);
+  const target = targetOf(ch);
+  const pct = target ? Math.min(100, Math.round((words / target) * 100)) : null;
+  // 章纲对齐：只看本章
+  let outlineHtml = '<span class="dim">本章没绑定章纲——在设定库「大纲」里给它挂一个。</span>';
+  if (ch.outlineId) {
+    const drift = (buildOutlineDrift(novel) || []).find((d) => d.id === ch.id);
+    outlineHtml = drift
+      ? `<span class="focus-warn">偏离：${esc(drift.reasons.join('；'))}</span>`
+      : '<span class="health-ok">人物 / 场景与章纲对齐 ✓</span>';
+  }
+  // 出场人物：正文里出现了名字 / 别名 / 关键词的
+  const arcs = buildCharacterArcs(novel);
+  const arcOf = new Map();
+  for (const a of arcs) arcOf.set(a.char?.id || '', a);
+  const present = (novel.bible?.characters || [])
+    .filter((c) => [c.name, ...(c.aliases || []), ...(c.keywords || [])].some((nm) => nm && content.includes(nm)))
+    .slice(0, 5);
+  const castHtml = present.length
+    ? present.map((c) => {
+        const a = arcOf.get(c.id);
+        const state = a?.latestState ? `${esc(a.latestState).slice(0, 46)}（截至第${a.latestStateNo || '?'}章）` : '<span class="dim">无记忆状态</span>';
+        return `<div class="focus-cast-row"><b>${esc(c.name)}</b><span>${state}</span></div>`;
+      }).join('')
+    : '<span class="dim">正文里还没出现设定库人物（或人物卡还没建）。</span>';
+  // 未决线索（全书体检同口径，最多 3 条）
+  let threadsHtml = '<span class="dim">章节记忆里没有未决线索。</span>';
+  try {
+    const r = buildHealthReport(novel);
+    const stale = (r.staleThreads || []).slice(0, 3);
+    if (stale.length) {
+      threadsHtml = stale.map((t) => `<div class="focus-thread-row"><span>${esc(t.text).slice(0, 60)}</span><em>第 ${t.latest?.no || '?'} 章</em></div>`).join('');
+    }
+  } catch { /* 报告出错就不显示这块 */ }
+  const povLine = ch.pov ? `「${esc(ch.pov)}」` : '<span class="dim">任意人（未设本章视角）</span>';
+  const payoff = ch.payoff;
+  const payoffLine = payoff && typeof payoff.score === 'number'
+    ? `⚡${payoff.score}/5${typeof payoff.conflict === 'number' ? ` · 冲突 ${payoff.conflict}/5` : ''}${payoff.type ? ` · ${esc(payoff.type)}` : ''}`
+    : '<span class="dim">还没打档</span>';
+  showModal(`<h3>本章聚焦 · 第 ${esc(String(ch.no || ''))} 章</h3>
+    <p class="modal-sub">${esc(ch.title || '未命名')} · 这份清单只汇聚本地数据，不用模型。</p>
+    <div class="focus-list">
+      <div class="focus-row"><span class="focus-label">本章视角</span><div>${povLine}</div></div>
+      <div class="focus-row"><span class="focus-label">目标进度</span><div>${target ? `${words} / ${target} 字 · ${pct}%` : `${words} 字（没设本章目标）`}</div></div>
+      <div class="focus-row"><span class="focus-label">章纲对齐</span><div>${outlineHtml}</div></div>
+      <div class="focus-row wide"><span class="focus-label">出场人物</span><div class="focus-cast">${castHtml}</div></div>
+      <div class="focus-row wide"><span class="focus-label">未决线索</span><div class="focus-threads">${threadsHtml}</div></div>
+      <div class="focus-row"><span class="focus-label">爽点 / 冲突</span><div>${payoffLine}</div></div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-primary" data-action="cancel">关闭</button></div>`);
+}
+
 function openEntryStatesModal(entry, states) {
   const name = entry?.name || '未命名';
   showModal(`<h3>「${esc(name)}」状态变化</h3>
@@ -11385,6 +11572,8 @@ function renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache) {
       ${field('说话风格', 'speech', c)}
       ${field('成长弧线', 'arc', c)}
       ${field('检索关键词（逗号分隔）', 'kwText', { kwText: (c.keywords || []).join('，') })}
+      ${field('别名 / 称谓（逗号分隔）', 'aliasText', { aliasText: (c.aliases || []).join('，') })}
+      ${field('口头禁用词（逗号分隔）', 'voiceBansText', { voiceBansText: (c.voiceBans || []).join('，') })}
     </div>
     ${field('关系（每行一条：对象|关系|备注）', 'relText', { relText: (c.relations || []).map((r) => `${r.to}|${r.type || ''}|${r.note || ''}`).join('\n') }, { area: true, rows: 2 })}
     <div class="char-appear-slot">${characterIndexHtml(c, i, charIndex, mentionIndex, stateCache)}</div>`;
@@ -11428,6 +11617,18 @@ function renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache) {
     c.keywords = kw.value.split(/[,，、\s]+/).filter(Boolean);
     saveNovelPart({ bible: n.bible });
   });
+  const aliasesEl = div.querySelector('[data-key="aliasText"]');
+  aliasesEl.addEventListener('input', () => {
+    if (c.locked) return;
+    c.aliases = aliasesEl.value.split(/[,，、\s]+/).filter(Boolean);
+    saveNovelPart({ bible: n.bible });
+  });
+  const bansEl = div.querySelector('[data-key="voiceBansText"]');
+  bansEl.addEventListener('input', () => {
+    if (c.locked) return;
+    c.voiceBans = bansEl.value.split(/[,，、\s]+/).filter(Boolean);
+    saveNovelPart({ bible: n.bible });
+  });
   const rel = div.querySelector('[data-key="relText"]');
   rel.addEventListener('input', () => {
     if (c.locked) return;
@@ -11444,6 +11645,7 @@ function renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache) {
   };
   div.querySelector('[data-key="name"]').addEventListener('change', paintIndex);
   kw.addEventListener('change', paintIndex);
+  aliasesEl.addEventListener('change', paintIndex);
   div.querySelector('.del').onclick = () => {
     if (!confirm(`删除人物「${c.name || i + 1}」？`)) return;
     removeBibleEntry('characters', i, '人物');
@@ -12401,6 +12603,64 @@ function cpSvg(cp) {
   }).join('');
   const avgY = scoredIdx.length ? yOf(Math.min(100, Math.max(0, cp.avg))) : null;
   return `<svg class="pcv-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="读者完读率曲线，0-100%">${grid}${xlabels}${avgY !== null ? `<line class="pcv-avg" x1="${PL}" x2="${W - PR}" y1="${avgY.toFixed(1)}" y2="${avgY.toFixed(1)}"/>` : ''}${path ? `<path class="pcv-line" d="${path}"/>` : ''}${dots}</svg>`;
+}
+
+/** ---- 术语表：统一全书用词，AI 生成时整表注入，不许自行换说法 ---- */
+function renderGlossaryTab(host, n) {
+  if (!Array.isArray(n.bible.glossary)) n.bible.glossary = [];
+  const items = n.bible.glossary;
+  host.innerHTML = `
+    <div class="bible-block">
+      <h2>术语表 <span style="flex:1"></span><span class="dim small">${items.length} 条</span></h2>
+      <p class="dim small">功法、地名、黑话、设定名词的统一说法。生成时整表强制注入上下文——AI 不会再把「玄冰石」写成三种写法。「别名」列同一行登记，别名也会一起进上下文。</p>
+      <label class="field-label">搜索<input class="input" id="glossSearch" placeholder="搜词条 / 含义 / 别名" autocomplete="off" /></label>
+      <div class="row gap6" style="margin-bottom:10px">
+        <input id="glossNewTerm" class="input" placeholder="词条" style="width:140px" />
+        <input id="glossNewMeaning" class="input" placeholder="含义，一句话说清…" style="flex:1" />
+        <input id="glossNewAlias" class="input" placeholder="别名，可多个（、分隔）" style="width:170px" />
+        <button class="btn btn-sm" id="glossAdd">${ico('plus')}记下</button>
+      </div>
+      <div class="glossary-list" id="glossaryList"></div>
+    </div>`;
+  const listEl = $('#glossaryList', host);
+  const renderList = () => {
+    const q = String($('#glossSearch', host)?.value || '').trim().toLowerCase();
+    const matched = q ? items.filter((x) => [x.term, x.meaning, (x.alias || []).join(' ')].filter(Boolean).some((s) => String(s).toLowerCase().includes(q))) : items;
+    if (!matched.length) {
+      listEl.innerHTML = `<p class="dim">${q ? `没有匹配「${esc(q)}」的术语。` : '还没有术语。把功法、地名、黑话记下来，AI 就不会乱写。'}</p>`;
+      return;
+    }
+    listEl.innerHTML = matched.map((item) => `
+      <div class="glossary-card" data-id="${esc(item.id)}">
+        <div class="glossary-head"><b class="glossary-term">${esc(item.term)}</b>${item.alias?.length ? `<span class="glossary-alias">别名：${item.alias.map((a) => esc(a)).join('、')}</span>` : ''}<span style="flex:1"></span><button type="button" class="icon-btn sm glossary-del" aria-label="删除术语" title="删除术语">${ico('trash')}</button></div>
+        ${item.meaning ? `<div class="glossary-meaning">${esc(item.meaning)}</div>` : ''}
+      </div>`).join('');
+  };
+  host.querySelector('#glossSearch').addEventListener('input', renderList);
+  host.querySelector('#glossAdd').addEventListener('click', () => {
+    const term = String(host.querySelector('#glossNewTerm')?.value || '').trim();
+    const meaning = String(host.querySelector('#glossNewMeaning')?.value || '').trim();
+    const alias = String(host.querySelector('#glossNewAlias')?.value || '').split(/[、,，/\\s]+/).map((s) => s.trim()).filter(Boolean);
+    if (!term) return toast('先填词条', 'err');
+    items.push({ id: uid('glo'), term, meaning: meaning || undefined, alias: alias.length ? alias : undefined });
+    host.querySelector('#glossNewTerm').value = '';
+    host.querySelector('#glossNewMeaning').value = '';
+    host.querySelector('#glossNewAlias').value = '';
+    saveNovelPart({ bible: n.bible });
+    renderList();
+  });
+  listEl.addEventListener('click', (e) => {
+    const delBtn = e.target.closest('.glossary-del');
+    if (!delBtn) return;
+    const id = delBtn.closest('.glossary-card')?.dataset?.id;
+    const idx = items.findIndex((x) => x.id === id);
+    if (idx < 0) return;
+    const [removed] = items.splice(idx, 1);
+    saveNovelPart({ bible: n.bible });
+    renderList();
+    toast('已删除', 'ok', { label: '撤销', onClick: () => { items.splice(idx, 0, removed); saveNovelPart({ bible: n.bible }); renderList(); } });
+  });
+  renderList();
 }
 
 /** ---- 生成记录：每次 AI 调用留一条 — 任务/模型/落在哪一章/注入了哪些资料/产出量/成败 ---- */
@@ -15398,6 +15658,7 @@ function cmdkSource() {
     op('全书体检', 'pulse', () => { setView('studio'); openHealthReport(); });
     op('影响范围分析', 'git-branch', () => { setView('studio'); openPropagationAnalysis(); });
     op('交稿检查', 'stamp', () => openSubmitCheck());
+    op('本章聚焦', 'eye', () => { setView('studio'); openFocusLens(); });
     op('章节看板', 'columns', () => { setView('studio'); openChapterBoard(); }, 'Ctrl+Alt+B');
     op('文字校对', 'proof', () => { setView('studio'); openProof(); }, 'Ctrl+Alt+P');
     op('本章修订清单', 'check', () => {

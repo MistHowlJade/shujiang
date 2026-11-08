@@ -252,6 +252,13 @@ const BOOKCHECK = `**总判词**：钩子立住了，人物立住一半，开书
 1. 第 2 章加一个「当下」钩子——别让读者等师门旧事讲完再往前冒，穿插一件现在正在发生的奇怪事。
 2. 谢迟的目标在第 3 章之前要更直接地摆给读者——读者知道主角想干什么，才留得住。
 3. 里程碑密度：前三章落地一个明确承诺（比如「师傅留下的口信要找到」），后面每两三章回收一次。`;
+const HOOK = { score: 4, verdict: '能断，钩子不够硬', reason: '章末拍在牌位上，离真相还差一步，追更欲够但不够狠', better: '此处即可' };
+const POISON = [
+  { severity: 'medium', risk: '注水', quote: '师门灭门那年他七岁', reason: '背景交代连写两章，节奏停在原地', suggest: '压缩成一句，直接切到现在' },
+];
+const SENSITIVITY = [
+  { severity: 'low', risk: '暴力血腥', quote: '被捡回来的时候怀里揣着一页烧焦的剑谱', reason: '含糊其词，平台一般不追究' },
+];
 const PAYOFF = { score: 4, type: '反转', note: '剑鞘秘密第一次被明示，悬念与情绪都立住了', suggestion: '保持这个节奏，第12章揭示前不放水', conflict: 3, conflictNote: '误会激化，两拨人在茶馆门口对峙了半场' };
 const PROPAGATION = [
   { chapter: 2, affected: true, reason: '师傅训话会被这段改写重新定义', evidence: '「师傅说过，剑不会自己开鞘，要等主人开口」', advice: '同步改第2章的训话那一段' },
@@ -327,6 +334,10 @@ function decide(text) {
   if (has('分卷大纲')) return 'outline';
   if (has('审稿意见')) return 'review';
   if (has('文风档案')) return 'style';
+  // 读者视角三件套（毒点 / 断章 / 敏感内容）
+  if (has('让人弃书') || has('弃书的点')) return 'poison';
+  if (has('断章位置')) return 'hook';
+  if (has('可能踩线') || has('踩线')) return 'sensitivity';
   // 按批注改稿：根据请求里的原文动态造一句能匹配上的 quote，顺一跟 tail 改一嘴，稳定通过
   if (has('按以下批注')) return 'anno_fix';
   if (has('请检查以下文字')) return 'diagnose';
@@ -361,6 +372,12 @@ function buildReply(text, model = '') {
       return { kind, content: REVIEW };
     case 'style':
       return { kind, content: STYLE };
+    case 'poison':
+      return { kind, content: JSON.stringify(POISON) };
+    case 'hook':
+      return { kind, content: JSON.stringify(HOOK) };
+    case 'sensitivity':
+      return { kind, content: JSON.stringify(SENSITIVITY) };
     case 'anno_fix': {
       const src = quoted(text).replace(/\n+/g, ' ').trim();
       const q = src.slice(0, Math.min(24, src.length));
