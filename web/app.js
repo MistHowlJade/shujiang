@@ -10137,6 +10137,7 @@ function renderBible() {
   if (bibleTab === 'arcs') return renderArcsTab(host, n);
   if (bibleTab === 'relations') return renderRelationsTab(host, n);
   if (bibleTab === 'threads') return renderThreadsTab(host, n);
+  if (bibleTab === 'reveal') return renderRevealPlanTab(host, n);
   return renderStyleTab(host, n);
 }
 
@@ -10757,6 +10758,7 @@ function renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache) {
       <span style="flex:1"></span>
       <button class="lock-btn${c.locked ? ' on' : ''}" title="${c.locked ? '取消锁定' : '锁定后 AI 生成不可改变此人设定'}" aria-label="${c.locked ? '取消锁定' : '锁定'}">${ico('lock')}</button>
       <button class="vis-btn${(c.visibility || '') === 'shadowed' ? ' on' : ''}" title="${(c.visibility || '') === 'shadowed' ? '改为已揭示' : '尚未揭示（伏笔中）'}" aria-label="${(c.visibility || '') === 'shadowed' ? '改为已揭示' : '尚未揭示（伏笔中）'}">${ico((c.visibility || '') === 'shadowed' ? 'eye-off' : 'eye')}</button>
+      <input class="input reveal-at" data-reveal-at type="number" min="1" step="1" placeholder="第几章揭示" title="预计第几章揭示（留空 = 不定计划）" aria-label="预计揭示章节号" value="${c.revealAt || ''}" ${c.locked ? 'disabled' : ''} ${(c.visibility || '') === 'shadowed' ? '' : 'hidden'} />
       <button class="del" title="删除" ${c.locked ? 'disabled' : ''}>${ico('trash')}</button>
     </div>
     <div class="entry-locked-note" ${c.locked ? '' : 'hidden'}>已锁定，AI 生成不会改动此设定</div>
@@ -10781,18 +10783,22 @@ function renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache) {
     c.visibility = now;
     const btn = div.querySelector('.vis-btn');
     btn.classList.toggle('on', now === 'shadowed');
+    const nextTip = now === 'shadowed' ? '改为已揭示' : '尚未揭示（伏笔中）';
+    btn.title = nextTip;
+    btn.setAttribute('aria-label', nextTip);
     const use = btn.querySelector('use');
     if (use) use.setAttribute('href', '#' + (now === 'shadowed' ? 'i-eye-off' : 'i-eye'));
+    const atInput = div.querySelector('.reveal-at');
+    if (atInput) atInput.hidden = now !== 'shadowed';
     saveNovelPart({ bible: n.bible });
   });
-  // 揭示位切换
-  div.querySelector('.vis-btn').addEventListener('click', () => {
-    const now = w.visibility === 'shadowed' ? 'shown' : 'shadowed';
-    w.visibility = now;
-    const btn = div.querySelector('.vis-btn');
-    btn.classList.toggle('on', now === 'shadowed');
-    const use = btn.querySelector('use');
-    if (use) use.setAttribute('href', '#' + (now === 'shadowed' ? 'i-eye-off' : 'i-eye'));
+  // 揭示计划：改预计揭示章节号
+  const revealAt = div.querySelector('.reveal-at');
+  revealAt.addEventListener('change', () => {
+    if (c.locked) return;
+    const v = Math.floor(Number(revealAt.value));
+    c.revealAt = Number.isFinite(v) && v >= 1 ? v : null;
+    if (revealAt.value !== '' && !c.revealAt) revealAt.value = '';
     saveNovelPart({ bible: n.bible });
   });
   // 锁定切换
@@ -10952,6 +10958,7 @@ function renderWorldEntry(w, i, n, mentionIndex, mentionCache, stateCache) {
       <span style="flex:1"></span>
       <button class="lock-btn${w.locked ? ' on' : ''}" title="${w.locked ? '取消锁定' : '锁定后 AI 生成不可改变此条目'}" aria-label="${w.locked ? '取消锁定' : '锁定'}">${ico('lock')}</button>
       <button class="vis-btn${(w.visibility || '') === 'shadowed' ? ' on' : ''}" title="${(w.visibility || '') === 'shadowed' ? '改为已揭示' : '尚未揭示（伏笔中）'}" aria-label="${(w.visibility || '') === 'shadowed' ? '改为已揭示' : '尚未揭示（伏笔中）'}">${ico((w.visibility || '') === 'shadowed' ? 'eye-off' : 'eye')}</button>
+      <input class="input reveal-at" data-reveal-at type="number" min="1" step="1" placeholder="第几章揭示" title="预计第几章揭示（留空 = 不定计划）" aria-label="预计揭示章节号" value="${w.revealAt || ''}" ${w.locked ? 'disabled' : ''} ${(w.visibility || '') === 'shadowed' ? '' : 'hidden'} />
       <button class="del" title="删除" ${w.locked ? 'disabled' : ''}>${ico('trash')}</button>
     </div>
     <div class="entry-locked-note" ${w.locked ? '' : 'hidden'}>已锁定，AI 生成不会改动此设定</div>
@@ -10959,6 +10966,30 @@ function renderWorldEntry(w, i, n, mentionIndex, mentionCache, stateCache) {
     ${field('检索关键词（逗号分隔）', 'kwText', { kwText: (w.keywords || []).join('，') })}
     <div class="world-index-slot">${worldMentionsHtml(w, mentionIndex, i, mentionCache, stateCache)}</div>`;
   bindFields(div, w, () => saveNovelPart({ bible: n.bible }));
+  // 揭示位切换
+  div.querySelector('.vis-btn').addEventListener('click', () => {
+    const now = w.visibility === 'shadowed' ? 'shown' : 'shadowed';
+    w.visibility = now;
+    const btn = div.querySelector('.vis-btn');
+    btn.classList.toggle('on', now === 'shadowed');
+    const nextTip = now === 'shadowed' ? '改为已揭示' : '尚未揭示（伏笔中）';
+    btn.title = nextTip;
+    btn.setAttribute('aria-label', nextTip);
+    const use = btn.querySelector('use');
+    if (use) use.setAttribute('href', '#' + (now === 'shadowed' ? 'i-eye-off' : 'i-eye'));
+    const atInput = div.querySelector('.reveal-at');
+    if (atInput) atInput.hidden = now !== 'shadowed';
+    saveNovelPart({ bible: n.bible });
+  });
+  // 揭示计划：改预计揭示章节号
+  const revealAt = div.querySelector('.reveal-at');
+  revealAt.addEventListener('change', () => {
+    if (w.locked) return;
+    const v = Math.floor(Number(revealAt.value));
+    w.revealAt = Number.isFinite(v) && v >= 1 ? v : null;
+    if (revealAt.value !== '' && !w.revealAt) revealAt.value = '';
+    saveNovelPart({ bible: n.bible });
+  });
   div.querySelector('.lock-btn').addEventListener('click', () => {
     w.locked = !w.locked;
     div.classList.toggle('entry--locked', w.locked);
@@ -11532,6 +11563,85 @@ function renderThreadsTab(host, n) {
     }
     const jump = e.target.closest('.thread-jump');
     if (jump) openChapterFromIndex(jump.dataset.threadCh);
+  });
+}
+
+/** ---- 揭示计划：给尚未揭示的条目定一个预计揭示章节 ---- */
+function collectRevealPlan(n) {
+  const rows = [];
+  (n?.bible?.characters || []).forEach((entry, idx) => {
+    if ((entry.visibility || '') !== 'shadowed') return;
+    rows.push({ kind: 'character', idx, kindClass: 'unresolved', kindLabel: '人物', name: entry.name, category: entry.role || '', entry });
+  });
+  (n?.bible?.world || []).forEach((entry, idx) => {
+    if ((entry.visibility || '') !== 'shadowed') return;
+    rows.push({ kind: 'world', idx, kindClass: 'foreshadowing', kindLabel: entry.category || '设定', name: entry.name, category: entry.category || '', entry });
+  });
+  return rows;
+}
+
+function revealBadge(at, curNo) {
+  if (!at) return '<span class="reveal-badge reveal-none">未定章节</span>';
+  if (at > curNo) return `<span class="reveal-badge reveal-wait">还差 ${at - curNo} 章</span>`;
+  if (at === curNo) return '<span class="reveal-badge reveal-now">本章计划揭示</span>';
+  return `<span class="reveal-badge reveal-overdue">已过 ${curNo - at} 章没揭示</span>`;
+}
+
+function renderRevealPlanTab(host, n) {
+  const chapters = n.chapters || [];
+  const current = S.chapterId ? chapters.find((c) => c.id === S.chapterId) : null;
+  const curNo = current ? Number(current.no) || 1
+    : chapters.reduce((max, c) => Math.max(max, Number(c.no) || 0), 0) || 1;
+  const pending = collectRevealPlan(n);
+  const planned = pending.filter((r) => Number(r.entry.revealAt) >= 1);
+  const overdue = planned.filter((r) => Number(r.entry.revealAt) <= curNo);
+  const sorted = pending.slice().sort((a, b) => {
+    const ra = Number(a.entry.revealAt) || Infinity;
+    const rb = Number(b.entry.revealAt) || Infinity;
+    return ra - rb || String(a.name || '').localeCompare(String(b.name || ''), 'zh');
+  });
+
+  host.innerHTML = `
+    <div class="bible-block">
+      <h2>揭示计划
+        <span style="flex:1"></span>
+      </h2>
+      <p class="dim small">给「尚未揭示」的人物 / 世界观词条定一个预计揭示的章节号——它们是读者不知道、只有作者知道的底牌。定了之后，上下文里会按章节号松紧处理：未到计划章严格压住；到了计划章也只是「作者要求才写」。到期还没点「标记已揭示」的会标红。揭示过的条目自动从这里消失。</p>
+      <div class="thread-stats">
+        <span class="thread-stat"><b>${pending.length}</b> 条待揭示</span>
+        <span class="thread-stat"><b>${planned.length}</b> 条已定章节</span>
+        <span class="thread-stat${overdue.length ? ' stat-overdue' : ''}"><b>${overdue.length}</b> 条已过计划没揭示</span>
+        <span class="thread-stat dim-text">按第 ${curNo} 章计算</span>
+      </div>
+      ${sorted.length ? `<div class="reveal-list">${sorted.map((r) => `
+        <div class="reveal-row" data-kind="${r.kind}" data-idx="${r.idx}">
+          <span class="thread-kind ${r.kindClass}">${esc(r.kindLabel)}</span>
+          <b class="reveal-name">${esc(r.name || '未命名')}</b>
+          ${revealBadge(Number(r.entry.revealAt) || 0, curNo)}
+          <label class="reveal-field">第 <input class="input reveal-input" type="number" min="1" step="1" value="${Number(r.entry.revealAt) || ''}" placeholder="?" aria-label="预计揭示章节号" /> 章揭示</label>
+          <button type="button" class="btn btn-sm btn-text reveal-done">标记已揭示</button>
+        </div>`).join('')}</div>`
+        : '<p class="thread-empty">现在没有「尚未揭示」的条目。在人物 / 世界观卡右上角点「眼睛」图标可以标为尚未揭示，再在这张卡上定一个揭示章节号。</p>'}
+    </div>`;
+
+  host.querySelectorAll('.reveal-row').forEach((row) => {
+    const list = row.dataset.kind === 'character' ? n.bible.characters : n.bible.world;
+    const entry = list[Number(row.dataset.idx)];
+    if (!entry) return;
+    const input = row.querySelector('.reveal-input');
+    const commit = () => {
+      const v = Math.floor(Number(input.value));
+      entry.revealAt = Number.isFinite(v) && v >= 1 ? v : null;
+      if (!entry.revealAt) input.value = '';
+      saveNovelPart({ bible: n.bible });
+    };
+    input.addEventListener('change', () => { commit(); renderBible(); });
+    row.querySelector('.reveal-done').addEventListener('click', () => {
+      entry.visibility = 'shown';
+      saveNovelPart({ bible: n.bible });
+      toast(`「${entry.name || '条目'}」已标记为已揭示`, 'ok');
+      renderBible();
+    });
   });
 }
 

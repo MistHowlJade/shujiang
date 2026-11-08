@@ -159,9 +159,20 @@ export function buildContext(novel, opts = {}) {
   push('全书总纲', topBits, true);
 
   // 尚未揭示给读者的设定：提示 AI 不要在正文里揭露这些
+  // 定了揭示计划的：未到计划章严格压住；到了计划章也只是「作者要求才写」
+  const curNo = idx >= 0 ? Number(chapters[idx]?.no) || 0 : 0;
+  const shadowedLine = (kind, name, revealAt) => {
+    const planned = Number(revealAt);
+    if (planned > 0 && curNo > 0) {
+      return planned <= curNo
+        ? `${kind}·${name}：尚未揭示，计划于第${planned}章揭示（本章已到计划章）；仅当作者要求时才写出，否则继续压着`
+        : `${kind}·${name}：尚未揭示，计划于第${planned}章揭示（${planned - curNo} 章后），此事不要向读者揭露`;
+    }
+    return `${kind}·${name}：尚未揭示，此事不要向读者揭露`;
+  };
   const shadowedBits = [
-    ...(novel.bible?.characters || []).filter((c) => c.visibility === 'shadowed').map((c) => `人物·${c.name}：尚未揭示，此事不要向读者揭露`),
-    ...(novel.bible?.world || []).filter((w) => w.visibility === 'shadowed').map((w) => `设定·${w.name}：尚未揭示，此事不要向读者揭露`),
+    ...(novel.bible?.characters || []).filter((c) => c.visibility === 'shadowed').map((c) => shadowedLine('人物', c.name, c.revealAt)),
+    ...(novel.bible?.world || []).filter((w) => w.visibility === 'shadowed').map((w) => shadowedLine('设定', w.name, w.revealAt)),
   ];
   if (shadowedBits.length) push('尚未揭示（不要写出真相）', shadowedBits.join('\n'), true);
 

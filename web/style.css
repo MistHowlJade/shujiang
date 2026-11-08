@@ -1733,6 +1733,23 @@ kbd {
 .ar-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
 .ar-meta { flex: none; color: var(--text-4); font-size: 11px; }
 
+/* 揭示计划 */
+.reveal-list { display: flex; flex-direction: column; gap: 7px; max-height: 60vh; overflow: auto; }
+.reveal-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
+  flex-wrap: wrap;
+}
+.reveal-name { font-size: 12.5px; }
+.reveal-field { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--text-4); font-size: 11.5px; white-space: nowrap; }
+.reveal-input { width: 56px; padding: 3px 6px; font-size: 11.5px; }
+.reveal-badge { flex: none; padding: 2px 8px; border-radius: var(--r-full); font-size: 10.5px; line-height: 1.7; }
+.reveal-none { color: var(--text-4); background: var(--surface-3); }
+.reveal-wait { color: var(--accent-hover); background: var(--accent-bg); }
+.reveal-now { color: var(--warning); background: var(--warning-bg); }
+.reveal-overdue { color: var(--danger); background: var(--danger-bg); font-weight: 600; }
+.reveal-at { width: 92px; font-size: 11px; padding: 4px 6px; }
+.thread-stat.stat-overdue b { color: var(--danger); }
 /* 跨章节传播分析 */
 .prop-list { max-height: 56vh; overflow: auto; margin: 0 -4px; padding: 2px 4px; }
 .prop-entity { border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; margin-bottom: 10px; }
