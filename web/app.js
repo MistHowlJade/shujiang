@@ -3123,6 +3123,12 @@ function openHealthReport() {
     <span><b class="health-thread-kind">未决</b>${esc(t.text)}</span><em>第 ${t.latest.no} 章</em>
   </button>`, 'thread', t.text, `未决线索：${String(t.text || '').slice(0, 20)}`)).join('');
 
+  // 爽点连档：连续两章以上 ≤1 分才报；没打过档的章节不参与
+  const slumpRows = (r.payoffSlumps || []).map((s) => withIgnore(`<div class="health-slump">
+    <div class="health-slump-label">${esc(s.label)}</div>
+    <div class="health-slump-chapters">${s.chapters.map((c) => healthChip(c)).join('')}</div>
+  </div>`, 'payoff', s.id, `爽点：${s.label}`)).join('');
+
   const noMemory = r.written.length > 0 && r.memCount === 0;
   const caution = r.issueKinds > 0 || noMemory;
   const verdict = !r.totalWords
@@ -3201,6 +3207,12 @@ function openHealthReport() {
         <h4>未回收线索 <span class="health-count">${staleUnpaid.length ? `${staleUnpaid.length} 条未决` : '无'}</span></h4>
         <p>从章节记忆汇总，共 ${r.unresolved.length} 条未决、${r.foreshadowing.length} 条伏笔${paidExcluded ? `；已标记 ${paidExcluded} 条回收，不再提醒` : ''}。是否有回收以正文为准——在「设定库 → 线索」里标记回收即可排除。</p>
         ${threadRows ? `<div class="health-rows">${threadRows}</div>` : healthOk(paidExcluded ? `章节记忆里的未决线索都标记过回收（${paidExcluded} 条）。` : '章节记忆里没有未决线索。')}
+      </section>
+
+      <section class="health-card wide">
+        <h4>爽点分布 <span class="health-count">${r.payoffCount || 0}/${total} 章打了档</span></h4>
+        <p>给每章打一个 0-5 的爽点分（写作面板快捷操作 → 「爽点档」，AI 评估、你决定存不存）。没打过档的章节不参与判断——不能因为没测就判它没戏。连续两章以上 ≤ 1 分会列在下面，可以点忽略（以后不再提醒）。</p>
+        ${slumpRows ? `<div class="health-rows">${slumpRows}</div>` : healthOk(r.payoffCount ? '打了档的章节里没有连续爽点偏低的，节奏立得住。' : '还没给任何一章打过爽点档。去「写作」面板点「爽点档」，AI 帮你看；没打档的章节这里不报警。')}
       </section>
     </div>
     ${r.memCount < total ? `<p class="health-disclaimer">章节记忆覆盖 ${r.memCount}/${total} 章，人物断档与线索统计会受此影响；可在「线索 → 批量补记忆」补齐。</p>` : ''}
@@ -4923,13 +4935,17 @@ function makeChapterItem(c, i, { filtered = false, group = null } = {}) {
     target ? `目标 ${fmtWords(target)} 字 · ${pct}%` : '',
   ].filter(Boolean).join(' · ');
   const w = wordsOf(c);
+  const payoff = (c.payoff && typeof c.payoff.score === 'number') ? c.payoff : null;
+  const payoffBadge = payoff
+    ? `<span class="ci-payoff ${payoff.score >= 4 ? 'hi' : payoff.score >= 2 ? 'mid' : 'lo'}" title="爽点档 ${payoff.score}/5${payoff.type ? ` · ${esc(payoff.type)}` : ''}：${esc(payoff.note || '')}">⚡${payoff.score}</span>`
+    : '';
   const moveButtons = filtered ? '' : `
       <button class="mini-act" data-a="up" title="上移" aria-label="上移">${ico('chev-up')}</button>
       <button class="mini-act" data-a="down" title="下移" aria-label="下移">${ico('chev-down')}</button>`;
   li.innerHTML = `
     <span class="ci-no">${i + 1}</span>
     <span class="ci-title">${esc(c.title || '未命名')}</span>
-    <span class="ci-words">${openRevs ? `<span class="ci-rev" title="${openRevs} 项待改">${openRevs}</span>` : ''}${c.memory ? '<button type="button" class="ci-mem" data-a="memory" title="查看本章记忆" aria-label="查看本章记忆"></button>' : ''}${w || ''}</span>
+    <span class="ci-words">${payoffBadge}${openRevs ? `<span class="ci-rev" title="${openRevs} 项待改">${openRevs}</span>` : ''}${c.memory ? '<button type="button" class="ci-mem" data-a="memory" title="查看本章记忆" aria-label="查看本章记忆"></button>' : ''}${w || ''}</span>
     <span class="ci-act">${moveButtons}
       <button class="mini-act" data-a="menu" title="分卷 / 本章操作" aria-label="分卷 / 本章操作">${ico('more')}</button>
       <button class="mini-act del" data-a="del" title="删除本章" aria-label="删除本章">${ico('x')}</button>
@@ -7357,6 +7373,14 @@ async function diagnoseOutput() {
       payload: { text },
     }, { target: 'diag' });
     const parsed = parseJsonLoose(acc);
+    if (!parsed) {
+      const mask = document.querySelector('#modalMask');
+      const setupOpen = mask && getComputedStyle(mask).display !== 'none';
+      diagList.innerHTML = setupOpen
+        ? '<p class="qs-error">这次还没发出去——先选个模型，选完再点一次「自检」就好了。</p>'
+        : '<p class="qs-error">AI 没按要求返回清单——可以换个模型再试。</p>';
+      return;
+    }
     const list = (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
       .filter((x) => x && typeof x === 'object' && x.text)
       .slice(0, 8);
@@ -8148,6 +8172,7 @@ $$('[data-quick]').forEach((btn) => btn.addEventListener('click', async () => {
   const kind = btn.dataset.quick;
   if (kind === 'batchMemory') return openBatchMemory();
   if (kind === 'propagate') return openPropagationAnalysis();
+  if (kind === 'payoff') return runPayoffAnalysis();
 
   const ch = currentChapter();
   if (!ch) return toast('先选一章', 'err');
@@ -10713,14 +10738,137 @@ function openPropagationAnalysis() {
   showModal(`<h3>影响范围 <span class="health-count">${r.totalEntities} 处设定</span></h3>
     <p class="modal-sub">分析依据：${esc(scope)}。当前章不计入。共命中 ${r.totalEntities} 处设定，涉及其他 ${hitChapters.size} 章（前文 ${r.totalBefore} 章次 · 后文 ${r.totalAfter} 章次）。</p>
     <div class="prop-list">${rows}</div>
-    <p class="dim small" style="margin-top:10px">只按名称 / 检索关键词做本地字符串匹配，不判断该不该改；动过的地方，这些章节里可能要跟着看一眼。动手前先看清楚，改完回来再查一次。</p>
-    ${closeFoot('知道了')}`,
+    <div class="prop-ai" id="propAiResult" hidden></div>
+    <p class="dim small" style="margin-top:10px">本地只按名称 / 检索关键词做字符串匹配，不判断该不该改；动过的地方，这些章节里可能要跟着看一眼。点「让 AI 判断」可以花一次模型的钱，让它逐个人头再给一遍「真的受影响 / 不用改」。</p>
+    <div class="modal-foot"><button class="btn btn-text" id="propAi">让 AI 判断影响</button><button class="btn btn-primary" id="propClose">知道了</button></div>`,
     (box) => {
       box.querySelector('#propClose').onclick = closeModal;
       box.querySelectorAll('[data-chapter]').forEach((el) => {
         el.onclick = () => { closeModal(); openChapterFromIndex(el.dataset.chapter); };
       });
+      const aiBtn = box.querySelector('#propAi');
+      let analyzing = false;
+      aiBtn?.addEventListener('click', async () => {
+        if (analyzing) return;
+        analyzing = true;
+        aiBtn.disabled = true;
+        aiBtn.textContent = 'AI 判断中…';
+        // 去重 + 排除当前章 + 最多 6 章，丢原文片段给模型
+        const seen = new Set();
+        const targets = [];
+        for (const e of r.entities) for (const c of e.chapters) {
+          if (seen.has(c.id)) continue;
+          seen.add(c.id);
+          const full = S.novel?.chapters?.find((x) => x.id === c.id);
+          if (full) targets.push({ id: c.id, no: c.no, title: c.title || '', excerpt: full.content || '', chars: (full.content || '').length });
+        }
+        targets.sort((a, b) => a.no - b.no);
+        const picked = targets.slice(0, 6);
+        const resultBox = box.querySelector('#propAiResult');
+        resultBox.hidden = false;
+        if (!picked.length) {
+          resultBox.innerHTML = '<p class="dim">没有后续章节需要判断。</p>';
+          aiBtn.disabled = false;
+          aiBtn.textContent = '让 AI 判断影响';
+          analyzing = false;
+          return;
+        }
+        resultBox.innerHTML = '<p class="dim">AI 正在逐个判断，别关窗口…</p>';
+        try {
+          const acc = await runStream({
+            task: 'propagation',
+            novelId: S.novel?.id,
+            chapterId: ch.id,
+            payload: { text: source, chapters: picked },
+          }, { target: 'diag' });
+          const parsed = parseJsonLoose(acc);
+          const list = (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
+            .filter((x) => x && typeof x === 'object' && Number(x.chapter) > 0)
+            .slice(0, picked.length);
+          if (!list.length) {
+            resultBox.innerHTML = '<p class="qs-error">AI 没按要求返回判断结果，换个模型再试。</p>';
+          } else {
+            const byNo = new Map(picked.map((t) => [t.no, t]));
+            resultBox.innerHTML = `<div class="prop-ai-head">AI 判断（共 ${list.length} 章）</div>` + list.map((item) => {
+              const t = byNo.get(Number(item.chapter));
+              const bad = Boolean(item.affected);
+              return `<div class="prop-ai-row ${bad ? 'bad' : 'ok'}">
+                <span class="prop-ai-flag">${bad ? '受影响' : '不用改'}</span>
+                <b>第 ${Number(item.chapter)} 章</b>
+                <span class="prop-ai-reason">${esc(String(item.reason || ''))}</span>
+                <span class="prop-ai-advice">${esc(String(item.advice || ''))}</span>
+              </div>`;
+            }).join('');
+          }
+        } catch (err) {
+          resultBox.innerHTML = `<p class="qs-error">AI 判断失败：${esc(err?.message || String(err))}</p>`;
+        } finally {
+          aiBtn.disabled = false;
+          aiBtn.textContent = '重新判断';
+          analyzing = false;
+        }
+      });
     });
+}
+
+/** ---- 爽点档：AI 打分，作者决定存不存 ---- */
+async function runPayoffAnalysis() {
+  const ch = currentChapter();
+  if (!ch) return toast('先打开一章', 'err');
+  const content = String($('#chContent')?.value ?? ch.content ?? '');
+  if (!content.trim()) return toast('这一章还没有正文——先写两笔再让 AI 看', 'err');
+  const card = $('#payoffCard');
+  card.hidden = false;
+  card.innerHTML = '<p class="dim small" style="margin:4px 2px">AI 正在看这一章，别关窗口…</p>';
+  try {
+    const acc = await runStream({ task: 'payoff', novelId: S.novel?.id, chapterId: ch.id }, { target: 'diag' });
+    const obj = parseJsonLoose(acc);
+    if (!obj || typeof obj !== 'object') {
+      const mask = document.querySelector('#modalMask');
+      const setupOpen = mask && getComputedStyle(mask).display !== 'none';
+      card.innerHTML = setupOpen
+        ? '<p class="qs-error">这次还没发出去——先选个模型（服务商已经接上了），选完再点一次「爽点档」就好了。</p>'
+        : '<p class="qs-error">AI 没按要求返回评分——可以换个模型再试。</p>';
+      return;
+    }
+    const score = Math.max(0, Math.min(5, Math.round(Number(obj.score) || 0)));
+    const type = String(obj.type || '无爽点').slice(0, 12);
+    const note = String(obj.note || '').slice(0, 80);
+    const suggestion = String(obj.suggestion || '').slice(0, 80);
+    paintPayoffCard(card, { score, type, note, suggestion }, ch);
+  } catch (err) {
+    card.innerHTML = `<p class="qs-error">爽点档失败：${esc(err?.message || String(err))}</p>`;
+  }
+}
+
+function paintPayoffCard(card, p, ch) {
+  card.innerHTML = `
+    <div class="payoff-head">
+      <span class="payoff-title">爽点档 · 本章</span>
+      <span class="payoff-dots" aria-label="爽点 ${p.score}/5">${[0, 1, 2, 3, 4].map((i) => `<i class="${i < p.score ? 'on' : ''}"></i>`).join('')}</span>
+      <span class="payoff-score">${p.score}<small>/5</small></span>
+      <span class="payoff-type">${esc(p.type)}</span>
+      <button type="button" class="mini-act" id="payoffDismiss" title="收起（不保存）" aria-label="收起">${ico('x')}</button>
+    </div>
+    <p class="payoff-note">${esc(p.note)}</p>
+    <p class="payoff-suggest"><b>建议：</b>${esc(p.suggestion)}</p>
+    <div class="payoff-foot">
+      <span class="dim small">AI 评估，不等于改对——爽不爽由你和读者说了算。</span>
+      <button type="button" class="btn btn-sm btn-primary" id="payoffSave">存入本章档案</button>
+    </div>`;
+  card.querySelector('#payoffDismiss').onclick = () => { card.hidden = true; };
+  card.querySelector('#payoffSave').onclick = async () => {
+    ch.payoff = { score: p.score, type: p.type, note: p.note, at: Date.now() };
+    try {
+      await api.send(`/api/novels/${S.novel.id}/chapters/${ch.id}`, { payoff: ch.payoff }, 'PUT');
+    } catch (err) {
+      toast(`保存失败：${err?.message || String(err)}`, 'err');
+      return;
+    }
+    refreshChapterList();
+    card.hidden = true;
+    toast('已存入本章档案', 'ok');
+  };
 }
 
 function openEntryStatesModal(entry, states) {
@@ -11587,6 +11735,38 @@ function revealBadge(at, curNo) {
   return `<span class="reveal-badge reveal-overdue">已过 ${curNo - at} 章没揭示</span>`;
 }
 
+/** 读者档案：按揭示章节罗列「第 N 章读者知道了什么」——纯本地，不调模型 */
+function readerTimelineHtml(reveals, maxNo, curNo, unscheduled) {
+  const byChapter = new Map();
+  for (const item of reveals) {
+    if (!byChapter.has(item.at)) byChapter.set(item.at, []);
+    byChapter.get(item.at).push(item);
+  }
+  let cumulative = 0;
+  const rows = [];
+  for (let k = 1; k <= maxNo; k += 1) {
+    const items = byChapter.get(k) || [];
+    cumulative += items.length;
+    const chips = items.length
+      ? items.map((x) => `<span class="rc-chip" title="${esc(x.kind)}">${esc(x.name)}</span>`).join('')
+      : '<span class="rc-none">—</span>';
+    rows.push(`<div class="reader-chapter${k === curNo ? ' now' : ''}">
+      <span class="rc-no">第 ${k} 章${k === curNo ? ' · 本章' : ''}</span>
+      <span class="rc-items">${chips}</span>
+      <span class="rc-cum">累计 ${cumulative} 条</span>
+    </div>`);
+  }
+  const futureCount = reveals.filter((x) => x.at > curNo).length;
+  return `
+    <details class="reader-arc">
+      <summary>读者档案 · 从第 1 章到第 ${maxNo} 章，读者知道什么
+        <span class="reader-arc-meta">${reveals.length} 条定了揭示章节${unscheduled ? `，${unscheduled} 条未定` : ''}${futureCount ? `，未来 ${futureCount} 条` : ''}</span>
+      </summary>
+      <div class="reader-arc-list">${rows.length ? rows.join('') : '<p class="thread-empty">还没有定揭示章节的条目。给尚未揭示的词条定一个「第几章揭示」，这里就会排出读者时间线。</p>'}</div>
+      ${unscheduled ? `<p class="dim small" style="margin-top:8px">${unscheduled} 条尚未揭示且没定揭示章节的条目不参与排序——它们在作者手里，读者暂时不知道。</p>` : ''}
+    </details>`;
+}
+
 function renderRevealPlanTab(host, n) {
   const chapters = n.chapters || [];
   const current = S.chapterId ? chapters.find((c) => c.id === S.chapterId) : null;
@@ -11600,6 +11780,12 @@ function renderRevealPlanTab(host, n) {
     const rb = Number(b.entry.revealAt) || Infinity;
     return ra - rb || String(a.name || '').localeCompare(String(b.name || ''), 'zh');
   });
+  const maxNo = chapters.reduce((max, c) => Math.max(max, Number(c.no) || 0), 0);
+  const readerReveals = [
+    ...(n?.bible?.characters || []).map((entry) => ({ kind: '人物', name: entry.name || '未命名', at: Number(entry.revealAt) || 0 })),
+    ...(n?.bible?.world || []).map((entry) => ({ kind: entry.category || '设定', name: entry.name || '未命名', at: Number(entry.revealAt) || 0 })),
+  ].filter((x) => x.at >= 1).sort((a, b) => a.at - b.at || String(a.name).localeCompare(String(b.name), 'zh'));
+  const unscheduled = pending.filter((r) => !(Number(r.entry.revealAt) >= 1)).length;
 
   host.innerHTML = `
     <div class="bible-block">
@@ -11622,6 +11808,7 @@ function renderRevealPlanTab(host, n) {
           <button type="button" class="btn btn-sm btn-text reveal-done">标记已揭示</button>
         </div>`).join('')}</div>`
         : '<p class="thread-empty">现在没有「尚未揭示」的条目。在人物 / 世界观卡右上角点「眼睛」图标可以标为尚未揭示，再在这张卡上定一个揭示章节号。</p>'}
+      ${readerTimelineHtml(readerReveals, maxNo, curNo, unscheduled)}
     </div>`;
 
   host.querySelectorAll('.reveal-row').forEach((row) => {

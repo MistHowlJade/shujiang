@@ -186,6 +186,20 @@ export function healthOk(text) {
   return `<p class="health-ok">${text}</p>`;
 }
 
+/** 低爽点连档：run 是一串连续 ≤1 分的章节（都有 payoff 档） */
+function makeSlump(run) {
+  const start = run[0];
+  const end = run[run.length - 1];
+  return {
+    id: `${start.no}-${end.no}`,
+    startNo: start.no,
+    endNo: end.no,
+    count: run.length,
+    chapters: run.map((c) => ({ id: c.id, no: c.no, title: c.title || '未命名' })),
+    label: `连续 ${run.length} 章爽点偏低（第 ${start.no}–${end.no} 章）`,
+  };
+}
+
 export function buildHealthReport(novel) {
   const chapters = (novel?.chapters || []).map((ch, i) => {
     const content = String(ch.content || '');
@@ -198,6 +212,7 @@ export function buildHealthReport(novel) {
       words: countWords(content),
       chars: content.length,
       stage: ch.stage || 'draft',
+      payoff: ch.payoff && typeof ch.payoff.score === 'number' ? ch.payoff : null,
     };
   });
   const written = chapters.filter((c) => c.words > 0);
@@ -330,6 +345,26 @@ export function buildHealthReport(novel) {
     .sort((a, b) => (a.latest?.no || 0) - (b.latest?.no || 0))
     .slice(0, 5);
 
+  // 爽点分布：连续两章及以上「打了档但 ≤ 1 分」，提醒读者可能开始打瞌睡。
+  // 没打过档的章节一律不参与判断——不能因为没测就判它没戏。
+  const slumps = [];
+  let run = [];
+  for (const c of written) {
+    const s = c.payoff?.score;
+    if (typeof s !== 'number') {
+      if (run.length >= 2) slumps.push(makeSlump(run));
+      run = [];
+      continue;
+    }
+    if (s <= 1) run.push(c);
+    else {
+      if (run.length >= 2) slumps.push(makeSlump(run));
+      run = [];
+    }
+  }
+  if (run.length >= 2) slumps.push(makeSlump(run));
+  const payoffCount = written.filter((c) => typeof c.payoff?.score === 'number').length;
+
   const issueKinds = [
     outliers.length,
     duplicates.length,
@@ -337,6 +372,7 @@ export function buildHealthReport(novel) {
     lowDialogue.length + highDialogue.length,
     gaps.length,
     staleThreads.length,
+    slumps.length,
   ].filter((n) => n > 0).length;
 
   return {
@@ -348,6 +384,7 @@ export function buildHealthReport(novel) {
     dialogueAvg, lowDialogue, highDialogue,
     gaps: gaps.slice(0, 6), gapTotal,
     unresolved, foreshadowing, staleThreads,
+    payoffSlumps: slumps.slice(0, 3), payoffCount,
     lastNo, issueKinds,
   };
 }
@@ -382,6 +419,7 @@ export function applyHealthIgnored(report, ignored = []) {
   cut('gaps', 'gap', (x) => x.name, 'gapTotal');
   cut('staleThreads', 'thread', (x) => x.text);
   cut('phrases', 'phrase', (x) => x.text);
+  cut('payoffSlumps', 'payoff', (x) => x.id);
   out.hidden = hidden;
   // 「有几类可以处理」要按过滤后的重新算，不然忽略了还照样说有 3 类
   out.issueKinds = [
@@ -391,6 +429,7 @@ export function applyHealthIgnored(report, ignored = []) {
     (out.lowDialogue?.length || 0) + (out.highDialogue?.length || 0),
     out.gaps.length,
     out.staleThreads.length,
+    out.payoffSlumps?.length || 0,
   ].filter((n) => n > 0).length;
   return out;
 }
@@ -441,6 +480,11 @@ export function healthMarkdown(r) {  const out = [];
     push('', '## 线索');
     push(`- 未决 ${r.unresolved.length} 条，伏笔 ${r.foreshadowing.length} 条`);
     r.staleThreads.forEach((t) => push(`- ${t.text}（最近提到：第 ${t.latest?.no || '?'} 章）`));
+  }
+  if (r.payoffSlumps?.length) {
+    push('', '## 爽点分布');
+    push(`- 打了档的 ${r.payoffCount || 0} 章`);
+    r.payoffSlumps.forEach((s) => push(`- ${s.label}`));
   }
   return out.join('\n');
 }

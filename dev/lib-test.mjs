@@ -1864,5 +1864,22 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('传播分析：空作品 / 空文本不报错', buildPropagationReport(null, '').entities.length === 0 && buildPropagationReport({}, 'x').entities.length === 0);
 }
 
+// ---------------------------------------------------------------
+// 爽点分布：连续两章以上打了档但 ≤ 1 分，体检会抓
+{
+  const mk = (no, score) => ({ id: `c${no}`, no, title: `第${no}章`, content: '这一章写了不少字。'.repeat(30), stage: 'done', payoff: score === null ? undefined : { score, type: '打脸', note: 'test' } });
+  const novel = { title: 'T', chapters: [mk(1, 3), mk(2, 1), mk(3, 0), mk(4, 5), mk(5, 1), mk(6, 1), mk(7, 1), mk(8, null), mk(9, 0)] };
+  const r = buildHealthReport(novel);
+  check('爽点：连续 ≤1 打档出现 slump', r.payoffSlumps.length === 2, JSON.stringify(r.payoffSlumps.map((s) => [s.startNo, s.endNo, s.count])));
+  check('爽点：统计打了档的章节数', r.payoffCount === 8, String(r.payoffCount));
+  check('爽点：slump 保留章节 id 与忽略键', r.payoffSlumps.every((s) => s.id && s.chapters.length === s.count));
+  const ignoredOne = applyHealthIgnored(r, [{ key: healthKey('payoff', r.payoffSlumps[0].id) }]);
+  check('爽点：忽略掉一条后只剩另一条', ignoredOne.payoffSlumps.length === 1, String(ignoredOne.payoffSlumps.length));
+  const ignoredAll = applyHealthIgnored(r, r.payoffSlumps.map((s) => ({ key: healthKey('payoff', s.id) })));
+  check('爽点：全部忽略后 issueKinds 少一类', ignoredAll.issueKinds === r.issueKinds - 1, `${ignoredAll.issueKinds} vs ${r.issueKinds}`);
+  check('爽点：没有打档的章节不参与连档判断', !buildHealthReport({ title: 'X', chapters: [mk(1, null), mk(2, null), mk(3, null)] }).payoffSlumps.length);
+  check('爽点：断档的低分不连档', !buildHealthReport({ title: 'Y', chapters: [mk(1, 1), mk(2, 5), mk(3, 0)] }).payoffSlumps.length);
+}
+
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
 process.exit(fail ? 1 : 0);

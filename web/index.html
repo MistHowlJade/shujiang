@@ -325,10 +325,12 @@
                     <button class="btn btn-sm btn-text" data-quick="memory" title="把本章的人物 / 伏笔 / 状态存下来，生成后续章节时会自动带上"><svg class="ico"><use href="#i-refresh" /></svg>存章节记忆</button>
                     <button class="btn btn-sm btn-text" data-quick="batchMemory" title="把还没存记忆的章节批量补上；会逐章调用模型">批量补记忆</button>
                     <button class="btn btn-sm btn-text" data-quick="propagate" title="分析这段文字里命中的设定痕迹，在其他章节哪里出现过——改动这里会牵动哪些章">影响范围</button>
+                    <button class="btn btn-sm btn-text" data-quick="payoff" title="AI 给本章打一个 0-5 的爽点分，觉得靠谱再存入本章档案（全书体检会看「连续爽点偏低」）">爽点档</button>
                     <button class="btn btn-sm btn-text" data-quick="summarize" title="给本章写一句概要，方便之后快速定位">生成概要</button>
                     <button class="btn btn-sm btn-text" data-quick="titles">起名</button>
                   </div>
                 </div>
+                <div class="payoff-card" id="payoffCard" hidden></div>
 
                 <div class="section-head">
                   <span>输出</span>

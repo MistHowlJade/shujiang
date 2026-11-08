@@ -240,6 +240,12 @@ const INSPIRATION_PROSE = "给你 5 个当下能写的方向，挑一个聊：\n
 
 
 
+const PAYOFF = { score: 4, type: '反转', note: '剑鞘秘密第一次被明示，悬念与情绪都立住了', suggestion: '保持这个节奏，第12章揭示前不放水' };
+const PROPAGATION = [
+  { chapter: 2, affected: true, reason: '师傅训话会被这段改写重新定义', advice: '同步改第2章的训话那一段' },
+  { chapter: 3, affected: false, reason: '藏经阁事件和这段无关', advice: '不用改' },
+  { chapter: 4, affected: true, reason: '剑痕的物理描写和剑鞘直接相关', advice: '对齐第4章剑鞘的破损程度' },
+];
 const DIAGNOSE = [
   {
     "severity": "medium",
@@ -309,6 +315,8 @@ function decide(text) {
   if (has('文风档案')) return 'style';
   if (has('请检查以下文字')) return 'diagnose';
   if (has('只输出修复后的文字')) return 'rewrite';
+  if (has('需要判断的章节')) return 'propagation';
+  if (has('爽点')) return 'payoff';
   if (has('开书') || has('灵感') || has('什么火') || has('热门榜')) return 'inspiration';
   if (has('8 个书名')) return 'titles';
   if (has('概括这一章')) return 'summary';
@@ -341,6 +349,10 @@ function buildReply(text, model = '') {
       return { kind, content: JSON.stringify(DIAGNOSE) };
     case 'rewrite':
       return { kind, content: /第十七圈/.test(text) ? '师傅亲手系的最后一圈。' : '他看了一眼酒壶，没有动。' };
+    case 'propagation':
+      return { kind, content: JSON.stringify(PROPAGATION) };
+    case 'payoff':
+      return { kind, content: JSON.stringify(PAYOFF) };
     case 'inspiration':
       return { kind, content: INSPIRATION_PROSE };
     case 'titles':

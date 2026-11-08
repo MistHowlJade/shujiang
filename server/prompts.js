@@ -410,6 +410,57 @@ ${text}`,
       };
     },
   },
+  /* ---------- 影响判断：这段改动牵连到哪些章 ---------- */
+  propagation: {
+    expect: 'json',
+    temperature: 0.2,
+    maxTokens: 1800,
+    build({ novel, pack, payload }) {
+      const text = String(payload?.text || '').slice(0, 2000);
+      const chapters = (Array.isArray(payload?.chapters) ? payload.chapters : []).slice(0, 6)
+        .map((c) => ({ no: Number(c?.no) || 0, title: String(c?.title || ''), excerpt: String(c?.excerpt || '').slice(0, 600), chars: Number(c?.chars) || 0 }))
+        .filter((c) => c.no > 0);
+      const chList = chapters.map((c) => `第${c.no}章「${c.title}」：\n"""\n${c.excerpt}\n"""`).join('\n\n');
+      return {
+        messages: [
+          sys('你是一位中文长篇小说责编。你的工作判断一段改动会不会牵连到后面的章节，给出结论，不改原文。', head(novel, pack)),
+          user(`作者正在处理下面这段文字（可能是改前也可能是改后），请逐个判断所列章节是否真的受影响。只从情节 / 人物设定 / 揭示节奏 / 伏笔逻辑角度判断，不要只因为「同一个名字出现过」就判受影响。
+只返回 JSON 数组，不要任何说明文字、不要 markdown 代码块。每个元素结构：
+{"chapter": 章节号, "affected": true|false, "reason": "一句话理由（30 字以内）", "advice": "一句话建议怎么做（30 字以内；不受影响时写「不用改」）"}
+
+作者正在处理的一段：
+"""
+${text}
+"""
+
+需要判断的章节：
+${chList}`),
+        ],
+      };
+    },
+  },
+  /* ---------- 爽点档：给本章打爽点分 ---------- */
+  payoff: {
+    expect: 'json',
+    temperature: 0.3,
+    maxTokens: 800,
+    build({ novel, pack, chapter }) {
+      const text = String(chapter?.content || '').slice(-3500);
+      return {
+        messages: [
+          sys('你是一位懂起点 / 番茄 / 晋江节奏的中文网文责任编辑。你的工作给本章打「爽点」分，给结论，不改原文。', head(novel, pack)),
+          user(`请评估这一章的「爽点」质量与密度：读者等这一章等得值不值。看冲突是否爆开、代价是否落地、主角是否有可感知的收获（信息差 / 装逼成熟 / 打脸 / 反转 / 情绪宣泄）。没有爽点也没关系，老实打 0-1 分。
+只返回 JSON 对象，不要任何说明文字、不要 markdown 代码块。结构：
+{"score": 0-5 的整数, "type": "打脸|反转|成长|揭秘|情绪宣泄|悬念|无爽点", "note": "一句话说明（40 字以内）", "suggestion": "一句话建议（40 字以内；分数 ≥ 4 就写「保持这个节奏」）"}
+
+本章正文：
+"""
+${text}
+"""`),
+        ],
+      };
+    },
+  },
   /* ---------- 对话助手 ---------- */
   chat: {
     expect: 'text',
