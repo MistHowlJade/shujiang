@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow" />
 <meta name="theme-color" content="#15110d" />
 <title>书匠 · AI 长篇小说创作台</title>
-<link rel="stylesheet" href="/style.css?v=1.0.14" />
+<link rel="stylesheet" href="/style.css?v=1.0.15" />
 <style id="designv1011">
   /* 书匠 · v1.0.11「东方典籍」视觉重写 —— 暖墨：衬线 + 赭金 + 朱砂 */
   @font-face { font-family: '思源宋体 VF'; src: local('Noto Serif SC'), local('Noto Serif SC VF'), local('NotoSerifSC-VF'); font-display: swap; }
@@ -94,19 +94,19 @@
   body[data-theme="dark"] { background: radial-gradient(1300px 460px at 50% -200px, rgba(217,162,95,.13), transparent 65%), var(--bg); }
   body[data-theme="light"] { background: radial-gradient(1300px 460px at 50% -200px, rgba(168,110,52,.12), transparent 65%), var(--bg); }
   /* iOS 26 折射玻璃：面板半透明 + 强模糊 + 顶部高光缘——背景暗金流光透过 */
-  body[data-theme="dark"] .rail { background: linear-gradient(180deg, rgba(54, 44, 34, .28), rgba(28, 23, 18, .4)) !important; backdrop-filter: blur(38px) saturate(2.3); -webkit-backdrop-filter: blur(38px) saturate(2.3); border-right: 1px solid rgba(255, 226, 180, .24); box-shadow: inset -1px 0 0 rgba(255, 230, 190, .12), inset 0 1px 0 rgba(255, 240, 214, .2) !important; }
-  body[data-theme="light"] .rail { background: linear-gradient(180deg, rgba(255, 253, 246, .45), rgba(243, 238, 227, .52)) !important; backdrop-filter: blur(30px) saturate(1.7); -webkit-backdrop-filter: blur(30px) saturate(1.7); border-right: 1px solid rgba(84, 62, 34, .2); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .8), inset 0 1px 0 rgba(255, 255, 255, .9) !important; }
+  body[data-theme="dark"] .rail { background: linear-gradient(180deg, rgba(54, 44, 34, .22), rgba(28, 23, 18, .32)) !important; backdrop-filter: blur(38px) saturate(2.3); -webkit-backdrop-filter: blur(38px) saturate(2.3); border-right: 1px solid rgba(255, 236, 208, .12); box-shadow: inset -1px 0 0 rgba(255, 236, 208, .12), inset 0 1px 0 rgba(255, 242, 218, .14), 0 20px 70px rgba(0, 0, 0, .32), 0 0 80px rgba(255, 214, 150, .06) !important; }
+  body[data-theme="light"] .rail { background: linear-gradient(180deg, rgba(255, 253, 246, .38), rgba(243, 238, 227, .44)) !important; backdrop-filter: blur(30px) saturate(1.7); -webkit-backdrop-filter: blur(30px) saturate(1.7); border-right: 1px solid rgba(90, 60, 35, .1); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .8), inset 0 1px 0 rgba(255, 255, 255, .9), 0 20px 70px rgba(132, 88, 40, .16), 0 0 80px rgba(232, 158, 92, .12) !important; }
   .rail .tab.on { color: var(--accent-hover) !important; box-shadow: inset 0 0 0 1px rgba(217,162,95,.4), inset 3px 0 0 var(--accent) !important; }
   .dock-main .card-head { border-bottom: 1px solid rgba(255,220,180,.08); border-top: 1px solid rgba(217,162,95,.38); border-radius: 10px; padding: 8px 10px 8px 12px; margin: 2px -2px 0 -2px; width: calc(100% + 4px); background: rgba(255,220,180,.02); }
   .rail .tab.on .ico { color: var(--accent-hover) !important; }
   .rail-nav { gap: 6px !important; }
-  body[data-theme="dark"] .topbar { background: linear-gradient(180deg, rgba(54, 44, 34, .28), rgba(31, 25, 20, .38)) !important; backdrop-filter: blur(36px) saturate(2.15); -webkit-backdrop-filter: blur(36px) saturate(2.15); border-bottom: 1px solid rgba(255, 226, 180, .24); box-shadow: inset 0 1px 0 rgba(255, 240, 214, .2), 0 12px 44px rgba(0, 0, 0, .4) !important; }
-  body[data-theme="light"] .topbar { background: linear-gradient(180deg, rgba(255, 253, 246, .48), rgba(246, 240, 229, .54)) !important; backdrop-filter: blur(28px) saturate(1.7); -webkit-backdrop-filter: blur(28px) saturate(1.7); border-bottom: 1px solid rgba(84, 62, 34, .2); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), 0 10px 36px rgba(84, 62, 34, .14) !important; }
+  body[data-theme="dark"] .topbar { background: linear-gradient(180deg, rgba(54, 44, 34, .22), rgba(31, 25, 20, .31)) !important; backdrop-filter: blur(38px) saturate(2.3); -webkit-backdrop-filter: blur(38px) saturate(2.3); border-bottom: 1px solid rgba(255, 236, 208, .09); box-shadow: inset 0 1px 0 rgba(255, 242, 218, .14), 0 22px 80px rgba(0, 0, 0, .38), 0 0 90px rgba(255, 214, 150, .07) !important; }
+  body[data-theme="light"] .topbar { background: linear-gradient(180deg, rgba(255, 253, 246, .38), rgba(246, 240, 229, .44)) !important; backdrop-filter: blur(30px) saturate(1.7); -webkit-backdrop-filter: blur(30px) saturate(1.7); border-bottom: 1px solid rgba(90, 60, 35, .1); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8), 0 20px 70px rgba(132, 88, 40, .16), 0 0 80px rgba(232, 158, 92, .13) !important; }
   .topbar-mid .top-export:hover { border-color: var(--accent-line) !important; color: var(--accent-hover) !important; }
   .topbar-mid .top-export { color: var(--text-1) !important; border-color: var(--border-2) !important; }
   .topbar-mid .ico { color: var(--accent-hover) !important; }
-  body[data-theme="dark"] .dock-main { background: linear-gradient(180deg, rgba(54, 44, 34, .33), rgba(31, 25, 20, .44)) !important; backdrop-filter: blur(36px) saturate(2.15); -webkit-backdrop-filter: blur(36px) saturate(2.15); border-left: 1px solid rgba(255, 226, 180, .24); box-shadow: inset 1px 0 0 rgba(255, 230, 190, .12) !important; }
-  body[data-theme="light"] .dock-main { background: linear-gradient(180deg, rgba(255, 253, 246, .5), rgba(243, 238, 227, .56)) !important; backdrop-filter: blur(28px) saturate(1.7); -webkit-backdrop-filter: blur(28px) saturate(1.7); border-left: 1px solid rgba(84, 62, 34, .2); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .8) !important; }
+  body[data-theme="dark"] .dock-main { background: linear-gradient(180deg, rgba(54, 44, 34, .26), rgba(31, 25, 20, .36)) !important; backdrop-filter: blur(38px) saturate(2.3); -webkit-backdrop-filter: blur(38px) saturate(2.3); border-left: 1px solid rgba(255, 236, 208, .1); box-shadow: inset 1px 0 0 rgba(255, 236, 208, .12), inset 0 1px 0 rgba(255, 240, 214, .14), 0 20px 70px rgba(0, 0, 0, .3), 0 0 80px rgba(255, 214, 150, .06) !important; }
+  body[data-theme="light"] .dock-main { background: linear-gradient(180deg, rgba(255, 253, 246, .4), rgba(243, 238, 227, .46)) !important; backdrop-filter: blur(30px) saturate(1.7); -webkit-backdrop-filter: blur(30px) saturate(1.7); border-left: 1px solid rgba(90, 60, 35, .1); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .8), inset 0 1px 0 rgba(255, 255, 255, .85), 0 20px 70px rgba(132, 88, 40, .16), 0 0 80px rgba(232, 158, 92, .12) !important; }
   .dock-main .card-head .co-title { color: var(--accent-hover) !important; }
   .dock-main .assist-hint { border-color: var(--accent-line) !important; color: var(--text-3) !important; font-family: var(--font-ui) !important; }
   .dock-main .card-head { border-bottom: 1px solid rgba(255,220,180,.08); padding-bottom: 8px; }
@@ -163,16 +163,16 @@
   .shelf-spotlight-title { font-size: 24px !important; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
 
   /* iOS 26 折射玻璃：浮层（弹窗 / 命令面板 / 页面头）——更厚的白高光、更深的模糊、边缘折射 */
-  .modal { background: linear-gradient(168deg, rgba(64, 53, 41, .52), rgba(32, 27, 21, .68)) !important; backdrop-filter: blur(38px) saturate(2.05) !important; -webkit-backdrop-filter: blur(38px) saturate(2.05) !important; border: 1px solid rgba(255, 226, 180, .26) !important; box-shadow: inset 0 1px 0 rgba(255, 240, 214, .2), inset 0 -1px 0 rgba(0, 0, 0, .3), 0 34px 96px rgba(0, 0, 0, .66), 0 0 0 1px rgba(217, 162, 95, .18) !important; }
+  .modal { background: linear-gradient(168deg, rgba(64, 53, 41, .45), rgba(32, 27, 21, .58)) !important; backdrop-filter: blur(38px) saturate(2.1) !important; -webkit-backdrop-filter: blur(38px) saturate(2.1) !important; border: 1px solid rgba(255, 236, 208, .16) !important; box-shadow: inset 0 1px 0 rgba(255, 242, 218, .2), inset 0 -1px 0 rgba(0, 0, 0, .26), 0 30px 90px rgba(0, 0, 0, .56), 0 0 70px rgba(255, 214, 150, .08) !important; }
   body[data-theme="light"] .modal { background: linear-gradient(168deg, rgba(255, 253, 246, .74), rgba(243, 238, 227, .84)) !important; border: 1px solid rgba(84, 62, 34, .24) !important; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .92), inset 0 -1px 0 rgba(84, 62, 34, .08), 0 34px 96px rgba(84, 62, 34, .3), 0 0 0 1px rgba(168, 110, 52, .12) !important; }
-  .cmdk { background: linear-gradient(172deg, rgba(66, 54, 42, .62), rgba(35, 29, 24, .76)) !important; backdrop-filter: blur(34px) saturate(1.85) !important; -webkit-backdrop-filter: blur(34px) saturate(1.85) !important; border: 1px solid rgba(255, 226, 180, .22) !important; box-shadow: inset 0 1px 0 rgba(255, 240, 214, .2), 0 34px 90px rgba(0, 0, 0, .6), 0 0 0 1px rgba(217, 162, 95, .14) !important; }
+  .cmdk { background: linear-gradient(172deg, rgba(66, 54, 42, .5), rgba(35, 29, 24, .62)) !important; backdrop-filter: blur(38px) saturate(2.1) !important; -webkit-backdrop-filter: blur(38px) saturate(2.1) !important; border: 1px solid rgba(255, 236, 208, .16) !important; box-shadow: inset 0 1px 0 rgba(255, 242, 218, .32), 0 34px 90px rgba(0, 0, 0, .6), 0 0 70px rgba(255, 214, 150, .1) !important; }
   body[data-theme="light"] .cmdk { background: linear-gradient(172deg, rgba(255, 253, 246, .8), rgba(246, 240, 229, .88)) !important; border: 1px solid rgba(84, 62, 34, .24) !important; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .92), 0 34px 90px rgba(84, 62, 34, .28) !important; }
   .page-head { backdrop-filter: blur(22px) saturate(1.6) !important; -webkit-backdrop-filter: blur(22px) saturate(1.6) !important; }
   .modal-mask::before { background: radial-gradient(900px 600px at 50% -12%, rgba(217, 162, 95, .22), transparent 62%) !important; }
 
   /* 顶栏下缘「抓住光的线」+ 玻璃内壁双高光（iOS 26 侧厚感） */
-  .topbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1.5px; background: linear-gradient(90deg, transparent 3%, rgba(255, 226, 160, .4) 14%, rgba(255, 240, 210, .75) 30%, rgba(226, 165, 95, .7) 46%, rgba(232, 110, 90, .6) 62%, rgba(255, 226, 160, .4) 78%, transparent 97%); opacity: .55; filter: blur(.2px); }
-  .modal { box-shadow: inset 0 1px 0 rgba(255, 244, 222, .3), inset 0 3px 8px rgba(255, 226, 180, .1), inset 0 -1px 0 rgba(0, 0, 0, .3), 0 34px 96px rgba(0, 0, 0, .62), 0 0 0 1px rgba(217, 162, 95, .16) !important; }
+  .topbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1.5px; background: linear-gradient(90deg, transparent 3%, rgba(255, 226, 160, .4) 14%, rgba(255, 240, 210, .75) 30%, rgba(226, 165, 95, .7) 46%, rgba(232, 110, 90, .6) 62%, rgba(255, 226, 160, .4) 78%, transparent 97%); opacity: .28; filter: blur(.3px); }
+  .modal { box-shadow: inset 0 1px 0 rgba(255, 244, 222, .18), inset 0 3px 8px rgba(255, 226, 180, .07), inset 0 -1px 0 rgba(0, 0, 0, .28), 0 30px 90px rgba(0, 0, 0, .56), 0 0 70px rgba(255, 214, 150, .08) !important; }
   .cmdk { box-shadow: inset 0 1px 0 rgba(255, 244, 222, .32), inset 0 3px 8px rgba(255, 226, 180, .1), 0 34px 90px rgba(0, 0, 0, .6), 0 0 0 1px rgba(217, 162, 95, .14) !important; }
   .rail, .dock-main { backdrop-filter: blur(38px) saturate(2.3) !important; -webkit-backdrop-filter: blur(38px) saturate(2.3) !important; }
 </style>

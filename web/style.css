@@ -212,7 +212,7 @@ main:focus { outline: none; }
 .topbar::after {
   content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1.5px;
   background: linear-gradient(90deg, transparent 3%, rgba(255, 226, 160, .4) 14%, rgba(255, 240, 210, .75) 30%, rgba(226, 165, 95, .7) 46%, rgba(232, 110, 90, .6) 62%, rgba(255, 226, 160, .4) 78%, transparent 97%);
-  opacity: .55; filter: blur(.2px);
+  opacity: .28; filter: blur(.3px);
 }
 .topbar { position: relative; }
 .topbar-mid {
@@ -1176,7 +1176,7 @@ kbd {
 .popmenu-sep { height: 1px; margin: 4px 2px; background: var(--border); }
 
 /* 编辑区 */
-.pane-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--paper); }
+.pane-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--paper); background-image: radial-gradient(120% 90% at 50% -12%, rgba(255, 216, 152, .16), transparent 58%); }
 
 /* 专注写作：收起导航、章节栏和助手栏，只留稿纸 */
 .focus-bar {
@@ -1409,11 +1409,11 @@ kbd {
    助手栏 · dock 主场（竖排卡片：章纲 · 生成 · 输出 · 修订）
    ========================================================================== */
 .dock-main {
-  background: linear-gradient(180deg, rgba(49, 40, 31, .42), rgba(31, 25, 20, .52)) !important;
-  backdrop-filter: blur(28px) saturate(1.7);
-  -webkit-backdrop-filter: blur(28px) saturate(1.7);
-  border-left: 1px solid rgba(255, 226, 180, .18);
-  box-shadow: inset 1px 0 0 rgba(255, 230, 190, .06);
+  background: linear-gradient(180deg, rgba(54, 44, 34, .26), rgba(31, 25, 20, .36)) !important;
+  backdrop-filter: blur(38px) saturate(2.3);
+  -webkit-backdrop-filter: blur(38px) saturate(2.3);
+  border-left: 1px solid rgba(255, 236, 208, .1);
+  box-shadow: inset 1px 0 0 rgba(255, 236, 208, .12), inset 0 1px 0 rgba(255, 240, 214, .14), 0 20px 70px rgba(0, 0, 0, .3), 0 0 80px rgba(255, 214, 150, .06);
   border-radius: 0; padding: 16px 14px; gap: 12px;
   display: flex; flex-direction: column; overflow: auto;
 }
@@ -3865,40 +3865,36 @@ body[data-theme="light"] .btn-primary {
    ========================================================================== */
 body[data-theme="dark"] .app {
   background:
-    radial-gradient(1600px 900px at 72% -280px, rgba(240, 180, 100, .46), transparent 50%),
-    radial-gradient(1350px 920px at -28% 126%, rgba(238, 118, 92, .4), transparent 46%),
-    radial-gradient(1150px 720px at 20% 38%, rgba(206, 138, 70, .32), transparent 45%),
-    radial-gradient(700px 500px at 94% 50%, rgba(130, 218, 168, .24), transparent 48%),
-    radial-gradient(900px 700px at 48% 112%, rgba(214, 96, 84, .3), transparent 50%),
-    linear-gradient(112deg, transparent 22%, rgba(255, 230, 180, .1) 40%, rgba(255, 232, 190, .26) 48%, rgba(255, 206, 178, .16) 54%, transparent 70%),
-    linear-gradient(180deg, #241c14 0%, #191410 54%, #131009 100%);
+    radial-gradient(1150px 700px at 50% -14%, rgba(255, 223, 164, .5), transparent 55%),
+    radial-gradient(950px 800px at 50% 34%, rgba(255, 208, 138, .26), transparent 62%),
+    radial-gradient(720px 560px at 112% 126%, rgba(255, 178, 124, .16), transparent 52%),
+    radial-gradient(720px 560px at -12% 126%, rgba(232, 150, 118, .15), transparent 52%),
+    linear-gradient(180deg, #231d16 0%, #181410 56%, #14110e 100%);
 }
 body[data-theme="light"] .app {
   background:
-    radial-gradient(1100px 620px at 74% -210px, rgba(226, 152, 78, .38), transparent 48%),
-    radial-gradient(820px 560px at -20% 124%, rgba(206, 66, 44, .24), transparent 48%),
-    radial-gradient(720px 460px at 24% 36%, rgba(226, 152, 78, .26), transparent 48%),
-    radial-gradient(560px 420px at 96% 48%, rgba(120, 200, 140, .2), transparent 48%),
-    linear-gradient(112deg, transparent 20%, rgba(226, 152, 78, .14) 40%, rgba(255, 255, 255, .6) 52%, rgba(226, 152, 78, .2) 62%, transparent 78%),
-    linear-gradient(180deg, #f4efe4 0%, #faf6ec 100%);
+    radial-gradient(1000px 580px at 50% -16%, rgba(255, 231, 168, .5), transparent 55%),
+    radial-gradient(720px 540px at 112% 124%, rgba(240, 168, 110, .2), transparent 53%),
+    radial-gradient(720px 540px at -12% 124%, rgba(230, 148, 108, .18), transparent 53%),
+    linear-gradient(180deg, #f5f0e7 0%, #faf6ed 100%);
 }
 
 /* 左边栏：暖墨折射玻璃 */
 .rail {
-  background: linear-gradient(180deg, rgba(49, 40, 31, .34), rgba(27, 22, 17, .48)) !important;
-  backdrop-filter: blur(30px) saturate(1.75);
-  -webkit-backdrop-filter: blur(30px) saturate(1.75);
-  border-right: 1px solid rgba(255, 226, 180, .18);
-  box-shadow: inset -1px 0 0 rgba(255, 230, 190, .07), inset 0 1px 0 rgba(255, 240, 214, .14);
+  background: linear-gradient(180deg, rgba(54, 44, 34, .22), rgba(28, 23, 18, .32)) !important;
+  backdrop-filter: blur(38px) saturate(2.3);
+  -webkit-backdrop-filter: blur(38px) saturate(2.3);
+  border-right: 1px solid rgba(255, 236, 208, .12);
+  box-shadow: inset -1px 0 0 rgba(255, 236, 208, .12), inset 0 1px 0 rgba(255, 242, 218, .14), 0 20px 70px rgba(0, 0, 0, .32), 0 0 80px rgba(255, 214, 150, .06);
 }
 
 /* 顶栏：暖墨折射玻璃 */
 .topbar {
-  background: linear-gradient(180deg, rgba(49, 40, 31, .35), rgba(31, 25, 20, .46)) !important;
-  backdrop-filter: blur(28px) saturate(1.7);
-  -webkit-backdrop-filter: blur(28px) saturate(1.7);
-  border-bottom: 1px solid rgba(255, 226, 180, .18);
-  box-shadow: inset 0 1px 0 rgba(255, 240, 214, .14), 0 12px 44px rgba(0, 0, 0, .38);
+  background: linear-gradient(180deg, rgba(54, 44, 34, .22), rgba(31, 25, 20, .31)) !important;
+  backdrop-filter: blur(38px) saturate(2.3);
+  -webkit-backdrop-filter: blur(38px) saturate(2.3);
+  border-bottom: 1px solid rgba(255, 236, 208, .09);
+  box-shadow: inset 0 1px 0 rgba(255, 242, 218, .14), 0 22px 80px rgba(0, 0, 0, .38), 0 0 90px rgba(255, 214, 150, .07);
 }
 .page-head { backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4); }
 
