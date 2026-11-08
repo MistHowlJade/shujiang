@@ -91,6 +91,22 @@
   .save-pill, .btn-primary { font-weight: 700 !important; }
   .assist-hint { font-family: var(--font-ui); }
   .panel { border-color: var(--border-2) !important; }
+
+  /* 书架「正在写」横幅 */
+  .shelf-spotlight { position: relative; margin: 2px 32px 16px; padding: 28px 32px; border: 1px solid var(--accent-line); border-radius: 14px; background: linear-gradient(135deg, rgba(217,162,95,.22), rgba(154,110,58,.12) 55%, rgba(29,24,18,.6)); display: flex; align-items: center; gap: 24px; box-shadow: inset 0 1px 0 rgba(255,220,180,.12), 0 18px 48px rgba(0,0,0,.35); overflow: hidden; }
+  .shelf-spotlight::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.04) 45%, transparent 55%); }
+  .shelf-spotlight-label { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--accent-hover); letter-spacing: .12em; text-transform: uppercase; font-weight: 700; }
+  .shelf-spotlight-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: spotlightPulse 1.8s var(--ease, cubic-bezier(.16,1,.3,1)) infinite; }
+  @keyframes spotlightPulse { 0%,100% { box-shadow: 0 0 0 2px rgba(217,162,95,.25); } 50% { box-shadow: 0 0 0 5px rgba(217,162,95,.08); } }
+  .shelf-spotlight-body { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px; }
+  .shelf-spotlight-title { font-family: var(--font-display); font-size: 26px; font-weight: 700; color: var(--text-1); letter-spacing: .02em; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .shelf-spotlight-sub { color: var(--text-2); font-size: 13px; }
+  .shelf-spotlight-goal { display: inline-flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .shelf-spotlight-goal i { display: block; height: 4px; width: 140px; border-radius: var(--r-full); background: var(--surface-3); overflow: hidden; position: relative; }
+  .shelf-spotlight-goal i::after { content: ""; position: absolute; inset: 0 100% 0 0; background: linear-gradient(90deg, var(--accent-btn-1), var(--accent-btn-2)); transition: width 320ms var(--ease, cubic-bezier(.16,1,.3,1)); }
+  .shelf-spotlight-cta { flex: 0 0 auto; width: auto; min-width: 180px; height: 44px !important; padding: 0 24px !important; font-weight: 700 !important; border-radius: 10px !important; }
+  .shelf-spotlight { padding: 24px 28px !important; gap: 28px !important; }
+  .shelf-spotlight-title { font-size: 24px !important; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
 </style>
 
 
@@ -218,6 +234,15 @@
             <button class="btn" id="newNovelBtn"><svg class="ico"><use href="#i-plus" /></svg>新建作品</button>
             <button class="btn" id="inspirationBtn" title="让 AI 按当前中文网文风向给你 8 个开书灵感——看看现在什么好卖、什么好写"><svg class="ico"><use href="#i-bulb" /></svg>AI 灵感</button>
             <button class="btn btn-primary" id="quickStartBtn" title="写一句想法，自动生成书名、人物、大纲和第一章"><svg class="ico"><use href="#i-spark" /></svg>一键开书</button>
+          </div>
+        </div>
+        <div class="shelf-spotlight" id="shelfSpotlight" hidden>
+          <div class="shelf-spotlight-label"><span class="shelf-spotlight-dot"></span><span>正在写</span></div>
+          <div class="shelf-spotlight-body">
+            <div class="shelf-spotlight-title" id="shelfSpotlightTitle">—</div>
+            <div class="shelf-spotlight-sub" id="shelfSpotlightSub">—</div>
+            <div class="shelf-spotlight-goal" id="shelfSpotlightGoal" hidden><i id="shelfSpotlightGoalBar"></i><span id="shelfSpotlightGoalText"></span></div>
+            <button class="btn btn-primary shelf-spotlight-cta" id="shelfSpotlightBtn"><svg class="ico"><use href="#i-pen" /></svg><span id="shelfSpotlightCtaText">继续写</span></button>
           </div>
         </div>
         <div class="shelf-grid" id="shelfGrid"></div>

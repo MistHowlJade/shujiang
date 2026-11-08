@@ -599,6 +599,44 @@ function coverOf(title) {
  * 全书目标：设了就报进度，没设返回 null。
  * 书架卡片拿的是列表数据（words + targetWords），工作台拿的是完整作品（meta + chapters），两种都认。
  */
+/** 书架顶部「正在写」横幅——挑最近一部改动的作品，给一个非常直接的下一步动作 */
+function renderShelfSpotlight(progressById) {
+  const spot = $('#shelfSpotlight');
+  if (!spot) return;
+  const novels = (S.novels || []).filter((n) => (n.chapterCount || 0) + (n.words || 0) > 0 || true);
+  if (!novels.length) { spot.hidden = true; return; }
+  const sorted = [...novels].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const best = sorted[0];
+  const meta = { id: best.id, title: best.title || '未命名', updatedAt: best.updatedAt };
+  $('#shelfSpotlightTitle').textContent = meta.title;
+  const chCount = best.chapterCount || 0;
+  const words = best.words || 0;
+  $('#shelfSpotlightSub').textContent = chCount
+    ? `${chCount} 章 · ${fmtWords(words)} 字${best.updatedAt ? ` · 最近更新 ${fmtDate(best.updatedAt).slice(5, 10)}` : ''}`
+    : '还没章节，先写下第一句';
+  const goal = bookGoalOf(best);
+  const goalBar = $('#shelfSpotlightGoalBar');
+  const goalText = $('#shelfSpotlightGoalText');
+  if (goal) {
+    goalBar.style.setProperty('--pct', `${Math.min(100, goal.pct)}%`);
+    goalBar.parentElement.hidden = false;
+    goalText.textContent = goal.done ? `已达成目标 ${fmtGoal(goal.target)} 字` : `目标 ${fmtGoal(goal.target)} 字 · ${goal.pct}%`;
+    // set the bar fill width explicitly
+    const bar = goalBar.parentElement.querySelector('i');
+    if (bar) bar.style.width = `${Math.min(100, goal.pct)}%`;
+  } else {
+    goalBar.parentElement.hidden = true;
+  }
+  const cta = $('#shelfSpotlightBtn');
+  const ctaText = $('#shelfSpotlightCtaText');
+  const prog = progressById.get(best.id);
+  ctaText.textContent = prog ? `继续写 第 ${prog.chapterNo || 1} 章` : (words ? '继续写下一章' : '写下第一章');
+  cta.onclick = async () => {
+    if (prog) continueReading(best.id); else openNovel(best.id);
+  };
+  spot.hidden = false;
+}
+
 function renderShelf() {
   const input = $('#shelfSearch');
   const q = (input.value || '').trim();
@@ -629,6 +667,7 @@ function renderShelf() {
       : '所有作品都保存在本机，不上传云端';
   }
   $('#shelfEmpty').hidden = S.novels.length > 0;
+  renderShelfSpotlight(progressById);
 
   for (const n of list) {
     const prog = progressById.get(n.id);
