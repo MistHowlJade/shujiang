@@ -5431,6 +5431,7 @@ function renderStudio({ list = true } = {}) {
     $('#chTitle').disabled = on;
     $('#chContent').disabled = on;
     $('#chStage').disabled = on;
+    $('#chPov').disabled = on;
     $('#formatBtn').disabled = on;
     $('#previewBtn').disabled = on;
   };
@@ -5506,6 +5507,10 @@ function renderStudio({ list = true } = {}) {
   const stage = ch ? stageOf(ch) : 'draft';
   $('#chStage').value = stage;
   $('#chStage').className = `stage-select st-${stage}`;
+  const povOpts = (n.bible?.characters || []).map((c) => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('');
+  $('#chPov').innerHTML = `<option value="">POV（任意人）</option>${povOpts}`;
+  $('#chPov').value = ch?.pov || '';
+  $('#chPov').disabled = !ch;
   $('#chTitle').value = ch?.title || '';
   const taEl = $('#chContent');
   const nextContent = ch?.content || '';
@@ -5533,6 +5538,7 @@ function chapterSavePayload(ch) {
     revisions: Array.isArray(ch.revisions) ? ch.revisions : undefined,
     annotations: ch.annotations,
     scenes: Array.isArray(ch.scenes) ? ch.scenes : undefined,   // 场景卡片：不带上就会在刷新后消失
+    pov: ch.pov,                              // 本章视角：限定只写某一人物能看到的信息
     counted: peekCounted(ch.id),        // 这次该给今日码字量记多少（见「码字量计数」）
   };
 }
@@ -6121,6 +6127,17 @@ $('#chStage').addEventListener('change', () => {
   markChapterDirty(ch);
   renderStudio();
   toast(`已标为「${STAGE_LABEL[stage]}」`, 'ok');
+});
+$('#chPov').addEventListener('change', async () => {
+  const ch = currentChapter();
+  if (!ch) return;
+  const pov = String($('#chPov').value).trim();
+  if (ch.pov === pov) return;
+  if (pov) ch.pov = pov; else delete ch.pov;
+  markChapterDirty(ch);
+  await saveChapterNow().catch(() => {});
+  renderStudio();
+  toast(pov ? `本章限定为「${pov}」视角` : '已取消视角限制', 'ok');
 });
 
 $('#stageFilter').addEventListener('change', () => {
@@ -10335,6 +10352,7 @@ function renderBible() {
   if (bibleTab === 'payoff') return renderPayoffTab(host, n);
   if (bibleTab === 'relations') return renderRelationsTab(host, n);
   if (bibleTab === 'threads') return renderThreadsTab(host, n);
+  if (bibleTab === 'inspirations') return renderInspirationsTab(host, n);
   if (bibleTab === 'reveal') return renderRevealPlanTab(host, n);
   return renderStyleTab(host, n);
 }
@@ -12157,6 +12175,88 @@ function cpSvg(cp) {
   }).join('');
   const avgY = scoredIdx.length ? yOf(Math.min(100, Math.max(0, cp.avg))) : null;
   return `<svg class="pcv-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="读者完读率曲线，0-100%">${grid}${xlabels}${avgY !== null ? `<line class="pcv-avg" x1="${PL}" x2="${W - PR}" y1="${avgY.toFixed(1)}" y2="${avgY.toFixed(1)}"/>` : ''}${path ? `<path class="pcv-line" d="${path}"/>` : ''}${dots}</svg>`;
+}
+
+/** ---- 灵感库：随手记把写作素材集中存放，结尾支持追加到本章 ---- */
+function renderInspirationsTab(host, n) {
+  if (!Array.isArray(n.inspirations)) n.inspirations = [];
+  const items = n.inspirations;
+  host.innerHTML = `
+    <div class="bible-block">
+      <h2>灵感库
+        <span style="flex:1"></span>
+        <span class="dim small">${items.length} 条</span>
+      </h2>
+      <p class="dim small">把看到的句子、画面、对话、脑洞随手存进来。灵感条目支持追加到本章末尾——写到一半卡住时，借一段当话头。</p>
+      <label class="field-label">搜索<input class="input" id="inspireSearch" placeholder="搜文字 / 标签" autocomplete="off" /></label>
+      <div class="row gap6" style="margin-bottom:10px">
+        <input id="inspireNewText" class="input" placeholder="写一条灵感……" style="flex:1" />
+        <input id="inspireNewTag" class="input" placeholder="标签（可选）" style="width:120px" />
+        <button class="btn btn-sm" id="inspireAdd">${ico('plus')}记下</button>
+      </div>
+      <div class="inspirations-list" id="inspirationsList"></div>
+    </div>`;
+  const listEl = $('#inspirationsList', host);
+  const renderList = () => {
+    const q = String($('#inspireSearch', host)?.value || '').trim().toLowerCase();
+    const matched = q ? items.filter((x) =>
+      [x.text, x.tag].filter(Boolean).some((s) => String(s || '').toLowerCase().includes(q))
+    ) : items;
+    if (!matched.length) {
+      listEl.innerHTML = `<p class="dim">${q ? `没有匹配「${esc(q)}」的灵感。` : '还没有灵感。看到想写的句子、画面、对话，先存进来。'}</p>`;
+      return;
+    }
+    listEl.innerHTML = matched.slice().reverse().map((item) => `
+      <div class="inspiration-card" data-id="${esc(item.id)}">
+        <div class="inspiration-text">${esc(item.text)}</div>
+        <div class="inspiration-foot">
+          ${item.tag ? `<span class="inspiration-tag">${esc(item.tag)}</span>` : ''}
+          <span class="inspiration-date">${fmtDate(item.ts || 0)}</span>
+          <span style="flex:1"></span>
+          <button type="button" class="btn btn-sm btn-text inspiration-insert" data-text="${esc(item.text)}" title="追加到本章末尾">追加到本章末尾</button>
+          <button type="button" class="icon-btn sm inspiration-del" aria-label="删除灵感" title="删除灵感">${ico('trash')}</button>
+        </div>
+      </div>`).join('');
+  };
+  host.querySelector('#inspireSearch').addEventListener('input', renderList);
+  host.querySelector('#inspireAdd').addEventListener('click', () => {
+    const text = String(host.querySelector('#inspireNewText')?.value || '').trim();
+    const tag = String(host.querySelector('#inspireNewTag')?.value || '').trim();
+    if (!text) return;
+    items.push({ id: uid('ins'), text, tag: tag || undefined, ts: Date.now() });
+    host.querySelector('#inspireNewText').value = '';
+    host.querySelector('#inspireNewTag').value = '';
+    saveNovelPart({ inspirations: items });
+    renderList();
+  });
+  listEl.addEventListener('click', (e) => {
+    const insBtn = e.target.closest('.inspiration-insert');
+    if (insBtn) {
+      const ch = currentChapter();
+      if (!ch) return toast('先打开一章', 'err');
+      const ta = $('#chContent');
+      const cur = ta.value.replace(/\s+$/, '');
+      ta.value = cur ? `${cur}\n\n${insBtn.dataset.text}\n\n` : `${insBtn.dataset.text}\n\n`;
+      ta.focus();
+      const cursor = ta.value.length;
+      ta.selectionStart = ta.selectionEnd = cursor;
+      markChapterDirty(ch);
+      toast('已追加到本章末尾', 'ok');
+      return;
+    }
+    const delBtn = e.target.closest('.inspiration-del');
+    if (delBtn) {
+      const card = delBtn.closest('.inspiration-card');
+      const id = card?.dataset?.id;
+      const idx = items.findIndex((x) => x.id === id);
+      if (idx < 0) return;
+      const [removed] = items.splice(idx, 1);
+      saveNovelPart({ inspirations: items });
+      renderList();
+      toast('灵感已删除', 'ok', { label: '撤销', onClick: () => { items.splice(idx, 0, removed); saveNovelPart({ inspirations: items }); renderList(); } });
+    }
+  });
+  renderList();
 }
 
 function renderPayoffTab(host, n) {

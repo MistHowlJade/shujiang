@@ -185,6 +185,12 @@ export function buildContext(novel, opts = {}) {
   ];
   if (lockedBits.length) push('🔒 锁定设定（生成时必须遵守）', lockedBits.join('\n'), true);
 
+  // 视角/POV 限定：本章只能写某一位人物看到的信息——避免脑补其他角色脑子里的事
+  const povName = String(chapter?.pov || '').trim();
+  if (povName) {
+    push('本章视角（遵守）', `本章只写「${povName}」能看到 / 知道 / 感受到的信息。其他角色不知道的事、没发生过的潜台词，不要替他脑补。`, true);
+  }
+
   // 人物状态账本：最新一条跨章节记忆里的状态——AI 不能假装不知道伤势/承诺/身份还在生效
   try {
     const arcs = buildCharacterArcs(novel);

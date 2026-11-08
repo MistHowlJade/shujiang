@@ -224,6 +224,7 @@
                   <option value="revising">修改中</option>
                   <option value="done">定稿</option>
                 </select>
+                <select id="chPov" class="pov-select" aria-label="本章视角" title="本章POV视角：限定一位人物，要求 AI 只写他能看到/知道的——限制多视角穿帮" disabled></select>
                 <button type="button" class="chip chip-target" id="chWords" title="设置本章目标字数" aria-label="设置本章目标字数" aria-haspopup="dialog" aria-expanded="false" disabled>0 字</button>
                 <button class="icon-btn sm" id="undoBtn" title="撤销（Ctrl+Z）" aria-label="撤销" disabled><svg class="ico"><use href="#i-undo" /></svg></button>
                 <button class="icon-btn sm" id="redoBtn" title="重做（Ctrl+Shift+Z）" aria-label="重做" disabled><svg class="ico"><use href="#i-redo" /></svg></button>
@@ -469,6 +470,7 @@
             <button data-bible="payoff">爽点</button>
             <button data-bible="relations">关系图谱</button>
             <button data-bible="threads">线索</button>
+            <button data-bible="inspirations">灵感</button>
             <button data-bible="reveal">揭示计划</button>
             <button data-bible="style">文风与规则</button>
           </div>
