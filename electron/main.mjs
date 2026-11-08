@@ -64,7 +64,7 @@ async function start() {
     minWidth: 1100,
     minHeight: 700,
     title: '书匠 · AI 长篇小说创作台',
-    backgroundColor: '#f6f6f7',
+    backgroundColor: '#15110d',
     autoHideMenuBar: true,
     icon: path.join(__dirname, 'icon.png'),
     show: false,
@@ -87,7 +87,7 @@ async function start() {
     if (!isLocal(target)) return { action: 'deny' };
     return {
       action: 'allow',
-      overrideBrowserWindowOptions: { autoHideMenuBar: true, backgroundColor: '#f6f6f7' },
+      overrideBrowserWindowOptions: { autoHideMenuBar: true, backgroundColor: '#15110d' },
     };
   });
 
@@ -98,3 +98,4 @@ app.on('window-all-closed', () => {
   // 桌面应用的常规行为：关掉所有窗口就退出，不残留在托盘/后台
   app.quit();
 });
+

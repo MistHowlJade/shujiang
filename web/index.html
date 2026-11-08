@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="description" content="书匠：跑在本机的中文长篇小说创作台。AI 起稿、续写、润色，查证设定，作品只在本机 data/ 目录保存。" />
 <meta name="robots" content="noindex,nofollow" />
+<meta name="theme-color" content="#15110d" />
 <title>书匠 · AI 长篇小说创作台</title>
-<link rel="stylesheet" href="/style.css?v=1.0.12" />
+<link rel="stylesheet" href="/style.css?v=1.0.13" />
 <style id="designv1011">
   /* 书匠 · v1.0.11「东方典籍」视觉重写 —— 暖墨：衬线 + 赭金 + 朱砂 */
   @font-face { font-family: '思源宋体 VF'; src: local('Noto Serif SC'), local('Noto Serif SC VF'), local('NotoSerifSC-VF'); font-display: swap; }
@@ -48,22 +49,63 @@
     --sh-3: 0 28px 70px rgba(0,0,0,.55), 0 0 0 1px rgba(255,220,180,.07) inset;
     --mask: rgba(12, 9, 6, .7);
   }
+  /* 浅色：楮皮纸 + 朱膘赭金——与暖墨暗色同属一族，不走蓝紫 */
+  body[data-theme="light"] {
+    --bg:              #f3eee3;
+    --surface-1:       #faf6ec;
+    --surface-2:       #fffdf6;
+    --surface-3:       #ece5d5;
+    --surface-4:       #ddd2bf;
+    --border:          rgba(84, 62, 34, .13);
+    --border-2:        rgba(84, 62, 34, .24);
+    --text-1:          #26201a;
+    --text-2:          #57503f;
+    --text-3:          #6f6656;
+    --text-4:          #8b8272;
+    --accent:          #a86e34;
+    --accent-hover:    #96622c;
+    --accent-down:     #7a4f24;
+    --accent-btn-1:    #b5793c;
+    --accent-btn-2:    #8f5a2b;
+    --accent-btn-1-h:  #c4854a;
+    --accent-btn-2-h:  #9a6534;
+    --accent-bg:       rgba(168, 110, 52, .10);
+    --accent-line:     rgba(168, 110, 52, .35);
+    --success:         #1d7a43;
+    --success-bg:      rgba(29, 122, 67, .10);
+    --warning:         #8f5408;
+    --warning-bg:      rgba(143, 84, 8, .10);
+    --danger:          #a8332a;
+    --danger-bg:       rgba(168, 51, 42, .10);
+    --danger-solid:    #8f2a20;
+    --paper:           #fffdf6;
+    --glow:            radial-gradient(ellipse 90% 65% at 50% -10%, rgba(168,110,52,.14), transparent 60%), radial-gradient(ellipse 45% 55% at 85% 110%, rgba(168,51,42,.07), transparent 65%);
+    --bg-blur:         rgba(250, 246, 236, .8);
+    --sh-1: 0 1px 2px rgba(84,62,34,.10), 0 0 0 1px rgba(84,62,34,.05) inset;
+    --sh-2: 0 6px 18px rgba(84,62,34,.13), 0 0 0 1px rgba(84,62,34,.06) inset;
+    --sh-3: 0 28px 70px rgba(84,62,34,.18), 0 0 0 1px rgba(84,62,34,.08) inset;
+    --mask: rgba(38, 32, 26, .34);
+  }
   .page-head h1 { font-family: var(--font-display); letter-spacing: .02em; font-weight: 700; }
   .ch-title { font-family: var(--font-display) !important; letter-spacing: .03em !important; font-weight: 700 !important; font-size: 17px !important; caret-color: var(--accent) !important; }
   .section-head span, .card-head h2, .card-head h3,
   .dock-main .card-head h2, .dock-main .card-head h3
   { font-family: var(--font-display); letter-spacing: .03em; }
-  body { background: radial-gradient(1300px 460px at 50% -200px, rgba(217,162,95,.13), transparent 65%), var(--bg); }
-  .rail { background: linear-gradient(180deg, #1d1812 0%, #181410 100%) !important; }
+  body[data-theme="dark"] { background: radial-gradient(1300px 460px at 50% -200px, rgba(217,162,95,.13), transparent 65%), var(--bg); }
+  body[data-theme="light"] { background: radial-gradient(1300px 460px at 50% -200px, rgba(168,110,52,.12), transparent 65%), var(--bg); }
+  body[data-theme="dark"] .rail { background: linear-gradient(180deg, #1d1812 0%, #181410 100%) !important; }
+  body[data-theme="light"] .rail { background: linear-gradient(180deg, #faf6ec 0%, #efe8d9 100%) !important; }
   .rail .tab.on { color: var(--accent-hover) !important; box-shadow: inset 0 0 0 1px rgba(217,162,95,.4), inset 3px 0 0 var(--accent) !important; }
   .dock-main .card-head { border-bottom: 1px solid rgba(255,220,180,.08); border-top: 1px solid rgba(217,162,95,.38); border-radius: 10px; padding: 8px 10px 8px 12px; margin: 2px -2px 0 -2px; width: calc(100% + 4px); background: rgba(255,220,180,.02); }
   .rail .tab.on .ico { color: var(--accent-hover) !important; }
   .rail-nav { gap: 6px !important; }
-  .topbar { background: linear-gradient(180deg, #1d1812 0%, #1b1612 100%) !important; }
+  body[data-theme="dark"] .topbar { background: linear-gradient(180deg, #1d1812 0%, #1b1612 100%) !important; }
+  body[data-theme="light"] .topbar { background: linear-gradient(180deg, #faf6ec 0%, #f2ecdf 100%) !important; }
   .topbar-mid .top-export:hover { border-color: var(--accent-line) !important; color: var(--accent-hover) !important; }
   .topbar-mid .top-export { color: var(--text-1) !important; border-color: var(--border-2) !important; }
   .topbar-mid .ico { color: var(--accent-hover) !important; }
-  .dock-main { background: linear-gradient(180deg, rgba(29,24,18,.88), rgba(21,17,13,.92)) !important; }
+  body[data-theme="dark"] .dock-main { background: linear-gradient(180deg, rgba(29,24,18,.88), rgba(21,17,13,.92)) !important; }
+  body[data-theme="light"] .dock-main { background: linear-gradient(180deg, rgba(250,246,236,.94), rgba(243,238,227,.96)) !important; }
   .dock-main .card-head .co-title { color: var(--accent-hover) !important; }
   .dock-main .assist-hint { border-color: var(--accent-line) !important; color: var(--text-3) !important; font-family: var(--font-ui) !important; }
   .dock-main .card-head { border-bottom: 1px solid rgba(255,220,180,.08); padding-bottom: 8px; }
@@ -102,7 +144,9 @@
   .editor::selection { background: rgba(255, 196, 116, .55) !important; }
 
   /* 书架「正在写」横幅 */
-  .shelf-spotlight { position: relative; margin: 2px 32px 16px; padding: 28px 32px; border: 1px solid var(--accent-line); border-radius: 14px; background: linear-gradient(135deg, rgba(217,162,95,.22), rgba(154,110,58,.12) 55%, rgba(29,24,18,.6)); display: flex; align-items: center; gap: 24px; box-shadow: inset 0 1px 0 rgba(255,220,180,.12), 0 18px 48px rgba(0,0,0,.35); overflow: hidden; }
+  .shelf-spotlight { position: relative; margin: 2px 32px 16px; padding: 28px 32px; border: 1px solid var(--accent-line); border-radius: 14px; display: flex; align-items: center; gap: 24px; overflow: hidden; }
+  body[data-theme="dark"] .shelf-spotlight { background: linear-gradient(135deg, rgba(217,162,95,.22), rgba(154,110,58,.12) 55%, rgba(29,24,18,.6)); box-shadow: inset 0 1px 0 rgba(255,220,180,.12), 0 18px 48px rgba(0,0,0,.35); }
+  body[data-theme="light"] .shelf-spotlight { background: linear-gradient(135deg, rgba(197,132,74,.16), rgba(168,110,52,.09) 55%, rgba(255,253,246,.9)); box-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 18px 48px rgba(84,62,34,.18); }
   .shelf-spotlight::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.04) 45%, transparent 55%); }
   .shelf-spotlight-label { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--accent-hover); letter-spacing: .12em; text-transform: uppercase; font-weight: 700; }
   .shelf-spotlight-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: spotlightPulse 1.8s var(--ease, cubic-bezier(.16,1,.3,1)) infinite; }
@@ -113,13 +157,13 @@
   .shelf-spotlight-goal { display: inline-flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; margin-top: 2px; }
   .shelf-spotlight-goal i { display: block; height: 4px; width: 140px; border-radius: var(--r-full); background: var(--surface-3); overflow: hidden; position: relative; }
   .shelf-spotlight-goal i::after { content: ""; position: absolute; inset: 0 100% 0 0; background: linear-gradient(90deg, var(--accent-btn-1), var(--accent-btn-2)); transition: width 320ms var(--ease, cubic-bezier(.16,1,.3,1)); }
-  .shelf-spotlight-cta { flex: 0 0 auto; width: auto; min-width: 180px; height: 44px !important; padding: 0 24px !important; font-weight: 700 !important; border-radius: 10px !important; }
+  .shelf-spotlight-cta { flex: 0 0 auto; align-self: flex-start; width: auto; min-width: 180px; height: 44px !important; padding: 0 24px !important; font-weight: 700 !important; border-radius: 10px !important; }
   .shelf-spotlight { padding: 24px 28px !important; gap: 28px !important; }
   .shelf-spotlight-title { font-size: 24px !important; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
 </style>
 
 
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234a7dff'/><path d='M9 8h9a4 4 0 0 1 4 4v12H13a4 4 0 0 0-4 4z' fill='none' stroke='white' stroke-width='2' stroke-linejoin='round'/></svg>" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2315110d'/><path d='M9 8h9a4 4 0 0 1 4 4v12H13a4 4 0 0 0-4 4z' fill='none' stroke='%23d9a25f' stroke-width='2' stroke-linejoin='round'/></svg>" />
 </head>
 <body data-theme="dark">
 <a class="skip-link" href="#main">跳到主要内容</a>
@@ -830,5 +874,6 @@
 <script src="/app.js" type="module"></script>
 </body>
 </html>
+
 
 
