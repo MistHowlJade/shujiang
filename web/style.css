@@ -1784,10 +1784,6 @@ body[data-theme="light"] .dock-main .assist-pane > .card {
 .diag-fix { flex: 1; min-width: 0; color: var(--text-3); overflow-wrap: anywhere; }
 .diag-fix-label { color: var(--text-4); }
 .diag-fix-btn { flex: none; }
-  display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;
-  margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--border);
-  color: var(--text-3); font-size: 12.5px;
-}
 .ca-label { flex: none; padding-top: 2px; }
 .ca-empty { color: var(--text-4); padding-top: 2px; }
 .ca-chips { display: flex; flex-wrap: wrap; gap: 5px; flex: 1; min-width: 0; }
@@ -1810,6 +1806,12 @@ body[data-theme="light"] .dock-main .assist-pane > .card {
   max-height: 52vh; overflow: auto; margin: 0 -4px; padding: 2px 4px;
 }
 .state-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 11px; text-align: left; font: inherit;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md);
+  color: var(--text-1); cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
 .char-appear, .entry-appear {
   display: flex; align-items: flex-start; gap: 10px; width: 100%;
   padding: 9px 11px; text-align: left; font: inherit;
