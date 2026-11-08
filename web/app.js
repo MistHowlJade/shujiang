@@ -1,11 +1,5 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
-// Electron 桌面壳下挂 is-electron 类：桌面壳启用 window.backgroundMaterial:'acrylic'，CSS 切成半透明透壁纸模式
-if (/electron/i.test(navigator.userAgent)) {
-  document.documentElement.classList.add('is-electron');
-  document.body.classList.add('is-electron');
-}
-
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
 import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, readerChapterRead, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';

@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow" />
 <meta name="theme-color" content="#15110d" />
 <title>书匠 · AI 长篇小说创作台</title>
-<link rel="stylesheet" href="/style.css?v=1.0.18" />
+<link rel="stylesheet" href="/style.css?v=1.0.19" />
 <style id="designv1011">
   /* 书匠 · v1.0.11「东方典籍」视觉重写 —— 暖墨：衬线 + 赭金 + 朱砂 */
   @font-face { font-family: '思源宋体 VF'; src: local('Noto Serif SC'), local('Noto Serif SC VF'), local('NotoSerifSC-VF'); font-display: swap; }
@@ -88,25 +88,6 @@
   }
   .page-head h1 { font-family: var(--font-display); letter-spacing: .02em; font-weight: 700; }
 
-  /* 亚克力（Windows 11）：窗口整体透出桌面壁纸，.app 只铺半透明摩挲层 + 暖光 */
-  body.is-electron { background: transparent !important; }
-  body.is-electron[data-theme="dark"] .app {
-    background:
-      radial-gradient(1150px 700px at 50% -14%, rgba(255, 221, 158, .5), transparent 55%),
-      radial-gradient(950px 800px at 50% 34%, rgba(255, 208, 138, .26), transparent 62%),
-      radial-gradient(720px 560px at 112% 126%, rgba(232, 150, 118, .16), transparent 52%),
-      radial-gradient(720px 560px at -12% 126%, rgba(232, 150, 118, .17), transparent 52%),
-      linear-gradient(180deg, rgba(35, 29, 22, .74), rgba(24, 20, 17, .8)) !important;
-  }
-  body.is-electron[data-theme="light"] .app {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, .34), rgba(255, 255, 255, .46)) !important;
-  }
-  body.is-electron[data-theme="dark"] .pane-editor { background: rgba(29, 24, 18, .84) !important; }
-  body.is-electron[data-theme="light"] .pane-editor { background: rgba(255, 255, 255, .66) !important; }
-  body.is-electron[data-theme="dark"] .editor-empty { background: rgba(29, 24, 18, .82) !important; }
-  body.is-electron[data-theme="light"] .editor-empty { background: rgba(255, 255, 255, .72) !important; }
-  body.is-electron .modal-mask { background: rgba(12, 9, 6, .4) !important; }
   .ch-title { font-family: var(--font-display) !important; letter-spacing: .03em !important; font-weight: 700 !important; font-size: 17px !important; caret-color: var(--accent) !important; }
   .section-head span, .card-head h2, .card-head h3,
   .dock-main .card-head h2, .dock-main .card-head h3
@@ -115,18 +96,18 @@
   body[data-theme="light"] { background: var(--bg); }
   /* iOS 26 折射玻璃：面板半透明 + 强模糊 + 顶部高光缘——背景暗金流光透过 */
   body[data-theme="dark"] .rail { background: linear-gradient(180deg, rgba(54, 44, 34, .22), rgba(28, 23, 18, .32)) !important; backdrop-filter: blur(38px) saturate(2.3); -webkit-backdrop-filter: blur(38px) saturate(2.3); border-right: 1px solid rgba(255, 236, 208, .12); box-shadow: inset -1px 0 0 rgba(255, 236, 208, .12), inset 0 1px 0 rgba(255, 242, 218, .14), 0 20px 70px rgba(0, 0, 0, .32), 0 0 80px rgba(255, 214, 150, .06) !important; }
-  body[data-theme="light"] .rail { background: linear-gradient(180deg, rgba(255, 255, 255, .3), rgba(255, 255, 255, .36)) !important; backdrop-filter: blur(32px) saturate(1.4); -webkit-backdrop-filter: blur(32px) saturate(1.4); border-right: 1px solid rgba(15, 15, 15, .07); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .85), inset 0 1px 0 rgba(255, 255, 255, .95), 0 20px 70px rgba(15, 15, 15, .12) !important; }
+  body[data-theme="light"] .rail { background: linear-gradient(180deg, #ffffff, #ffffff) !important; border-right: 1px solid rgba(15, 15, 15, .1); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .9), inset 0 1px 0 rgba(255, 255, 255, .95), 0 20px 70px rgba(15, 15, 15, .08) !important; }
   .rail .tab.on { color: var(--accent-hover) !important; box-shadow: inset 0 0 0 1px rgba(217,162,95,.4), inset 3px 0 0 var(--accent) !important; }
   .dock-main .card-head { border-bottom: 1px solid rgba(255,220,180,.08); border-top: 1px solid rgba(217,162,95,.38); border-radius: 10px; padding: 8px 10px 8px 12px; margin: 2px -2px 0 -2px; width: calc(100% + 4px); background: rgba(255,220,180,.02); }
   .rail .tab.on .ico { color: var(--accent-hover) !important; }
   .rail-nav { gap: 6px !important; }
   body[data-theme="dark"] .topbar { background: linear-gradient(180deg, rgba(54, 44, 34, .22), rgba(31, 25, 20, .31)) !important; backdrop-filter: blur(38px) saturate(2.3); -webkit-backdrop-filter: blur(38px) saturate(2.3); border-bottom: 1px solid rgba(255, 236, 208, .09); box-shadow: inset 0 1px 0 rgba(255, 242, 218, .14), 0 22px 80px rgba(0, 0, 0, .38), 0 0 90px rgba(255, 214, 150, .07) !important; }
-  body[data-theme="light"] .topbar { background: linear-gradient(180deg, rgba(255, 255, 255, .3), rgba(255, 255, 255, .36)) !important; backdrop-filter: blur(32px) saturate(1.4); -webkit-backdrop-filter: blur(32px) saturate(1.4); border-bottom: 1px solid rgba(15, 15, 15, .07); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), 0 18px 70px rgba(15, 15, 15, .1) !important; }
+  body[data-theme="light"] .topbar { background: linear-gradient(180deg, #ffffff, #ffffff) !important; border-bottom: 1px solid rgba(15, 15, 15, .1); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 18px 70px rgba(15, 15, 15, .06) !important; }
   .topbar-mid .top-export:hover { border-color: var(--accent-line) !important; color: var(--accent-hover) !important; }
   .topbar-mid .top-export { color: var(--text-1) !important; border-color: var(--border-2) !important; }
   .topbar-mid .ico { color: var(--accent-hover) !important; }
   body[data-theme="dark"] .dock-main { background: linear-gradient(180deg, rgba(54, 44, 34, .26), rgba(31, 25, 20, .36)) !important; backdrop-filter: blur(38px) saturate(2.3); -webkit-backdrop-filter: blur(38px) saturate(2.3); border-left: 1px solid rgba(255, 236, 208, .1); box-shadow: inset 1px 0 0 rgba(255, 236, 208, .12), inset 0 1px 0 rgba(255, 240, 214, .14), 0 20px 70px rgba(0, 0, 0, .3), 0 0 80px rgba(255, 214, 150, .06) !important; }
-  body[data-theme="light"] .dock-main { background: linear-gradient(180deg, rgba(255, 255, 255, .28), rgba(255, 255, 255, .34)) !important; backdrop-filter: blur(32px) saturate(1.4); -webkit-backdrop-filter: blur(32px) saturate(1.4); border-left: 1px solid rgba(15, 15, 15, .07); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .85), inset 0 1px 0 rgba(255, 255, 255, .9), 0 20px 70px rgba(15, 15, 15, .12) !important; }
+  body[data-theme="light"] .dock-main { background: linear-gradient(180deg, #ffffff, #ffffff) !important; border-left: 1px solid rgba(15, 15, 15, .1); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .9), inset 0 1px 0 rgba(255, 255, 255, .9), 0 20px 70px rgba(15, 15, 15, .08) !important; }
   .dock-main .card-head .co-title { color: var(--accent-hover) !important; }
   .dock-main .assist-hint { border-color: var(--accent-line) !important; color: var(--text-3) !important; font-family: var(--font-ui) !important; }
   .dock-main .card-head { border-bottom: 1px solid rgba(255,220,180,.08); padding-bottom: 8px; }
@@ -184,9 +165,9 @@
 
   /* iOS 26 折射玻璃：浮层（弹窗 / 命令面板 / 页面头）——更厚的白高光、更深的模糊、边缘折射 */
   .modal { background: linear-gradient(168deg, rgba(64, 53, 41, .45), rgba(32, 27, 21, .58)) !important; backdrop-filter: blur(38px) saturate(2.1) !important; -webkit-backdrop-filter: blur(38px) saturate(2.1) !important; border: 1px solid rgba(255, 236, 208, .16) !important; box-shadow: inset 0 1px 0 rgba(255, 242, 218, .2), inset 0 -1px 0 rgba(0, 0, 0, .26), 0 30px 90px rgba(0, 0, 0, .56), 0 0 70px rgba(255, 214, 150, .08) !important; }
-  body[data-theme="light"] .modal { background: linear-gradient(168deg, rgba(255, 255, 255, .55), rgba(255, 255, 255, .42)) !important; border: 1px solid rgba(15, 15, 15, .1) !important; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), inset 0 -1px 0 rgba(15, 15, 15, .05), 0 34px 96px rgba(15, 15, 15, .2), 0 0 70px rgba(255, 255, 255, .25) !important; }
+  body[data-theme="light"] .modal { background: linear-gradient(168deg, rgba(255, 255, 255, .96), rgba(255, 255, 255, .94)) !important; border: 1px solid rgba(15, 15, 15, .12) !important; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), inset 0 -1px 0 rgba(15, 15, 15, .05), 0 34px 96px rgba(15, 15, 15, .25) !important; }
   .cmdk { background: linear-gradient(172deg, rgba(66, 54, 42, .5), rgba(35, 29, 24, .62)) !important; backdrop-filter: blur(38px) saturate(2.1) !important; -webkit-backdrop-filter: blur(38px) saturate(2.1) !important; border: 1px solid rgba(255, 236, 208, .16) !important; box-shadow: inset 0 1px 0 rgba(255, 242, 218, .32), 0 34px 90px rgba(0, 0, 0, .6), 0 0 70px rgba(255, 214, 150, .1) !important; }
-  body[data-theme="light"] .cmdk { background: linear-gradient(172deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, .46)) !important; border: 1px solid rgba(15, 15, 15, .1) !important; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 34px 90px rgba(15, 15, 15, .2), 0 0 70px rgba(255, 255, 255, .28) !important; }
+  body[data-theme="light"] .cmdk { background: linear-gradient(172deg, rgba(255, 255, 255, .96), rgba(255, 255, 255, .93)) !important; border: 1px solid rgba(15, 15, 15, .12) !important; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 34px 90px rgba(15, 15, 15, .22) !important; }
   .page-head { backdrop-filter: blur(22px) saturate(1.6) !important; -webkit-backdrop-filter: blur(22px) saturate(1.6) !important; }
   .modal-mask::before { background: radial-gradient(900px 600px at 50% -12%, rgba(217, 162, 95, .22), transparent 62%) !important; }
 
