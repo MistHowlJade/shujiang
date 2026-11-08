@@ -58,13 +58,16 @@ async function start() {
   const url = `http://127.0.0.1:${port}`;
   const isLocal = (target) => typeof target === 'string' && (target.startsWith(`${url}/`) || target === url || target.startsWith(`http://localhost:${port}`));
 
+  const isWin = process.platform === 'win32';
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 1100,
     minHeight: 700,
     title: '书匠 · AI 长篇小说创作台',
-    backgroundColor: '#15110d',
+    // Windows 11：整个窗口由系统亚克力背板虚化壁纸（液态玻璃）；非 Win11/不支持时忽略
+    backgroundColor: isWin ? '#00000000' : '#15110d',
+    backgroundMaterial: isWin ? 'acrylic' : undefined,
     autoHideMenuBar: true,
     icon: path.join(__dirname, 'icon.png'),
     show: false,

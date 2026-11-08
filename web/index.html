@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow" />
 <meta name="theme-color" content="#15110d" />
 <title>书匠 · AI 长篇小说创作台</title>
-<link rel="stylesheet" href="/style.css?v=1.0.16" />
+<link rel="stylesheet" href="/style.css?v=1.0.17" />
 <style id="designv1011">
   /* 书匠 · v1.0.11「东方典籍」视觉重写 —— 暖墨：衬线 + 赭金 + 朱砂 */
   @font-face { font-family: '思源宋体 VF'; src: local('Noto Serif SC'), local('Noto Serif SC VF'), local('NotoSerifSC-VF'); font-display: swap; }
@@ -87,12 +87,35 @@
     --mask: rgba(38, 32, 26, .34);
   }
   .page-head h1 { font-family: var(--font-display); letter-spacing: .02em; font-weight: 700; }
+
+  /* 亚克力（Windows 11）：窗口整体透出桌面壁纸，.app 只铺半透明摩挲层 + 暖光 */
+  body.is-electron { background: transparent !important; }
+  body.is-electron[data-theme="dark"] .app {
+    background:
+      radial-gradient(1150px 700px at 50% -14%, rgba(255, 221, 158, .5), transparent 55%),
+      radial-gradient(950px 800px at 50% 34%, rgba(255, 208, 138, .26), transparent 62%),
+      radial-gradient(720px 560px at 112% 126%, rgba(232, 150, 118, .16), transparent 52%),
+      radial-gradient(720px 560px at -12% 126%, rgba(232, 150, 118, .17), transparent 52%),
+      linear-gradient(180deg, rgba(35, 29, 22, .74), rgba(24, 20, 17, .8)) !important;
+  }
+  body.is-electron[data-theme="light"] .app {
+    background:
+      radial-gradient(1000px 580px at 50% -16%, rgba(255, 231, 168, .6), transparent 55%),
+      radial-gradient(720px 540px at 112% 124%, rgba(240, 168, 110, .18), transparent 52%),
+      radial-gradient(720px 540px at -12% 124%, rgba(230, 148, 108, .17), transparent 52%),
+      linear-gradient(180deg, rgba(250, 246, 236, .64), rgba(243, 238, 227, .72)) !important;
+  }
+  body.is-electron[data-theme="dark"] .pane-editor { background: rgba(29, 24, 18, .84) !important; }
+  body.is-electron[data-theme="light"] .pane-editor { background: rgba(255, 253, 246, .88) !important; }
+  body.is-electron[data-theme="dark"] .editor-empty { background: rgba(29, 24, 18, .82) !important; }
+  body.is-electron[data-theme="light"] .editor-empty { background: rgba(255, 253, 246, .86) !important; }
+  body.is-electron .modal-mask { background: rgba(12, 9, 6, .4) !important; }
   .ch-title { font-family: var(--font-display) !important; letter-spacing: .03em !important; font-weight: 700 !important; font-size: 17px !important; caret-color: var(--accent) !important; }
   .section-head span, .card-head h2, .card-head h3,
   .dock-main .card-head h2, .dock-main .card-head h3
   { font-family: var(--font-display); letter-spacing: .03em; }
-  body[data-theme="dark"] { background: radial-gradient(1300px 460px at 50% -200px, rgba(217,162,95,.13), transparent 65%), var(--bg); }
-  body[data-theme="light"] { background: radial-gradient(1300px 460px at 50% -200px, rgba(168,110,52,.12), transparent 65%), var(--bg); }
+  body[data-theme="dark"] { background: var(--bg); }
+  body[data-theme="light"] { background: var(--bg); }
   /* iOS 26 折射玻璃：面板半透明 + 强模糊 + 顶部高光缘——背景暗金流光透过 */
   body[data-theme="dark"] .rail { background: linear-gradient(180deg, rgba(54, 44, 34, .22), rgba(28, 23, 18, .32)) !important; backdrop-filter: blur(38px) saturate(2.3); -webkit-backdrop-filter: blur(38px) saturate(2.3); border-right: 1px solid rgba(255, 236, 208, .12); box-shadow: inset -1px 0 0 rgba(255, 236, 208, .12), inset 0 1px 0 rgba(255, 242, 218, .14), 0 20px 70px rgba(0, 0, 0, .32), 0 0 80px rgba(255, 214, 150, .06) !important; }
   body[data-theme="light"] .rail { background: linear-gradient(180deg, rgba(255, 253, 246, .38), rgba(243, 238, 227, .44)) !important; backdrop-filter: blur(30px) saturate(1.7); -webkit-backdrop-filter: blur(30px) saturate(1.7); border-right: 1px solid rgba(90, 60, 35, .1); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .8), inset 0 1px 0 rgba(255, 255, 255, .9), 0 20px 70px rgba(132, 88, 40, .16), 0 0 80px rgba(232, 158, 92, .12) !important; }
@@ -137,7 +160,7 @@
 
   /* 书案质感：SVG noise 纸纹 + 暖金选区 */
   body::before {
-    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 79; opacity: .09;
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 79; opacity: .06;
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .55 0'/></filter><rect width='240' height='240' filter='url(%23n)'/></svg>");
     mix-blend-mode: overlay;
   }
