@@ -48,17 +48,17 @@ body[data-theme="dark"] {
 
 /* ---------------- 令牌：浅色 ---------------- */
 body[data-theme="light"] {
-  --bg:              #f3eee3;                     /* 楮皮纸 */
-  --surface-1:       #faf6ec;                     /* 侧栏 / 顶栏 / 面板 */
-  --surface-2:       #fffdf6;                     /* 卡片 / 输入容器 */
-  --surface-3:       #ece5d5;                     /* 输入 / 悬浮态 */
-  --surface-4:       #ddd2bf;                     /* 按下 / 选中态 */
-  --border:          rgba(84, 62, 34, .13);
-  --border-2:        rgba(84, 62, 34, .24);
-  --text-1:          #26201a;
-  --text-2:          #57503f;
-  --text-3:          #6f6656;
-  --text-4:          #8b8272;
+  --bg:              #ffffff;                      /* 纯白 */
+  --surface-1:       #ffffff;                      /* 侧栏 / 顶栏 / 面板 */
+  --surface-2:       #ffffff;                      /* 卡片 / 输入容器 */
+  --surface-3:       #f3f3f3;                      /* 输入 / 悬浮态 */
+  --surface-4:       #e8e8e8;                      /* 按下 / 选中态 */
+  --border:          rgba(15, 15, 15, .08);
+  --border-2:        rgba(15, 15, 15, .15);
+  --text-1:          #171512;
+  --text-2:          #3f3a34;
+  --text-3:          #5c574e;
+  --text-4:          #7d786d;
   --accent:          #a86e34;
   --accent-hover:    #96622c;
   --accent-down:     #7a4f24;
@@ -75,13 +75,13 @@ body[data-theme="light"] {
   --danger:          #a8332a;
   --danger-bg:       rgba(168, 51, 42, .10);
   --danger-solid:    #8f2a20;
-  --paper:           #fffdf6;
-  --sh-1: 0 1px 2px rgba(84,62,34,.10), 0 0 0 1px rgba(84,62,34,.05) inset;
-  --sh-2: 0 6px 18px rgba(84,62,34,.13), 0 0 0 1px rgba(84,62,34,.06) inset;
-  --sh-3: 0 28px 70px rgba(84,62,34,.18), 0 0 0 1px rgba(84,62,34,.08) inset;
-  --mask: rgba(38, 32, 26, .34);
-  --glow: radial-gradient(ellipse 90% 65% at 50% -10%, rgba(168,110,52,.14), transparent 60%), radial-gradient(ellipse 45% 55% at 85% 110%, rgba(168,51,42,.07), transparent 65%);
-  --bg-blur: rgba(245, 244, 241, .8);
+  --paper:           #ffffff;
+  --sh-1: 0 1px 2px rgba(15, 15, 15, .08), 0 0 0 1px rgba(15,15,15,.04) inset;
+  --sh-2: 0 6px 18px rgba(15, 15, 15, .1), 0 0 0 1px rgba(15,15,15,.05) inset;
+  --sh-3: 0 28px 70px rgba(15, 15, 15, .14), 0 0 0 1px rgba(15,15,15,.06) inset;
+  --mask: rgba(15, 15, 15, .3);
+  --glow: radial-gradient(ellipse 90% 65% at 50% -10%, rgba(15,15,15,.045), transparent 60%);
+  --bg-blur: rgba(255, 255, 255, .78);
 }
 
 :root {
@@ -1418,7 +1418,7 @@ kbd {
   display: flex; flex-direction: column; overflow: auto;
 }
 body[data-theme="light"] .dock-main {
-  border-left: 1px solid rgba(84, 62, 34, .18);
+  border-left: 1px solid rgba(15, 15, 15, .07);
 }
 .dock-main .dock-body { display: flex; flex-direction: column; gap: 12px; flex: 1; overflow: auto; }
 .dock-main .assist-pane { display: contents; }
@@ -1430,9 +1430,9 @@ body[data-theme="light"] .dock-main {
   box-shadow: inset 0 1px 1px rgba(255, 220, 180, .08), 0 6px 24px rgba(0, 0, 0, .25);
 }
 body[data-theme="light"] .dock-main .assist-pane > .card {
-  background: rgba(255, 253, 246, .72);
-  border: 1px solid rgba(84, 62, 34, .16);
-  box-shadow: inset 0 1px 1px rgba(255,255,255,.7), 0 6px 24px rgba(84, 62, 34, .12);
+  background: rgba(255, 255, 255, .68);
+  border: 1px solid rgba(15, 15, 15, .07);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .9), 0 6px 24px rgba(15, 15, 15, .1);
 }
 .dock-main .assist-pane > .card-head,
 .dock-main .assist-pane > .card-head h2,
@@ -3873,10 +3873,7 @@ body[data-theme="dark"] .app {
 }
 body[data-theme="light"] .app {
   background:
-    radial-gradient(1000px 580px at 50% -16%, rgba(255, 231, 168, .5), transparent 55%),
-    radial-gradient(720px 540px at 112% 124%, rgba(240, 168, 110, .2), transparent 53%),
-    radial-gradient(720px 540px at -12% 124%, rgba(230, 148, 108, .18), transparent 53%),
-    linear-gradient(180deg, #f5f0e7 0%, #faf6ed 100%);
+    linear-gradient(180deg, #ffffff 0%, #ffffff 100%);
 }
 
 /* 左边栏：暖墨折射玻璃 */
@@ -3908,7 +3905,7 @@ body[data-theme="light"] .app {
   background: radial-gradient(900px 600px at 50% -12%, rgba(217, 162, 95, .16), transparent 65%);
 }
 body[data-theme="light"] .modal-mask::before {
-  background: radial-gradient(900px 600px at 50% -12%, rgba(168, 110, 52, .12), transparent 65%);
+  background: radial-gradient(900px 600px at 50% -12%, rgba(255, 255, 255, .35), transparent 65%);
 }
 .modal {
   position: relative;

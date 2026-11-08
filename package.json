@@ -1,6 +1,6 @@
 {
   "name": "shu-ai-novel-studio",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "private": true,
   "type": "module",
   "description": "书匠 · AI 长篇小说创作台（本地运行，零依赖）",
