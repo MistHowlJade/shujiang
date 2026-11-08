@@ -7340,6 +7340,60 @@ async function generateChapter() {
 }
 $('#genChapterBtn').addEventListener('click', generateChapter);
 
+/** 有监督批量生成：连续生成 N 章草稿，每章停一下等作者看完再继续；全程不覆盖已有正文 */
+function askBatchNext(message, primary) {
+  return new Promise((resolve) => {
+    showModal(`<h3>已生成</h3>
+      <p class="modal-sub">${esc(message)}<br>输出区里是这章的初稿——满意就点「追加到正文」落到本章；不满意就直接进下一章。</p>
+      <div class="modal-foot"><button class="btn btn-text" id="batchStop">停在这里</button><button class="btn btn-primary" id="batchNext">${esc(primary)}</button></div>`, (box) => {
+      box.querySelector('#batchStop').onclick = () => { closeModal(); resolve('stop'); };
+      box.querySelector('#batchNext').onclick = () => { closeModal(); resolve('next'); };
+    });
+  });
+}
+
+async function batchGenerateChapters() {
+  const ch = currentChapter();
+  if (!ch) return toast('先建一章', 'err');
+  const idx = S.novel.chapters.findIndex((c) => c.id === ch.id);
+  if (idx < 0) return toast('先选一章当前章', 'err');
+  const count = await new Promise((resolve) => {
+    showModal(`<h3>批量生成（有监督）</h3>
+      <p class="modal-sub">从当前章（第 ${ch.no} 章）开始，连续生成多章草稿。每章跑完一遍你就看输出区；满意点「追加到正文」落到那章，不满意就点「下一章」进下一章。<br>全程不覆盖已有正文——落到本章的是草稿建议，你定。</p>
+      <div class="field-row"><label class="field-label">连续几章<input id="batchCount" type="number" min="1" max="10" value="3" class="input" style="width:80px" /></label></div>
+      <div class="modal-foot"><button class="btn btn-text" id="batchCancel">关闭</button><button class="btn btn-primary" id="batchStart">开始生成</button></div>`, (box) => {
+      box.querySelector('#batchCancel').onclick = () => { closeModal(); resolve(0); };
+      box.querySelector('#batchStart').onclick = () => { closeModal(); resolve(Math.max(1, Math.min(10, Number(box.querySelector('#batchCount')?.value) || 1))); };
+    });
+  });
+  if (!count) return;
+  const lastNo = S.novel.chapters[idx + count - 1]?.no || S.novel.chapters[S.novel.chapters.length - 1]?.no;
+  for (let k = 0; k < count && idx + k < S.novel.chapters.length; k += 1) {
+    const target = S.novel.chapters[idx + k];
+    selectChapter(target.id);
+    // 列表选中即可，不需要额外等待——真卡住先去掉试试
+    await runStream({
+      task: 'chapter',
+      novelId: S.novel.id,
+      chapterId: target.id,
+      model: $('#genModel').value.trim() || undefined,
+      payload: {
+        instruction: $('#genReq').value.trim() || undefined,
+        targetWords: Number($('#genWords').value) || undefined,
+        extraQuery: $('#genReq').value.trim() || undefined,
+      },
+    });
+    if (k < count - 1 && S.novel.chapters[idx + k + 1]) {
+      const nextNo = S.novel.chapters[idx + k + 1].no;
+      const go = await askBatchNext(`第 ${target.no} 章「${target.title || '未命名'}」已生成。`, `继续第 ${nextNo} 章 →`);
+      if (go !== 'next') break;
+    } else {
+      toast(`已生成，逐章点「追加到正文」落稿。`, 'ok');
+    }
+  }
+}
+$('#batchHintBtn').addEventListener('click', batchGenerateChapters);
+
 async function continueWriting() {
   const ch = currentChapter();
   if (!ch) return toast('先建一章', 'err');
