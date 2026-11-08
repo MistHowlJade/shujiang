@@ -2006,6 +2006,25 @@ kbd {
 .hook-card { border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px; background: var(--surface-2); }
 .hook-better { font-size: 11px; color: var(--text-3); margin-top: 8px; padding: 8px 10px; background: var(--surface-3); border-radius: var(--r-sm); }
 
+/* 结构检查（场景拆解） */
+.scene-list { display: flex; flex-direction: column; gap: 8px; }
+.scene-row { border: 1px solid var(--border); border-left: 3px solid var(--success); border-radius: var(--r-md); padding: 10px 12px; background: var(--surface-2); }
+.scene-row.scene-water { border-left-color: var(--warning); }
+.scene-row.scene-cut { border-left-color: var(--danger); }
+.scene-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.scene-head b { font-size: 12px; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.scene-verdict { font-size: 10.5px; padding: 1px 8px; border-radius: var(--r-full); background: var(--surface-3); color: var(--text-3); }
+.scene-row.scene-water .scene-verdict { color: var(--warning); }
+.scene-row.scene-cut .scene-verdict { color: var(--danger); }
+.scene-row.scene-good .scene-verdict { color: var(--success); }
+.scene-reason { font-size: 11px; color: var(--text-4); overflow-wrap: anywhere; }
+.scene-cells { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 11px; color: var(--text-2); line-height: 1.65; overflow-wrap: anywhere; }
+.scene-label { display: block; font-size: 9.5px; color: var(--text-4); margin-bottom: 2px; }
+.scene-overall { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px; background: var(--surface-2); }
+.scene-overall b { font-size: 11px; color: var(--text-3); }
+.scene-overall p { font-size: 12px; line-height: 1.8; color: var(--text-1); margin-top: 4px; }
+.scene-cut { margin-top: 8px; padding-left: 18px; font-size: 11px; color: var(--text-3); line-height: 1.75; }
+
 /* 本章聚焦 */
 .focus-list { display: flex; flex-direction: column; gap: 10px; }
 .focus-row { display: grid; grid-template-columns: 84px 1fr; gap: 10px; align-items: start; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }

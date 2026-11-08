@@ -252,6 +252,14 @@ const BOOKCHECK = `**总判词**：钩子立住了，人物立住一半，开书
 1. 第 2 章加一个「当下」钩子——别让读者等师门旧事讲完再往前冒，穿插一件现在正在发生的奇怪事。
 2. 谢迟的目标在第 3 章之前要更直接地摆给读者——读者知道主角想干什么，才留得住。
 3. 里程碑密度：前三章落地一个明确承诺（比如「师傅留下的口信要找到」），后面每两三章回收一次。`;
+const SCENE = {
+  scenes: [
+    { no: 1, goal: '沈砚想弄清雪岭来路', conflict: '冷风雪雾看不到路，身上没有干粮', outcome: '摸到石碑，得到师门线索', verdict: '有效', reason: '主线推进并埋下伏笔' },
+    { no: 2, goal: '交代外貌与身世', conflict: '没有阻力', outcome: '读者记住沈砚', verdict: '注水', reason: '背景连写两章，信息密度低' },
+  ],
+  overall: '雪岭那段是真正推进，后面两段背景铺陈是注水；外貌、身世、铁匠铺三段能合并成一段，烧焦剑谱能压掉三行。',
+  cutElsewhere: ['师门灭门时怀里的烧焦剑谱能压掉三行', '铁匠铺六年的描写是逐句搬运的说明文'],
+};
 const HOOK = { score: 4, verdict: '能断，钩子不够硬', reason: '章末拍在牌位上，离真相还差一步，追更欲够但不够狠', better: '此处即可' };
 const POISON = [
   { severity: 'medium', risk: '注水', quote: '师门灭门那年他七岁', reason: '背景交代连写两章，节奏停在原地', suggest: '压缩成一句，直接切到现在' },
@@ -334,6 +342,8 @@ function decide(text) {
   if (has('分卷大纲')) return 'outline';
   if (has('审稿意见')) return 'review';
   if (has('文风档案')) return 'style';
+  // 结构检查（场景拆解）
+  if (has('拆成场景序列')) return 'scene';
   // 读者视角三件套（毒点 / 断章 / 敏感内容）
   if (has('让人弃书') || has('弃书的点')) return 'poison';
   if (has('断章位置')) return 'hook';
@@ -372,6 +382,8 @@ function buildReply(text, model = '') {
       return { kind, content: REVIEW };
     case 'style':
       return { kind, content: STYLE };
+    case 'scene':
+      return { kind, content: JSON.stringify(SCENE) };
     case 'poison':
       return { kind, content: JSON.stringify(POISON) };
     case 'hook':

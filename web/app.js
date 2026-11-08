@@ -7522,7 +7522,7 @@ const GEN_TASK_LABEL = {
   consistency: '一致性检查', review: '责编评审', diagnose: '自检', anno_fix: '按批注修',
   payoff: '爽点档', inspiration: '灵感对话', outline: '大纲', characters: '人物', worldview: '世界观',
   bookcheck: '开书诊断', summarize: '概要', sceneGen: '场景正文', expandScene: '场景正文',
-  poison: '毒点检查', hook: '断章评估', sensitivity: '敏感内容提醒', memoryChapter: '章节记忆',
+  poison: '毒点检查', hook: '断章评估', sensitivity: '敏感内容提醒', memoryChapter: '章节记忆', scene: '结构检查',
 };
 const genTaskLabel = (t) => GEN_TASK_LABEL[t] || String(t || '其他');
 
@@ -8583,6 +8583,7 @@ $$('[data-quick]').forEach((btn) => btn.addEventListener('click', async () => {
   if (kind === 'hook') return runHookCheck();
   if (kind === 'sensitivity') return runSensitivityCheck();
   if (kind === 'focus') return openFocusLens();
+  if (kind === 'scene') return runSceneCheck();
 
   const ch = currentChapter();
   if (!ch) return toast('先选一章', 'err');
@@ -11459,6 +11460,40 @@ async function runHookCheck() {
         ${obj.reason ? `<p class="payoff-note">${esc(obj.reason)}</p>` : ''}
         ${obj.better ? `<p class="hook-better"><b>更好的位置：</b>${esc(obj.better)}</p>` : ''}
       </div>`;
+  } catch (err) {
+    paintReaderScanError(err);
+  }
+}
+
+const verdictClass = (v) => { const s = String(v || ''); return s.includes('注水') ? 'water' : s.includes('可删') ? 'cut' : 'good'; };
+
+async function runSceneCheck() {
+  const ch = currentChapter();
+  if (!ch) return toast('先打开一章', 'err');
+  if (!String(ch.content || '').trim()) return toast('这一章还没有正文', 'err');
+  if (S.controller) return toast('生成中——先停一下', 'err');
+  openReaderScanModal('结构检查 · 本章', 'AI 把这一章拆成场景序列：看目标—冲突—结果有没有真推进，再给删减与合并建议——只分析，不改正文。');
+  try {
+    const acc = await runStream({ task: 'scene', novelId: S.novel.id, chapterId: ch.id }, { target: 'diag' });
+    const box = document.querySelector('#readerScanList');
+    if (!box) return;
+    const obj = parseJsonLoose(acc);
+    const scenes = obj && Array.isArray(obj.scenes) ? obj.scenes : (Array.isArray(obj) ? obj : []);
+    if (!scenes.length) {
+      box.innerHTML = '<p class="qs-error">AI 没按要求返回 JSON 场景清单——可以换个模型再试。</p>';
+      return;
+    }
+    const overall = obj && typeof obj === 'object' ? String(obj.overall || '').slice(0, 300) : '';
+    const cut = obj && typeof obj === 'object' && Array.isArray(obj.cutElsewhere) ? obj.cutElsewhere.slice(0, 3).map((s) => String(s).slice(0, 80)) : [];
+    box.innerHTML = `
+      <div class="scene-list">
+        ${scenes.slice(0, 12).map((s) => `
+          <div class="scene-row scene-${verdictClass(s.verdict)}">
+            <div class="scene-head"><b>场景 ${esc(String(s.no ?? '?'))}</b><span class="scene-verdict">${esc(s.verdict || '有效')}</span>${s.reason ? `<span class="scene-reason">${esc(s.reason)}</span>` : ''}</div>
+            <div class="scene-cells"><div><span class="scene-label">目标</span>${esc(s.goal || '')}</div><div><span class="scene-label">冲突</span>${esc(s.conflict || '')}</div><div><span class="scene-label">结果</span>${esc(s.outcome || '')}</div></div>
+          </div>`).join('')}
+      </div>
+      ${overall ? `<div class="scene-overall"><b>整体判词</b><p>${esc(overall)}</p>${cut.length ? `<ul class="scene-cut">${cut.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}</div>` : ''}`;
   } catch (err) {
     paintReaderScanError(err);
   }

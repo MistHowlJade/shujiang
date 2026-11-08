@@ -115,7 +115,7 @@ const ROLE_OF_TASK = {
   outline: 'write', characters: 'write', worldview: 'write', chapter: 'write',
   continue: 'write', polish: 'write', expand: 'write', shorten: 'write',
   rewrite: 'write', custom: 'write', titles: 'write', style: 'write', anno_fix: 'write',
-  poison: 'write', hook: 'write', sensitivity: 'write',
+  poison: 'write', hook: 'write', sensitivity: 'write', scene: 'write',
   memory: 'summary', consistency: 'summary', review: 'review',
 };
 
