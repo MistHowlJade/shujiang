@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow" />
 <meta name="theme-color" content="#15110d" />
 <title>书匠 · AI 长篇小说创作台</title>
-<link rel="stylesheet" href="/style.css?v=1.0.13" />
+<link rel="stylesheet" href="/style.css?v=1.0.14" />
 <style id="designv1011">
   /* 书匠 · v1.0.11「东方典籍」视觉重写 —— 暖墨：衬线 + 赭金 + 朱砂 */
   @font-face { font-family: '思源宋体 VF'; src: local('Noto Serif SC'), local('Noto Serif SC VF'), local('NotoSerifSC-VF'); font-display: swap; }
@@ -93,19 +93,20 @@
   { font-family: var(--font-display); letter-spacing: .03em; }
   body[data-theme="dark"] { background: radial-gradient(1300px 460px at 50% -200px, rgba(217,162,95,.13), transparent 65%), var(--bg); }
   body[data-theme="light"] { background: radial-gradient(1300px 460px at 50% -200px, rgba(168,110,52,.12), transparent 65%), var(--bg); }
-  body[data-theme="dark"] .rail { background: linear-gradient(180deg, #1d1812 0%, #181410 100%) !important; }
-  body[data-theme="light"] .rail { background: linear-gradient(180deg, #faf6ec 0%, #efe8d9 100%) !important; }
+  /* iOS 26 折射玻璃：面板半透明 + 强模糊 + 顶部高光缘——背景暗金流光透过 */
+  body[data-theme="dark"] .rail { background: linear-gradient(180deg, rgba(49, 40, 31, .34), rgba(27, 22, 17, .48)) !important; backdrop-filter: blur(32px) saturate(1.8); -webkit-backdrop-filter: blur(32px) saturate(1.8); border-right: 1px solid rgba(255, 226, 180, .18); box-shadow: inset -1px 0 0 rgba(255, 230, 190, .09), inset 0 1px 0 rgba(255, 240, 214, .14) !important; }
+  body[data-theme="light"] .rail { background: linear-gradient(180deg, rgba(255, 253, 246, .55), rgba(243, 238, 227, .62)) !important; backdrop-filter: blur(28px) saturate(1.5); -webkit-backdrop-filter: blur(28px) saturate(1.5); border-right: 1px solid rgba(84, 62, 34, .16); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .8), inset 0 1px 0 rgba(255, 255, 255, .9) !important; }
   .rail .tab.on { color: var(--accent-hover) !important; box-shadow: inset 0 0 0 1px rgba(217,162,95,.4), inset 3px 0 0 var(--accent) !important; }
   .dock-main .card-head { border-bottom: 1px solid rgba(255,220,180,.08); border-top: 1px solid rgba(217,162,95,.38); border-radius: 10px; padding: 8px 10px 8px 12px; margin: 2px -2px 0 -2px; width: calc(100% + 4px); background: rgba(255,220,180,.02); }
   .rail .tab.on .ico { color: var(--accent-hover) !important; }
   .rail-nav { gap: 6px !important; }
-  body[data-theme="dark"] .topbar { background: linear-gradient(180deg, #1d1812 0%, #1b1612 100%) !important; }
-  body[data-theme="light"] .topbar { background: linear-gradient(180deg, #faf6ec 0%, #f2ecdf 100%) !important; }
+  body[data-theme="dark"] .topbar { background: linear-gradient(180deg, rgba(49, 40, 31, .35), rgba(31, 25, 20, .46)) !important; backdrop-filter: blur(30px) saturate(1.75); -webkit-backdrop-filter: blur(30px) saturate(1.75); border-bottom: 1px solid rgba(255, 226, 180, .18); box-shadow: inset 0 1px 0 rgba(255, 240, 214, .14), 0 12px 44px rgba(0, 0, 0, .38) !important; }
+  body[data-theme="light"] .topbar { background: linear-gradient(180deg, rgba(255, 253, 246, .58), rgba(246, 240, 229, .64)) !important; backdrop-filter: blur(26px) saturate(1.5); -webkit-backdrop-filter: blur(26px) saturate(1.5); border-bottom: 1px solid rgba(84, 62, 34, .16); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), 0 10px 36px rgba(84, 62, 34, .14) !important; }
   .topbar-mid .top-export:hover { border-color: var(--accent-line) !important; color: var(--accent-hover) !important; }
   .topbar-mid .top-export { color: var(--text-1) !important; border-color: var(--border-2) !important; }
   .topbar-mid .ico { color: var(--accent-hover) !important; }
-  body[data-theme="dark"] .dock-main { background: linear-gradient(180deg, rgba(29,24,18,.88), rgba(21,17,13,.92)) !important; }
-  body[data-theme="light"] .dock-main { background: linear-gradient(180deg, rgba(250,246,236,.94), rgba(243,238,227,.96)) !important; }
+  body[data-theme="dark"] .dock-main { background: linear-gradient(180deg, rgba(49, 40, 31, .42), rgba(31, 25, 20, .52)) !important; backdrop-filter: blur(30px) saturate(1.75); -webkit-backdrop-filter: blur(30px) saturate(1.75); border-left: 1px solid rgba(255, 226, 180, .18); box-shadow: inset 1px 0 0 rgba(255, 230, 190, .09) !important; }
+  body[data-theme="light"] .dock-main { background: linear-gradient(180deg, rgba(255, 253, 246, .6), rgba(243, 238, 227, .68)) !important; backdrop-filter: blur(26px) saturate(1.5); -webkit-backdrop-filter: blur(26px) saturate(1.5); border-left: 1px solid rgba(84, 62, 34, .16); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .8) !important; }
   .dock-main .card-head .co-title { color: var(--accent-hover) !important; }
   .dock-main .assist-hint { border-color: var(--accent-line) !important; color: var(--text-3) !important; font-family: var(--font-ui) !important; }
   .dock-main .card-head { border-bottom: 1px solid rgba(255,220,180,.08); padding-bottom: 8px; }
@@ -160,6 +161,14 @@
   .shelf-spotlight-cta { flex: 0 0 auto; align-self: flex-start; width: auto; min-width: 180px; height: 44px !important; padding: 0 24px !important; font-weight: 700 !important; border-radius: 10px !important; }
   .shelf-spotlight { padding: 24px 28px !important; gap: 28px !important; }
   .shelf-spotlight-title { font-size: 24px !important; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
+
+  /* iOS 26 折射玻璃：浮层（弹窗 / 命令面板 / 页面头）——更厚的白高光、更深的模糊、边缘折射 */
+  .modal { background: linear-gradient(168deg, rgba(66, 54, 42, .6), rgba(33, 28, 22, .76)) !important; backdrop-filter: blur(36px) saturate(1.85) !important; -webkit-backdrop-filter: blur(36px) saturate(1.85) !important; border: 1px solid rgba(255, 226, 180, .22) !important; box-shadow: inset 0 1px 0 rgba(255, 240, 214, .18), inset 0 -1px 0 rgba(0, 0, 0, .3), 0 34px 96px rgba(0, 0, 0, .62), 0 0 0 1px rgba(217, 162, 95, .16) !important; }
+  body[data-theme="light"] .modal { background: linear-gradient(168deg, rgba(255, 253, 246, .74), rgba(243, 238, 227, .84)) !important; border: 1px solid rgba(84, 62, 34, .24) !important; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .92), inset 0 -1px 0 rgba(84, 62, 34, .08), 0 34px 96px rgba(84, 62, 34, .3), 0 0 0 1px rgba(168, 110, 52, .12) !important; }
+  .cmdk { background: linear-gradient(172deg, rgba(66, 54, 42, .62), rgba(35, 29, 24, .76)) !important; backdrop-filter: blur(34px) saturate(1.85) !important; -webkit-backdrop-filter: blur(34px) saturate(1.85) !important; border: 1px solid rgba(255, 226, 180, .22) !important; box-shadow: inset 0 1px 0 rgba(255, 240, 214, .2), 0 34px 90px rgba(0, 0, 0, .6), 0 0 0 1px rgba(217, 162, 95, .14) !important; }
+  body[data-theme="light"] .cmdk { background: linear-gradient(172deg, rgba(255, 253, 246, .8), rgba(246, 240, 229, .88)) !important; border: 1px solid rgba(84, 62, 34, .24) !important; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .92), 0 34px 90px rgba(84, 62, 34, .28) !important; }
+  .page-head { backdrop-filter: blur(22px) saturate(1.6) !important; -webkit-backdrop-filter: blur(22px) saturate(1.6) !important; }
+  .modal-mask::before { background: radial-gradient(900px 600px at 50% -12%, rgba(217, 162, 95, .22), transparent 62%) !important; }
 </style>
 
 
@@ -874,6 +883,7 @@
 <script src="/app.js" type="module"></script>
 </body>
 </html>
+
 
 
 
