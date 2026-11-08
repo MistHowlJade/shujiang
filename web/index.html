@@ -94,19 +94,19 @@
   body[data-theme="dark"] { background: radial-gradient(1300px 460px at 50% -200px, rgba(217,162,95,.13), transparent 65%), var(--bg); }
   body[data-theme="light"] { background: radial-gradient(1300px 460px at 50% -200px, rgba(168,110,52,.12), transparent 65%), var(--bg); }
   /* iOS 26 折射玻璃：面板半透明 + 强模糊 + 顶部高光缘——背景暗金流光透过 */
-  body[data-theme="dark"] .rail { background: linear-gradient(180deg, rgba(49, 40, 31, .34), rgba(27, 22, 17, .48)) !important; backdrop-filter: blur(32px) saturate(1.8); -webkit-backdrop-filter: blur(32px) saturate(1.8); border-right: 1px solid rgba(255, 226, 180, .18); box-shadow: inset -1px 0 0 rgba(255, 230, 190, .09), inset 0 1px 0 rgba(255, 240, 214, .14) !important; }
-  body[data-theme="light"] .rail { background: linear-gradient(180deg, rgba(255, 253, 246, .55), rgba(243, 238, 227, .62)) !important; backdrop-filter: blur(28px) saturate(1.5); -webkit-backdrop-filter: blur(28px) saturate(1.5); border-right: 1px solid rgba(84, 62, 34, .16); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .8), inset 0 1px 0 rgba(255, 255, 255, .9) !important; }
+  body[data-theme="dark"] .rail { background: linear-gradient(180deg, rgba(54, 44, 34, .28), rgba(28, 23, 18, .4)) !important; backdrop-filter: blur(38px) saturate(2.3); -webkit-backdrop-filter: blur(38px) saturate(2.3); border-right: 1px solid rgba(255, 226, 180, .24); box-shadow: inset -1px 0 0 rgba(255, 230, 190, .12), inset 0 1px 0 rgba(255, 240, 214, .2) !important; }
+  body[data-theme="light"] .rail { background: linear-gradient(180deg, rgba(255, 253, 246, .45), rgba(243, 238, 227, .52)) !important; backdrop-filter: blur(30px) saturate(1.7); -webkit-backdrop-filter: blur(30px) saturate(1.7); border-right: 1px solid rgba(84, 62, 34, .2); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .8), inset 0 1px 0 rgba(255, 255, 255, .9) !important; }
   .rail .tab.on { color: var(--accent-hover) !important; box-shadow: inset 0 0 0 1px rgba(217,162,95,.4), inset 3px 0 0 var(--accent) !important; }
   .dock-main .card-head { border-bottom: 1px solid rgba(255,220,180,.08); border-top: 1px solid rgba(217,162,95,.38); border-radius: 10px; padding: 8px 10px 8px 12px; margin: 2px -2px 0 -2px; width: calc(100% + 4px); background: rgba(255,220,180,.02); }
   .rail .tab.on .ico { color: var(--accent-hover) !important; }
   .rail-nav { gap: 6px !important; }
-  body[data-theme="dark"] .topbar { background: linear-gradient(180deg, rgba(49, 40, 31, .35), rgba(31, 25, 20, .46)) !important; backdrop-filter: blur(30px) saturate(1.75); -webkit-backdrop-filter: blur(30px) saturate(1.75); border-bottom: 1px solid rgba(255, 226, 180, .18); box-shadow: inset 0 1px 0 rgba(255, 240, 214, .14), 0 12px 44px rgba(0, 0, 0, .38) !important; }
-  body[data-theme="light"] .topbar { background: linear-gradient(180deg, rgba(255, 253, 246, .58), rgba(246, 240, 229, .64)) !important; backdrop-filter: blur(26px) saturate(1.5); -webkit-backdrop-filter: blur(26px) saturate(1.5); border-bottom: 1px solid rgba(84, 62, 34, .16); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), 0 10px 36px rgba(84, 62, 34, .14) !important; }
+  body[data-theme="dark"] .topbar { background: linear-gradient(180deg, rgba(54, 44, 34, .28), rgba(31, 25, 20, .38)) !important; backdrop-filter: blur(36px) saturate(2.15); -webkit-backdrop-filter: blur(36px) saturate(2.15); border-bottom: 1px solid rgba(255, 226, 180, .24); box-shadow: inset 0 1px 0 rgba(255, 240, 214, .2), 0 12px 44px rgba(0, 0, 0, .4) !important; }
+  body[data-theme="light"] .topbar { background: linear-gradient(180deg, rgba(255, 253, 246, .48), rgba(246, 240, 229, .54)) !important; backdrop-filter: blur(28px) saturate(1.7); -webkit-backdrop-filter: blur(28px) saturate(1.7); border-bottom: 1px solid rgba(84, 62, 34, .2); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), 0 10px 36px rgba(84, 62, 34, .14) !important; }
   .topbar-mid .top-export:hover { border-color: var(--accent-line) !important; color: var(--accent-hover) !important; }
   .topbar-mid .top-export { color: var(--text-1) !important; border-color: var(--border-2) !important; }
   .topbar-mid .ico { color: var(--accent-hover) !important; }
-  body[data-theme="dark"] .dock-main { background: linear-gradient(180deg, rgba(49, 40, 31, .42), rgba(31, 25, 20, .52)) !important; backdrop-filter: blur(30px) saturate(1.75); -webkit-backdrop-filter: blur(30px) saturate(1.75); border-left: 1px solid rgba(255, 226, 180, .18); box-shadow: inset 1px 0 0 rgba(255, 230, 190, .09) !important; }
-  body[data-theme="light"] .dock-main { background: linear-gradient(180deg, rgba(255, 253, 246, .6), rgba(243, 238, 227, .68)) !important; backdrop-filter: blur(26px) saturate(1.5); -webkit-backdrop-filter: blur(26px) saturate(1.5); border-left: 1px solid rgba(84, 62, 34, .16); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .8) !important; }
+  body[data-theme="dark"] .dock-main { background: linear-gradient(180deg, rgba(54, 44, 34, .33), rgba(31, 25, 20, .44)) !important; backdrop-filter: blur(36px) saturate(2.15); -webkit-backdrop-filter: blur(36px) saturate(2.15); border-left: 1px solid rgba(255, 226, 180, .24); box-shadow: inset 1px 0 0 rgba(255, 230, 190, .12) !important; }
+  body[data-theme="light"] .dock-main { background: linear-gradient(180deg, rgba(255, 253, 246, .5), rgba(243, 238, 227, .56)) !important; backdrop-filter: blur(28px) saturate(1.7); -webkit-backdrop-filter: blur(28px) saturate(1.7); border-left: 1px solid rgba(84, 62, 34, .2); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .8) !important; }
   .dock-main .card-head .co-title { color: var(--accent-hover) !important; }
   .dock-main .assist-hint { border-color: var(--accent-line) !important; color: var(--text-3) !important; font-family: var(--font-ui) !important; }
   .dock-main .card-head { border-bottom: 1px solid rgba(255,220,180,.08); padding-bottom: 8px; }
@@ -137,7 +137,7 @@
 
   /* 书案质感：SVG noise 纸纹 + 暖金选区 */
   body::before {
-    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 79; opacity: .07;
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 79; opacity: .09;
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .55 0'/></filter><rect width='240' height='240' filter='url(%23n)'/></svg>");
     mix-blend-mode: overlay;
   }
@@ -146,7 +146,7 @@
 
   /* 书架「正在写」横幅 */
   .shelf-spotlight { position: relative; margin: 2px 32px 16px; padding: 28px 32px; border: 1px solid var(--accent-line); border-radius: 14px; display: flex; align-items: center; gap: 24px; overflow: hidden; }
-  body[data-theme="dark"] .shelf-spotlight { background: linear-gradient(135deg, rgba(217,162,95,.22), rgba(154,110,58,.12) 55%, rgba(29,24,18,.6)); box-shadow: inset 0 1px 0 rgba(255,220,180,.12), 0 18px 48px rgba(0,0,0,.35); }
+  body[data-theme="dark"] .shelf-spotlight { background: linear-gradient(135deg, rgba(228, 168, 99, .34), rgba(168, 110, 66, .17) 55%, rgba(29, 24, 18, .5)); box-shadow: inset 0 1px 0 rgba(255, 232, 200, .2), 0 22px 56px rgba(0, 0, 0, .45), 0 0 60px rgba(217, 162, 95, .12); }
   body[data-theme="light"] .shelf-spotlight { background: linear-gradient(135deg, rgba(197,132,74,.16), rgba(168,110,52,.09) 55%, rgba(255,253,246,.9)); box-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 18px 48px rgba(84,62,34,.18); }
   .shelf-spotlight::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.04) 45%, transparent 55%); }
   .shelf-spotlight-label { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--accent-hover); letter-spacing: .12em; text-transform: uppercase; font-weight: 700; }
@@ -163,7 +163,7 @@
   .shelf-spotlight-title { font-size: 24px !important; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
 
   /* iOS 26 折射玻璃：浮层（弹窗 / 命令面板 / 页面头）——更厚的白高光、更深的模糊、边缘折射 */
-  .modal { background: linear-gradient(168deg, rgba(66, 54, 42, .6), rgba(33, 28, 22, .76)) !important; backdrop-filter: blur(36px) saturate(1.85) !important; -webkit-backdrop-filter: blur(36px) saturate(1.85) !important; border: 1px solid rgba(255, 226, 180, .22) !important; box-shadow: inset 0 1px 0 rgba(255, 240, 214, .18), inset 0 -1px 0 rgba(0, 0, 0, .3), 0 34px 96px rgba(0, 0, 0, .62), 0 0 0 1px rgba(217, 162, 95, .16) !important; }
+  .modal { background: linear-gradient(168deg, rgba(64, 53, 41, .52), rgba(32, 27, 21, .68)) !important; backdrop-filter: blur(38px) saturate(2.05) !important; -webkit-backdrop-filter: blur(38px) saturate(2.05) !important; border: 1px solid rgba(255, 226, 180, .26) !important; box-shadow: inset 0 1px 0 rgba(255, 240, 214, .2), inset 0 -1px 0 rgba(0, 0, 0, .3), 0 34px 96px rgba(0, 0, 0, .66), 0 0 0 1px rgba(217, 162, 95, .18) !important; }
   body[data-theme="light"] .modal { background: linear-gradient(168deg, rgba(255, 253, 246, .74), rgba(243, 238, 227, .84)) !important; border: 1px solid rgba(84, 62, 34, .24) !important; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .92), inset 0 -1px 0 rgba(84, 62, 34, .08), 0 34px 96px rgba(84, 62, 34, .3), 0 0 0 1px rgba(168, 110, 52, .12) !important; }
   .cmdk { background: linear-gradient(172deg, rgba(66, 54, 42, .62), rgba(35, 29, 24, .76)) !important; backdrop-filter: blur(34px) saturate(1.85) !important; -webkit-backdrop-filter: blur(34px) saturate(1.85) !important; border: 1px solid rgba(255, 226, 180, .22) !important; box-shadow: inset 0 1px 0 rgba(255, 240, 214, .2), 0 34px 90px rgba(0, 0, 0, .6), 0 0 0 1px rgba(217, 162, 95, .14) !important; }
   body[data-theme="light"] .cmdk { background: linear-gradient(172deg, rgba(255, 253, 246, .8), rgba(246, 240, 229, .88)) !important; border: 1px solid rgba(84, 62, 34, .24) !important; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .92), 0 34px 90px rgba(84, 62, 34, .28) !important; }
@@ -174,7 +174,7 @@
   .topbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1.5px; background: linear-gradient(90deg, transparent 3%, rgba(255, 226, 160, .4) 14%, rgba(255, 240, 210, .75) 30%, rgba(226, 165, 95, .7) 46%, rgba(232, 110, 90, .6) 62%, rgba(255, 226, 160, .4) 78%, transparent 97%); opacity: .55; filter: blur(.2px); }
   .modal { box-shadow: inset 0 1px 0 rgba(255, 244, 222, .3), inset 0 3px 8px rgba(255, 226, 180, .1), inset 0 -1px 0 rgba(0, 0, 0, .3), 0 34px 96px rgba(0, 0, 0, .62), 0 0 0 1px rgba(217, 162, 95, .16) !important; }
   .cmdk { box-shadow: inset 0 1px 0 rgba(255, 244, 222, .32), inset 0 3px 8px rgba(255, 226, 180, .1), 0 34px 90px rgba(0, 0, 0, .6), 0 0 0 1px rgba(217, 162, 95, .14) !important; }
-  .rail, .dock-main { backdrop-filter: blur(30px) saturate(2) !important; -webkit-backdrop-filter: blur(30px) saturate(2) !important; }
+  .rail, .dock-main { backdrop-filter: blur(38px) saturate(2.3) !important; -webkit-backdrop-filter: blur(38px) saturate(2.3) !important; }
 </style>
 
 
