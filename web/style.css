@@ -210,8 +210,9 @@ main:focus { outline: none; }
   box-shadow: 0 1px 0 0 rgba(0, 0, 0, .2);
 }
 .topbar::after {
-  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
-  background: linear-gradient(90deg, transparent 4%, var(--accent-line) 30%, rgba(224, 110, 92, .4) 60%, transparent 96%);
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1.5px;
+  background: linear-gradient(90deg, transparent 3%, rgba(255, 226, 160, .4) 14%, rgba(255, 240, 210, .75) 30%, rgba(226, 165, 95, .7) 46%, rgba(232, 110, 90, .6) 62%, rgba(255, 226, 160, .4) 78%, transparent 97%);
+  opacity: .55; filter: blur(.2px);
 }
 .topbar { position: relative; }
 .topbar-mid {
@@ -3864,19 +3865,19 @@ body[data-theme="light"] .btn-primary {
    ========================================================================== */
 body[data-theme="dark"] .app {
   background:
-    radial-gradient(1300px 780px at 78% -240px, rgba(217, 162, 95, .3), transparent 56%),
-    radial-gradient(1150px 820px at -24% 118%, rgba(224, 110, 92, .22), transparent 52%),
-    radial-gradient(950px 620px at 30% 44%, rgba(168, 119, 70, .18), transparent 52%),
-    radial-gradient(560px 430px at 92% 58%, rgba(120, 200, 155, .12), transparent 54%),
-    linear-gradient(112deg, transparent 32%, rgba(255, 226, 178, .05) 44%, rgba(255, 226, 178, .11) 50%, transparent 64%),
-    linear-gradient(180deg, #1d1812 0%, #15110d 58%, #12100c 100%);
+    radial-gradient(1500px 840px at 74% -260px, rgba(232, 172, 96, .36), transparent 53%),
+    radial-gradient(1250px 880px at -26% 122%, rgba(230, 112, 92, .3), transparent 50%),
+    radial-gradient(1050px 660px at 26% 40%, rgba(186, 126, 68, .24), transparent 49%),
+    radial-gradient(620px 460px at 92% 54%, rgba(126, 208, 160, .18), transparent 51%),
+    linear-gradient(112deg, transparent 26%, rgba(255, 228, 178, .08) 42%, rgba(255, 228, 178, .18) 49%, rgba(255, 200, 190, .1) 54%, transparent 68%),
+    linear-gradient(180deg, #221b14 0%, #171310 56%, #131009 100%);
 }
 body[data-theme="light"] .app {
   background:
-    radial-gradient(900px 520px at 78% -180px, rgba(197, 132, 74, .22), transparent 56%),
-    radial-gradient(700px 500px at -15% 115%, rgba(168, 51, 42, .12), transparent 54%),
-    radial-gradient(620px 400px at 30% 40%, rgba(197, 132, 74, .13), transparent 55%),
-    linear-gradient(112deg, transparent 32%, rgba(197, 132, 74, .07) 46%, rgba(255, 255, 255, .35) 52%, transparent 64%),
+    radial-gradient(1000px 560px at 76% -190px, rgba(209, 143, 74, .3), transparent 53%),
+    radial-gradient(760px 520px at -18% 118%, rgba(190, 60, 40, .18), transparent 52%),
+    radial-gradient(680px 440px at 28% 38%, rgba(209, 143, 74, .2), transparent 52%),
+    linear-gradient(112deg, transparent 24%, rgba(209, 143, 74, .1) 42%, rgba(255, 255, 255, .5) 52%, rgba(209, 143, 74, .12) 60%, transparent 74%),
     linear-gradient(180deg, #f3eee3 0%, #faf6ec 100%);
 }
 
