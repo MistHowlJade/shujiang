@@ -1,6 +1,7 @@
 // 上下文组装器：把"设定库 + 大纲 + 章节记忆 + 前文"按相关度筛选后拼成给模型看的资料包。
 // 纯词法匹配（无向量库、无外部依赖），对中文小说这种专有名词密集的文本效果足够好。
 import { chapterVolumeIds, findOutlineEntry } from './store.js';
+import { buildCharacterArcs } from '../web/lib/data.js';
 
 const DEFAULT_BUDGET = 26000; // 资料包字符预算（约合 1.5~2 万字正文所需的参考量）
 
@@ -183,6 +184,17 @@ export function buildContext(novel, opts = {}) {
     ...(novel.bible?.timeline || []).filter((t) => t.locked).map((t) => `时间线·${t.when || t.time || ''}：${t.event || t.text || ''}`),
   ];
   if (lockedBits.length) push('🔒 锁定设定（生成时必须遵守）', lockedBits.join('\n'), true);
+
+  // 人物状态账本：最新一条跨章节记忆里的状态——AI 不能假装不知道伤势/承诺/身份还在生效
+  try {
+    const arcs = buildCharacterArcs(novel);
+    const ledgerBits = arcs
+      .filter((a) => a.latestState)
+      .map((a) => `人物·${a.char?.name || '未命名'}（最新截至第${a.latestStateNo || '?'}章）：${a.latestState}`);
+    if (ledgerBits.length) push('人物状态账本（最新状态，生成时遵守）', ledgerBits.join('\n'), true);
+  } catch {
+    // 不阻塞：账本出问题不报错，退化成不带这块资料
+  }
 
   const volumes = novel.outline?.volumes || [];
   if (volumes.length) {
