@@ -315,7 +315,7 @@ const api = {
 };
 
 /** 流式生成：逐块回调，返回完整文本 */
-async function streamAI(body, { onDelta, onReasoning, onMeta, signal } = {}) {
+async function streamAI(body, { onDelta, onReasoning, onMeta, onNotice, signal } = {}) {
   // 注入自定义提示词模板
   const cfg = S.config;
   if (cfg?.promptTemplates) {
@@ -356,6 +356,11 @@ async function streamAI(body, { onDelta, onReasoning, onMeta, signal } = {}) {
       try { j = JSON.parse(payload); } catch { continue; }
       if (j.shu_meta) { onMeta?.(j.shu_meta); continue; }
       if (j.shu_error) throw new Error(j.shu_error);
+      if (j.shu_notice) {
+        try { toast(`⚠️ ${j.shu_notice.message || '模型输出可能被截断'}`, 'warn'); } catch {}
+        onNotice?.(j.shu_notice);
+        continue;
+      }
       if (j.error) throw new Error(j.error.message || j.error.code || '模型返回错误');
       const d = j.choices?.[0]?.delta || {};
       const think = d.reasoning_content ?? d.reasoning;
@@ -13749,7 +13754,7 @@ function renderSettings() {
 
   $('#cfgTemp').value = cfg.temperature ?? 0.85;
   $('#tempVal').textContent = $('#cfgTemp').value;
-  $('#cfgMaxTokens').value = cfg.maxTokens || 4096;
+  $('#cfgMaxTokens').value = cfg.maxTokens || 8192;
   $('#cfgBudget').value = S.novel?.meta?.contextBudget || 26000;
   $('#roleWrite').value = cfg.roleModels?.write || '';
   $('#roleSummary').value = cfg.roleModels?.summary || '';

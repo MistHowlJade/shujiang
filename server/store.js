@@ -35,7 +35,7 @@ const CONFIG_DEFAULT = {
   model: '',
   temperature: 0.85,
   topP: 0.95,
-  maxTokens: 4096,
+  maxTokens: 8192,
   // 分角色模型（留空则用上面的默认模型）
   roleModels: { write: '', summary: '', review: '' },
   ui: { theme: 'dark' },

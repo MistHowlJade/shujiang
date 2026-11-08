@@ -395,6 +395,10 @@ async function relayCompletion({ res, upstream, abort }) {
       fatal = friendlyProviderError(String(j.message), upstream.resp.status);
       return false;
     }
+    if (j.choices && (j.choices[0]?.finish_reason === 'length')) {
+      // 达到 max_tokens 被截断：上游不回报错，但正文会半截停住——告诉前端，免得把半成品当成品
+      sseWrite(res, { shu_notice: { kind: 'truncated', message: '模型输出被截断（达到 max_tokens），可能没写完。可以到 设置→模型 把最大长度调大，或点「续写」接着写。' } });
+    }
     emit(deltaFromChunk(j));
     return true;
   };
@@ -404,7 +408,12 @@ async function relayCompletion({ res, upstream, abort }) {
       // 供应商无视 stream:true，直接返回完整回复
       const txt = await upstream.resp.text();
       const j = tryJson(txt);
-      if (j) emit(deltaFromChunk(j));
+      if (j) {
+        if (j.choices && j.choices[0]?.finish_reason === 'length') {
+          sseWrite(res, { shu_notice: { kind: 'truncated', message: '模型输出被截断（达到 max_tokens），可能没写完。可以到 设置→模型 把最大长度调大，或点「续写」接着写。' } });
+        }
+        emit(deltaFromChunk(j));
+      }
       if (!emitted) sniffed = txt.slice(0, 2048);
     } else {
       const dec = new TextDecoder('utf-8');
@@ -1213,7 +1222,8 @@ async function handleApi(req, res, url) {
     const provider = resolveProvider(cfg, body.providerId);
     const model = body.model || resolveModel(cfg, provider, body.task || 'chapter');
     temperature = body.temperature ?? cfg.temperature ?? temperature;
-    maxTokens = body.maxTokens ?? cfg.maxTokens ?? maxTokens;
+    // 4096 是历史默认，实际会截断中文长文；遇到历史默认时让任务自带的预算（chapter 6000）生效
+    maxTokens = body.maxTokens ?? (cfg.maxTokens && cfg.maxTokens !== 4096 ? cfg.maxTokens : maxTokens);
 
     const ac = new AbortController();
     // 等响应头阶段也要有兜底：有些服务商/网关接了连接却什么都不回

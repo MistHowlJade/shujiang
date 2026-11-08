@@ -312,7 +312,7 @@ const split = (s, n = CHUNK) => {
 };
 
 // 用来模拟真实世界里「OpenAI 兼容」的各种偏差：模型名里带关键词即可切换
-const VARIANTS = ['normal', 'json', 'array', 'reason', 'crlf', 'split', 'keepalive', 'text', 'empty', 'html', 'page', 'quota', 'stall', 'dead'];
+const VARIANTS = ['normal', 'json', 'array', 'reason', 'crlf', 'split', 'keepalive', 'text', 'empty', 'html', 'page', 'quota', 'stall', 'dead', 'length'];
 function variantOf(model) {
   const m = String(model || '').toLowerCase();
   for (const v of VARIANTS) {
@@ -564,7 +564,7 @@ const server = http.createServer(async (req, res) => {
       await send(kind === 'text' ? rawStr(p) : frameStr(asDelta('content', p)));
       await sleep(DELAY);
     }
-    if (kind !== 'empty') await send(frameStr({}, 'stop'));
+    if (kind !== 'empty') await send(frameStr({}, kind === 'length' ? 'length' : 'stop'));
     res.write(`data: [DONE]${nl}${nl}`);
   } catch { /* 客户端断开 */ }
   res.end();
