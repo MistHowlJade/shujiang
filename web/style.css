@@ -3792,3 +3792,80 @@ body[data-theme="light"] .btn-primary {
 .icon-btn.sm { width: 28px; height: 28px; }
 .field-label { font-weight: 600; }
 .btn-sm { height: 29px; }
+
+/* ==========================================================================
+   v1 液态玻璃（override 在此，不动前面的规则）
+   ========================================================================== */
+body[data-theme="dark"] .app {
+  background:
+    radial-gradient(1200px 700px at 70% -220px, rgba(124, 135, 230, .2), transparent 62%),
+    radial-gradient(1100px 750px at -22% 115%, rgba(154, 110, 224, .18), transparent 56%),
+    radial-gradient(900px 560px at 30% 46%, rgba(90, 99, 200, .09), transparent 55%),
+    radial-gradient(520px 380px at 92% 62%, rgba(76, 195, 138, .07), transparent 60%),
+    linear-gradient(180deg, #15171e 0%, #101218 58%, #0e1015 100%);
+}
+body[data-theme="light"] .app {
+  background:
+    radial-gradient(900px 500px at 78% -180px, rgba(87, 83, 207, .06), transparent 60%),
+    linear-gradient(180deg, #f7f5f0 0%, #faf9f6 100%);
+}
+
+/* 左边栏：磨砂玻璃 */
+.rail {
+  background: rgba(23, 26, 34, .58) !important;
+  backdrop-filter: blur(22px) saturate(1.5);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  border-right: 1px solid rgba(255, 255, 255, .09);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, .06);
+}
+
+/* 顶栏：磨砂玻璃 */
+.topbar {
+  background: rgba(23, 26, 34, .5) !important;
+  backdrop-filter: blur(22px) saturate(1.5);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .09), 0 10px 32px rgba(0, 0, 0, .32);
+}
+.page-head { backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4); }
+
+/* 弹窗：悬空的玻璃片 */
+.modal-mask {
+  backdrop-filter: blur(16px) saturate(1.25);
+  -webkit-backdrop-filter: blur(16px) saturate(1.25);
+}
+.modal-mask::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(900px 600px at 50% -12%, rgba(124, 135, 230, .17), transparent 65%);
+}
+.modal {
+  position: relative;
+  background: rgba(29, 32, 43, .78);
+  backdrop-filter: blur(28px) saturate(1.55);
+  -webkit-backdrop-filter: blur(28px) saturate(1.55);
+  border: 1px solid rgba(255, 255, 255, .12);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .17), inset 0 0 0 1px rgba(255, 255, 255, .05),
+              0 30px 90px rgba(0, 0, 0, .58), 0 0 0 1px rgba(124, 135, 230, .14);
+}
+
+/* 主按钮：高光反射 */
+.btn-primary {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .34), inset 0 -1px 0 rgba(0, 0, 0, .22),
+              0 8px 28px rgba(124, 135, 230, .42), 0 0 0 1px rgba(124, 135, 230, .32);
+}
+body[data-theme="light"] .btn-primary {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4), inset 0 -1px 0 rgba(0, 0, 0, .08),
+              0 6px 20px rgba(87, 83, 207, .32), 0 0 0 1px rgba(87, 83, 207, .22);
+}
+
+/* 主按钮与图标按钮共享一点点高光 */
+.btn:not(.btn-text):not(.btn-danger-ghost), .icon-btn {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+.btn-danger-ghost, .btn-text { box-shadow: none; }
+
+/* 书架书封：斜射光（手机 App 图标质感） */
+.book::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 158px;
+  z-index: 1; pointer-events: none; border-radius: inherit;
+  background: linear-gradient(118deg, rgba(255, 255, 255, .27) 0%, rgba(255, 255, 255, .06) 30%, transparent 48%);
+}
