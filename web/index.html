@@ -8,51 +8,6 @@
 <title>书匠 · AI 长篇小说创作台</title>
 <link rel="stylesheet" href="/style.css?v=1.0.10" />
 <style id="aiDockStyle">
-  /* 悬浮 AI 助手面板——内联随页面加载，避免外部样式被缓存钉死 */
-  .ai-dock {
-    position: fixed; right: 18px; bottom: 18px; z-index: 85;
-    width: 320px; max-width: calc(100vw - 36px);
-    background: rgba(29, 32, 43, .82);
-    backdrop-filter: blur(20px) saturate(1.3);
-    -webkit-backdrop-filter: blur(20px) saturate(1.3);
-    border: 1px solid rgba(255, 255, 255, .12);
-    border-radius: 14px;
-    box-shadow: inset 0 1px 1px rgba(255, 255, 255, .14), inset 0 0 0 1px rgba(124, 135, 230, .1),
-                0 18px 56px rgba(0, 0, 0, .45);
-    overflow: hidden;
-    animation: aiDockPeek 240ms cubic-bezier(.16, 1, .3, 1);
-  }
-  @keyframes aiDockPeek { from { transform: translateY(20px); opacity: 0; } }
-  .ai-dock-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 10px 16px; border-bottom: 1px solid rgba(255,255,255,.07); background: rgba(255,255,255,.025); }
-  .ai-dock-toggle { display: inline-flex; align-items: center; gap: 7px; border: 0; background: transparent; cursor: pointer; font: inherit; font-size: 14.5px; font-weight: 600; color: var(--text-1); padding: 4px 6px; border-radius: var(--r-sm); }
-  .ai-dock-toggle:hover { background: rgba(255,255,255,.06); }
-  .ai-dock-toggle .ico { color: var(--accent-hover); }
-  .ai-dock-chev { transition: transform 140ms cubic-bezier(.16, 1, .3, 1); width: 14px; height: 14px; }
-  .ai-dock[aria-expanded="false"] .ai-dock-chev { transform: rotate(-90deg); }
-  .ai-dock-collapse-btn { opacity: .7; }
-  .ai-dock-collapse-btn:hover { opacity: 1; color: var(--text-1); background: rgba(255,255,255,.06); }
-  .ai-dock-body { padding: 14px 14px 10px; display: flex; flex-direction: column; gap: 14px; }
-  .ai-dock[aria-expanded="false"] .ai-dock-body { display: none; }
-  .ai-dock-section { display: flex; flex-direction: column; gap: 8px; }
-  .ai-dock-kicker { font-size: 9px; color: var(--text-4); letter-spacing: .08em; text-transform: uppercase; font-weight: 700; }
-  .ai-dock-title { font-size: 14px; color: var(--text-1); font-weight: 600; }
-  .ai-dock-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .ai-dock-chapter-info { min-width: 0; }
-  .ai-dock-counter { display: inline-flex; align-items: baseline; gap: 4px; padding: 3px 10px; border-radius: var(--r-full); background: var(--accent-bg); border: 1px solid var(--accent-line); font-variant-numeric: tabular-nums; color: var(--accent-hover); }
-  .ai-dock-counter b { font-size: 17px; font-weight: 700; }
-  .ai-dock-counter span { font-size: 11.5px; color: var(--text-2); }
-  .ai-dock-progress { height: 3px; border-radius: var(--r-full); background: rgba(255,255,255,.07); overflow: hidden; }
-  .ai-dock-progress i { display: block; height: 100%; background: linear-gradient(90deg, #7c87e6, #9a6eeb); border-radius: inherit; transition: width 320ms cubic-bezier(.16, 1, .3, 1); }
-  .ai-dock-row.meta-row { font-size: 12px; color: var(--text-3); flex-wrap: wrap; row-gap: 4px; }
-  .ai-dock-row.meta-row span { white-space: nowrap; }
-  .ai-dock-target-input { height: 28px; font-size: 13px; padding: 0 6px; width: 96px; }
-  .ai-dock-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-4); font-weight: 700; }
-  .ai-dock-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .ai-dock-action { height: 36px; font-size: 13.5px; gap: 6px; justify-content: flex-start; padding: 0 10px; }
-  .ai-dock-action.btn-primary { justify-content: center; }
-  .ai-dock-hint { font-size: 12.5px; color: var(--text-2); line-height: 1.7; padding: 10px 12px; border-radius: var(--r-md); background: rgba(255,255,255,.025); border: 1px dashed rgba(255,255,255,.08); }
-  .ai-dock-footer { display: flex; justify-content: space-between; padding: 8px 0 0; border-top: 1px solid rgba(255,255,255,.06); font-size: 11px; color: var(--text-4); }
-  body.sprint-open .ai-dock { bottom: 302px; }
   /* CTA buttons */
   .ai-cta { display: inline-flex; align-items: center; gap: 6px; height: 30px !important; padding: 0 12px !important; font-size: 13px !important; font-weight: 650 !important; border-radius: var(--r-md) !important; white-space: nowrap; }
   .ai-cta .ico { width: 14px !important; height: 14px !important; }
@@ -74,8 +29,7 @@
   .dock-main .assist-hint { padding: 10px 12px; border-radius: 12px; border: 1px dashed rgba(255,255,255,.09); color: var(--text-3); font-size: 12.5px; }
   .assist-pane, .assist-pane.on { display: contents; animation: none; }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(3px); } }
-  .AiDockSpace { display: none }
-</style>
+  </style>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234a7dff'/><path d='M9 8h9a4 4 0 0 1 4 4v12H13a4 4 0 0 0-4 4z' fill='none' stroke='white' stroke-width='2' stroke-linejoin='round'/></svg>" />
 </head>
 <body data-theme="dark">
@@ -772,53 +726,6 @@
     <button class="btn btn-primary" id="diffAccept"><svg class="ico"><use href="#i-check" /></svg>接受替换</button>
     <button class="btn" id="diffRetry"><svg class="ico"><use href="#i-refresh" /></svg>再生成一次</button>
     <button class="btn btn-text" id="diffReject">丢弃</button>
-  </div>
-</div>
-
-<!-- 悬浮 AI 助手：常驻右下，帮你随时看本章进度、调用 AI 生成/续写/检查/自检 -->
-<div class="ai-dock" id="aiDock" role="complementary" aria-label="AI 助手" aria-expanded="false">
-  <div class="ai-dock-head">
-    <button class="ai-dock-toggle" id="aiDockToggle" title="展开 / 收起 AI 助手" aria-label="展开或收起 AI 助手"><svg class="ico"><use href="#i-spark" /></svg><span class="ai-dock-label">AI 助手</span><svg class="ico ai-dock-chev" id="aiDockChev"><use href="#i-chev-right" /></svg></button>
-    <button class="icon-btn sm ai-dock-collapse-btn" id="aiDockCollapse" title="收起 AI 助手" aria-label="收起 AI 助手"><svg class="ico"><use href="#i-x" /></svg></button>
-  </div>
-
-  <div class="ai-dock-body" id="aiDockBody">
-    <!-- 本章 -->
-    <div class="ai-dock-section ai-dock-chapter">
-      <div class="ai-dock-row">
-        <div class="ai-dock-chapter-info">
-          <div class="ai-dock-kicker">本章</div>
-          <div class="ai-dock-title" id="aiDockChapterTitle">还没打开作品</div>
-        </div>
-        <div class="ai-dock-counter"><b id="aiDockWords">0</b><span>字</span></div>
-      </div>
-      <div class="ai-dock-progress" title="本章目标完成进度" aria-hidden="true"><i id="aiDockProgressBar" style="width:0%"></i></div>
-        <div class="ai-dock-row meta-row">
-        <span id="aiDockPov">POV：任意人</span>
-        <span id="aiDockStage">草稿</span>
-      </div>
-      <div class="ai-dock-row">
-        <label class="field-label" for="aiDockTargetWords">本章目标字数
-          <input id="aiDockTargetWords" type="number" min="200" step="100" class="input ai-dock-target-input" placeholder="3000" /></label>
-      </div>
-    </div>
-
-    <!-- AI 快速操作 -->
-    <div class="ai-dock-section">
-      <div class="ai-dock-section-title">AI 操作</div>
-      <div class="ai-dock-actions">
-        <button class="btn btn-primary ai-dock-action" id="aiDockGenerate"><svg class="ico"><use href="#i-spark" /></svg>生成本章</button>
-        <button class="btn ai-dock-action" id="aiDockContinue"><svg class="ico"><use href="#i-pen" /></svg>续写</button>
-        <button class="btn ai-dock-action" id="aiDockCheck"><svg class="ico"><use href="#i-pulse" /></svg>自检并修复</button>
-        <button class="btn ai-dock-action" id="aiDockProof"><svg class="ico"><use href="#i-proof" /></svg>文字校对</button>
-      </div>
-    </div>
-
-    <!-- 下一步提示 -->
-    <div class="ai-dock-section ai-dock-hint" id="aiDockHint"><span class="dim small">打开作品后显示本章建议。</span></div>
-
-    <!-- footer -->
-    <div class="ai-dock-footer"><span class="dim small">Esc 收起 · 悬窗可拖动</span></div>
   </div>
 </div>
 
