@@ -114,7 +114,7 @@ function resolveProvider(cfg, providerId) {
 const ROLE_OF_TASK = {
   outline: 'write', characters: 'write', worldview: 'write', chapter: 'write',
   continue: 'write', polish: 'write', expand: 'write', shorten: 'write',
-  rewrite: 'write', custom: 'write', titles: 'write', style: 'write',
+  rewrite: 'write', custom: 'write', titles: 'write', style: 'write', anno_fix: 'write',
   memory: 'summary', consistency: 'summary', review: 'review',
 };
 

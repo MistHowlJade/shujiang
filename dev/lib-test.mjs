@@ -1907,6 +1907,12 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('爽点曲线：连档 label 可读', r.flatRuns[0].label.includes('第 2–3 章'));
   check('爽点曲线：空作品 / 全没打档', buildPayoffProfile({ title: 'X', chapters: [] }).scored === 0 && buildPayoffProfile({ title: 'Y', chapters: [mk(1, null), mk(2, null)] }).flatRuns.length === 0);
   check('爽点曲线：tier 分档', payoffTier(5) === 'hi' && payoffTier(4) === 'hi' && payoffTier(3) === 'mid' && payoffTier(2) === 'mid' && payoffTier(1) === 'lo' && payoffTier(0) === 'lo' && payoffTier(null) === 'none');
+  // 冲突密度（与爽点同一次 payoff 调用返回，存进 ch.payoff.conflict）
+  const conflictMk = (no, score, conflict) => ({ id: `k${no}`, no, title: `冲突章${no}`, content: '', stage: 'done', payoff: { score, conflict, type: '打脸', note: 'n', conflictNote: 'cn' } });
+  const rc = buildPayoffProfile({ title: 'T', chapters: [conflictMk(1, 4, 3), conflictMk(2, 1, 5), conflictMk(3, 0, 2)] });
+  check('冲突密度：buildPayoffProfile 透出每个打档章节的 conflict', rc.chapters.every((c, i) => c.conflict === [3, 5, 2][i]));
+  check('冲突密度：平均分与计数', rc.conflictAvg === 3.3 && rc.conflictScored === 3, `${rc.conflictAvg} / ${rc.conflictScored}`);
+  check('冲突密度：老数据（没有 conflict 字段）不炸', buildPayoffProfile({ title: 'T', chapters: [mk(9, 3)] }).chapters[0].conflict === null && buildPayoffProfile({ title: 'T', chapters: [mk(9, 3)] }).conflictScored === 0);
 }
 
 // ---------------------------------------------------------------

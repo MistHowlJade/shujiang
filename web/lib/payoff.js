@@ -26,6 +26,7 @@ export function buildPayoffProfile(novel) {
   const chapters = (novel?.chapters || []).map((ch, i) => {
     const p = ch?.payoff;
     const score = p && typeof p.score === 'number' ? Math.max(0, Math.min(5, p.score)) : null;
+    const conflict = p && typeof p.conflict === 'number' ? Math.max(0, Math.min(5, p.conflict)) : null;
     return {
       id: ch?.id || '',
       no: Number(ch?.no) || i + 1,
@@ -34,11 +35,15 @@ export function buildPayoffProfile(novel) {
       score,
       type: p?.type ? String(p.type) : '',
       note: p?.note ? String(p.note) : '',
+      conflict,
+      conflictNote: p?.conflictNote ? String(p.conflictNote) : '',
       at: Number(p?.at) || 0,
     };
   });
   const scored = chapters.filter((c) => c.score !== null).slice().sort((a, b) => a.no - b.no);
   const avg = scored.length ? scored.reduce((sum, c) => sum + c.score, 0) / scored.length : 0;
+  const conflictScored = chapters.filter((c) => c.conflict !== null).slice().sort((a, b) => a.no - b.no);
+  const conflictAvg = conflictScored.length ? conflictScored.reduce((sum, c) => sum + c.conflict, 0) / conflictScored.length : 0;
   const maxScore = scored.length ? Math.max(...scored.map((c) => c.score)) : 0;
   const best = scored.reduce((pick, c) => (c.score > (pick?.score ?? -1) ? c : pick), null);
 
@@ -67,6 +72,8 @@ export function buildPayoffProfile(novel) {
     maxScore,
     best,
     flatRuns,
+    conflictAvg: Math.round(conflictAvg * 10) / 10,
+    conflictScored: conflictScored.length,
     scoredChapters: scored,
   };
 }

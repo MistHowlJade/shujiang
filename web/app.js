@@ -7126,6 +7126,9 @@ function renderAnnotationSidebar() {
     return;
   }
   sidebar.innerHTML = `
+    <div class="anno-fix-bar">
+      <button type="button" class="btn btn-sm" id="annoFixPlanBtn" title="把这些批注交给 AI，生成最小修改方案；逐条确认才写回正文">${ico('edit')}让 AI 按批注修</button>
+    </div>
     <div class="annotation-list">
       ${annotations.map(a => {
         const color = ANNOTATION_COLORS.find(c => c.id === a.color) || ANNOTATION_COLORS[0];
@@ -7153,6 +7156,125 @@ function renderAnnotationSidebar() {
       if (confirm('删除这条批注？')) deleteAnnotation(ch, id);
     };
   });
+  sidebar.querySelector('#annoFixPlanBtn')?.addEventListener('click', () => annoFixPlan());
+}
+
+/** ---- 按批注改稿：AI 给最小修改方案，逐条确认写回 ---- */
+function replaceQuoteOnce(full, quote, newText) {
+  let idx = full.indexOf(quote);
+  if (idx >= 0) {
+    let span = quote.length;
+    if (newText.endsWith('。') && full.slice(idx + span).startsWith('。')) span += 1;
+    return { next: full.slice(0, idx) + newText + full.slice(idx + span), ok: true };
+  }
+  const head = quote.slice(0, 8);
+  idx = head ? full.indexOf(head) : -1;
+  if (idx < 0) return { next: full, ok: false };
+  const tail = full.slice(idx).match(/^[^。\n]{0,199}。?/);
+  const span = tail?.[0]?.length || quote.length;
+  return { next: full.slice(0, idx) + newText + full.slice(idx + span), ok: true };
+}
+
+function paintAnnoFixItems(box, list, ch, applyAllBtn, progressEl) {
+  let applied = 0;
+  const refresh = () => {
+    progressEl.textContent = `已应用 ${applied}/${list.length} 条`;
+    if (applied === list.length) applyAllBtn.disabled = true;
+  };
+  const rows = list.map((item, i) => ({
+    i,
+    note: String(item?.note || item?.anno || '').trim(),
+    quote: String(item?.quote || '').trim(),
+    fix: String(item?.fix || '').trim(),
+    status: 'pending',
+  }));
+  box.innerHTML = `
+    <div class="anno-fix-list">
+      ${rows.map((r) => `
+        <div class="anno-fix-row" data-i="${r.i}">
+          <div class="anno-fix-head"><b>#${r.i + 1}</b><span class="anno-fix-quote" title="${esc(r.quote)}">${esc(r.quote.length > 60 ? r.quote.slice(0, 60) + '…' : r.quote)}</span></div>
+          <div class="anno-fix-compare"><del>${esc(r.quote)}</del></div>
+          <div class="anno-fix-compare"><ins>${esc(r.fix)}</ins></div>
+          <div class="anno-fix-foot"><button type="button" class="btn btn-sm anno-apply-btn" data-i="${r.i}">应用这一条</button><span class="anno-fix-status"></span></div>
+        </div>`).join('')}
+    </div>`;
+  const textarea = $('#chContent');
+  const applyOne = (i) => {
+    const row = rows[i];
+    if (!row || row.status === 'applied') return false;
+    const res = replaceQuoteOnce(String(ch.content || ''), row.quote, row.fix);
+    if (!res.ok) { row.status = 'nomatch'; renderStatus(i); return false; }
+    ch.content = res.next;
+    textarea.value = res.next;
+    markChapterDirty(ch);
+    row.status = 'applied';
+    applied += 1;
+    renderStatus(i);
+    refresh();
+    return true;
+  };
+  const renderStatus = (i) => {
+    const rowEl = box.querySelector(`.anno-fix-row[data-i="${i}"]`);
+    if (!rowEl) return;
+    const statusEl = rowEl.querySelector('.anno-fix-status');
+    const btn = rowEl.querySelector('.anno-apply-btn');
+    if (rows[i].status === 'applied') { rowEl.classList.add('is-applied'); btn.disabled = true; statusEl.textContent = '已应用'; }
+    else if (rows[i].status === 'nomatch') { statusEl.textContent = '原文里没找到这一句'; }
+    else statusEl.textContent = '';
+  };
+  box.querySelectorAll('.anno-apply-btn').forEach((btn) => btn.addEventListener('click', () => applyOne(Number(btn.dataset.i))));
+  applyAllBtn.addEventListener('click', () => {
+    for (const row of rows) if (row.status !== 'applied') applyOne(row.i);
+  });
+}
+
+async function annoFixPlan() {
+  const ch = currentChapter();
+  if (!ch) return toast('先打开一章', 'err');
+  const annotations = getChapterAnnotations(ch);
+  if (!annotations.length) return toast('这章还没有批注', 'err');
+  if (!String(ch.content || '').trim()) return toast('正文还是空的', 'err');
+  if (S.controller) return toast('生成中——先停一下', 'err');
+  const annoPayload = annotations.map((a) => ({ start: a.start, note: String(a.note || a.text || '').slice(0, 150) }));
+  openAnnoFixModal(`<p class="dim">AI 正在读这 ${annotations.length} 条批注，生成最小修改方案…</p>`);
+  const box = document.querySelector('#annoFixList');
+  const applyAllBtn = document.querySelector('#annoFixApplyAll');
+  const progressEl = document.querySelector('#annoFixProgress');
+  try {
+    const acc = await runStream({
+      task: 'anno_fix',
+      novelId: S.novel.id,
+      chapterId: ch.id,
+      payload: { text: String(ch.content || '').slice(0, 14000), annotations: annoPayload },
+    }, { target: 'diag' });
+    const parsed = parseJsonLoose(acc);
+    const list = (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
+      .filter((x) => x && typeof x === 'object' && String(x.quote || '').trim())
+      .slice(0, 20);
+    if (!list.length) {
+      box.innerHTML = parsed == null
+        ? '<p class="qs-error">AI 没按要求返回 JSON 清单——可以换个模型再试。</p>'
+        : '<p class="dim">AI 认为按这些批注不需要改动正文。要么批注和正文已经一致，要么模型没看懂——这种时候建议你自己看一遍批注。</p>';
+      return;
+    }
+    paintAnnoFixItems(box, list, ch, applyAllBtn, progressEl);
+    applyAllBtn.disabled = false;
+    refreshProgressText();
+  } catch (err) {
+    box.innerHTML = `<p class="qs-error">生成失败：${esc(err?.message || String(err))}</p>`;
+  }
+}
+
+function openAnnoFixModal(bodyHtml) {
+  showModal(`<h3>按批注改稿</h3>
+    <p class="modal-sub">AI 依据批注生成最小修改方案；逐条点「应用」才写回正文，不动正文里批注管不着的地方。</p>
+    <div class="anno-fix-modal" id="annoFixList">${bodyHtml}</div>
+    <div class="modal-foot"><span id="annoFixProgress" class="dim small"></span><span style="flex:1"></span><button class="btn btn-text" data-action="cancel">关闭</button><button class="btn btn-primary" id="annoFixApplyAll" disabled>全部应用</button></div>`);
+}
+
+function refreshProgressText() {
+  const el = document.querySelector('#annoFixProgress');
+  if (el && !el.textContent) el.textContent = '点「全部应用」一次应用所有能匹配到的条目';
 }
 
 function editAnnotation(ch, annotationId) {
@@ -7326,11 +7448,14 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
   }
   let acc = '';
   let streamFailed = false;
+  let auditMeta = null;   // onMeta 带回来的注入清单（供生成溯源记录）
+  let lastError = null;
   const openSettings = () => setView('settings');
   try {
     acc = await streamAI(body, {
       signal: ac.signal,
       onMeta: (m) => {
+        auditMeta = m || null;
         if (target === 'out') {
           S.outModel = m.model || '';
           $('#outInfo').textContent = `${S.outModel} 生成中…`;
@@ -7347,6 +7472,7 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
     });
   } catch (err) {
     streamFailed = true;
+    lastError = err;
     if (err.name === 'AbortError') toast('已停止');
     else if (!retried && isModelSetupError(err)) {
       openGenerateModelSetup(body, () => runStream(body, { target, retried: true }));
@@ -7373,7 +7499,47 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
     else $('#checkBox').innerHTML = `<span class="status-err">${esc(msg)}</span>`;
     toast(msg, 'err', { label: '打开设置', onClick: openSettings });
   }
+  recordGenAudit(body, { auditMeta, outChars: acc.length, streamFailed, lastError });
   return acc;
+}
+
+/** ---- 生成溯源：每次模型调用落一条本地记录（任务/模型/章节/注入资料/产出量/成败），最多留 100 条 ---- */
+const GEN_TASK_LABEL = {
+  chapter: '续写章节', continue: '续写', polish: '润色', expand: '扩写', shorten: '精简',
+  rewrite: '改写', custom: '按指令处理', titles: '起名', style: '文风提取', memory: '章节记忆',
+  consistency: '一致性检查', review: '责编评审', diagnose: '自检', anno_fix: '按批注修',
+  payoff: '爽点档', inspiration: '灵感对话', outline: '大纲', characters: '人物', worldview: '世界观',
+  bookcheck: '开书诊断', summarize: '概要', sceneGen: '场景正文', expandScene: '场景正文',
+};
+const genTaskLabel = (t) => GEN_TASK_LABEL[t] || String(t || '其他');
+
+function recordGenAudit(body, { auditMeta, outChars, streamFailed, lastError }) {
+  try {
+    const novel = S.novel;
+    if (!novel) return;
+    const task = body?.task || 'chapter';
+    const ch = body?.chapterId ? (novel.chapters || []).find((c) => c.id === body.chapterId) : null;
+    const status = lastError?.name === 'AbortError' ? 'abort'
+      : streamFailed ? 'error'
+        : (outChars > 0 ? 'ok' : 'empty');
+    const list = Array.isArray(novel.meta?.genLog) ? [...novel.meta.genLog] : [];
+    list.push({
+      at: Date.now(),
+      task,
+      model: String(auditMeta?.model || body?.model || ''),
+      chapterId: body?.chapterId || '',
+      chapterTitle: ch?.title || '',
+      outChars: Math.max(0, Math.floor(outChars || 0)),
+      status,
+      error: String(lastError?.message || '').slice(0, 160),
+      injected: (Array.isArray(auditMeta?.lines) ? auditMeta.lines : []).slice(0, 24).map((s) => String(s).slice(0, 80)),
+    });
+    while (list.length > 100) list.shift();
+    novel.meta = { ...(novel.meta || {}), genLog: list };
+    saveNovelPart({ meta: novel.meta });
+  } catch {
+    // 溯源记不下来也不能影响主流程，静默跳过
+  }
 }
 
 async function generateChapter() {
@@ -10395,6 +10561,7 @@ function renderBible() {
   if (bibleTab === 'relations') return renderRelationsTab(host, n);
   if (bibleTab === 'threads') return renderThreadsTab(host, n);
   if (bibleTab === 'inspirations') return renderInspirationsTab(host, n);
+  if (bibleTab === 'genlog') return renderGenLogTab(host, n);
   if (bibleTab === 'reveal') return renderRevealPlanTab(host, n);
   return renderStyleTab(host, n);
 }
@@ -11123,13 +11290,16 @@ async function runPayoffAnalysis() {
     const type = String(obj.type || '无爽点').slice(0, 12);
     const note = String(obj.note || '').slice(0, 80);
     const suggestion = String(obj.suggestion || '').slice(0, 80);
-    paintPayoffCard(card, { score, type, note, suggestion }, ch);
+    const conflict = typeof obj.conflict === 'number' ? Math.max(0, Math.min(5, Math.round(obj.conflict))) : undefined;
+    const conflictNote = String(obj.conflictNote || '').slice(0, 80);
+    paintPayoffCard(card, { score, type, note, suggestion, conflict, conflictNote }, ch);
   } catch (err) {
     card.innerHTML = `<p class="qs-error">爽点档失败：${esc(err?.message || String(err))}</p>`;
   }
 }
 
 function paintPayoffCard(card, p, ch) {
+  const conflict = typeof p.conflict === 'number' ? Math.max(0, Math.min(5, Math.round(p.conflict))) : null;
   card.innerHTML = `
     <div class="payoff-head">
       <span class="payoff-title">爽点档 · 本章</span>
@@ -11138,6 +11308,12 @@ function paintPayoffCard(card, p, ch) {
       <span class="payoff-type">${esc(p.type)}</span>
       <button type="button" class="mini-act" id="payoffDismiss" title="收起（不保存）" aria-label="收起">${ico('x')}</button>
     </div>
+    ${conflict !== null ? `<div class="payoff-head payoff-conflict">
+      <span class="payoff-title payoff-conflict-title">冲突密度</span>
+      <span class="payoff-dots conflict-dots" aria-label="冲突密度 ${conflict}/5">${[0, 1, 2, 3, 4].map((i) => `<i class="${i < conflict ? 'on' : ''}"></i>`).join('')}</span>
+      <span class="payoff-score">${conflict}<small>/5</small></span>
+      <span class="payoff-type">${esc(p.conflictNote || '')}</span>
+    </div>` : ''}
     <p class="payoff-note">${esc(p.note)}</p>
     <p class="payoff-suggest"><b>建议：</b>${esc(p.suggestion)}</p>
     <div class="payoff-foot">
@@ -11146,7 +11322,7 @@ function paintPayoffCard(card, p, ch) {
     </div>`;
   card.querySelector('#payoffDismiss').onclick = () => { card.hidden = true; };
   card.querySelector('#payoffSave').onclick = async () => {
-    ch.payoff = { score: p.score, type: p.type, note: p.note, at: Date.now() };
+    ch.payoff = { score: p.score, type: p.type, note: p.note, at: Date.now(), ...(conflict !== null ? { conflict, conflictNote: p.conflictNote || '' } : {}) };
     try {
       await api.send(`/api/novels/${S.novel.id}/chapters/${ch.id}`, { payoff: ch.payoff }, 'PUT');
     } catch (err) {
@@ -12109,7 +12285,7 @@ function renderRevealPlanTab(host, n) {
       <h2>揭示计划
         <span style="flex:1"></span>
       </h2>
-      <p class="dim small">给「尚未揭示」的人物 / 世界观词条定一个预计揭示的章节号——它们是读者不知道、只有作者知道的底牌。定了之后，上下文里会按章节号松紧处理：未到计划章严格压住；到了计划章也只是「作者要求才写」。到期还没点「标记已揭示」的会标红。揭示过的条目自动从这里消失。</p>
+      <p class="dim small">给「尚未揭示」的人物 / 世界观词条定一个预计揭示的章节号——它们是读者不知道、只有作者知道的底牌。定了之后，上下文里会按章节号松紧处理：未到计划章严格压住；到了计划章也只是「作者要求才写」。到期还没点「标记已揭示」的会标红。揭示过的条目自动从这里消失。「知道的人物」填了这条秘密哪些角色提前知道——AI 写章时不许让其他人表现出知情，POV 人物不在名单里也不会替他知道。</p>
       <div class="thread-stats">
         <span class="thread-stat"><b>${pending.length}</b> 条待揭示</span>
         <span class="thread-stat"><b>${planned.length}</b> 条已定章节</span>
@@ -12122,6 +12298,7 @@ function renderRevealPlanTab(host, n) {
           <b class="reveal-name">${esc(r.name || '未命名')}</b>
           ${revealBadge(Number(r.entry.revealAt) || 0, curNo)}
           <label class="reveal-field">第 <input class="input reveal-input" type="number" min="1" step="1" value="${Number(r.entry.revealAt) || ''}" placeholder="?" aria-label="预计揭示章节号" /> 章揭示</label>
+          <label class="reveal-field reveal-knowing">知道的人物 <input class="input reveal-know-input" type="text" value="${esc(r.entry.knowing || '')}" placeholder="沈砚、周砚（可空白）" aria-label="知道这件事的人物名单" /></label>
           <button type="button" class="btn btn-sm btn-text reveal-done">标记已揭示</button>
         </div>`).join('')}</div>`
         : '<p class="thread-empty">现在没有「尚未揭示」的条目。在人物 / 世界观卡右上角点「眼睛」图标可以标为尚未揭示，再在这张卡上定一个揭示章节号。</p>'}
@@ -12140,6 +12317,13 @@ function renderRevealPlanTab(host, n) {
       saveNovelPart({ bible: n.bible });
     };
     input.addEventListener('change', () => { commit(); renderBible(); });
+    const knowInput = row.querySelector('.reveal-know-input');
+    knowInput.addEventListener('change', () => {
+      const v = String(knowInput.value || '').trim();
+      if (v) entry.knowing = v; else delete entry.knowing;
+      saveNovelPart({ bible: n.bible });
+      toast(v ? '知道的人物已更新' : '已清空知道的人物', 'ok');
+    });
     row.querySelector('.reveal-done').addEventListener('click', () => {
       entry.visibility = 'shown';
       saveNovelPart({ bible: n.bible });
@@ -12217,6 +12401,36 @@ function cpSvg(cp) {
   }).join('');
   const avgY = scoredIdx.length ? yOf(Math.min(100, Math.max(0, cp.avg))) : null;
   return `<svg class="pcv-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="读者完读率曲线，0-100%">${grid}${xlabels}${avgY !== null ? `<line class="pcv-avg" x1="${PL}" x2="${W - PR}" y1="${avgY.toFixed(1)}" y2="${avgY.toFixed(1)}"/>` : ''}${path ? `<path class="pcv-line" d="${path}"/>` : ''}${dots}</svg>`;
+}
+
+/** ---- 生成记录：每次 AI 调用留一条 — 任务/模型/落在哪一章/注入了哪些资料/产出量/成败 ---- */
+const GEN_STATUS_LABEL = { ok: '已生成', error: '失败', abort: '已停止', empty: '空输出' };
+function renderGenLogTab(host, n) {
+  const list = (Array.isArray(n.meta?.genLog) ? [...n.meta.genLog] : []).reverse();
+  host.innerHTML = `
+    <div class="bible-block">
+      <h2>生成记录 <span style="flex:1"></span><span class="dim small">${list.length} / 100 条</span></h2>
+      <p class="dim small">每次 AI 调用留一条本地记录：哪个任务、什么模型、落在哪一章、注入了哪些资料、产出多少字、成没成功。纯本地存在 data/ 里，不上传；忘了某次让模型干了什么，翻这里。</p>
+      ${list.length ? `<div class="genlog-list">${list.map((e) => `
+        <div class="genlog-row st-${esc(e.status)}">
+          <div class="genlog-line1"><span class="genlog-time">${esc(fmtDate(e.at))}</span><span class="genlog-task">${esc(genTaskLabel(e.task))}</span><span class="genlog-status">${esc(GEN_STATUS_LABEL[e.status] || e.status || '?')}</span>${e.chapterTitle ? `<button type="button" class="genlog-chapter" data-chapter="${esc(e.chapterId)}" title="打开《${esc(e.chapterTitle)}》">${esc(e.chapterTitle)}</button>` : ''}</div>
+          <div class="genlog-line2"><span class="genlog-model" title="${esc(e.model || '')}">${esc(String(e.model || '未知模型').slice(0, 46))}</span><span class="genlog-chars">${e.outChars} 字</span></div>
+          ${e.injected?.length ? `<div class="genlog-injected">${e.injected.map((s) => `<span class="genlog-tag">${esc(s)}</span>`).join('')}</div>` : ''}
+          ${e.error ? `<div class="genlog-error">${esc(e.error)}</div>` : ''}
+        </div>`).join('')}</div>
+        <div class="modal-foot"><span style="flex:1"></span><button class="btn btn-text" id="genlogClear">清空记录（不可恢复）</button></div>`
+        : '<p class="thread-empty">还没有记录。任何 AI 生成都会记一条，这里就是它的家。</p>'}
+    </div>`;
+  host.querySelectorAll('.genlog-chapter').forEach((btn) => btn.addEventListener('click', () => { setView('studio'); selectChapter(btn.dataset.chapter); }));
+  host.querySelector('#genlogClear')?.addEventListener('click', () => {
+    if (!confirm('清空这本书的生成记录？不影响正文和设定。')) return;
+    const meta = { ...(n.meta || {}) };
+    delete meta.genLog;
+    n.meta = meta;
+    saveNovelPart({ meta: n.meta });
+    renderBible();
+    toast('生成记录已清空', 'ok');
+  });
 }
 
 /** ---- 灵感库：随手记把写作素材集中存放，结尾支持追加到本章 ---- */
@@ -12310,7 +12524,7 @@ function renderPayoffTab(host, n) {
     host.innerHTML = `
       <div class="bible-block">
         <h2>爽点曲线</h2>
-        <p class="dim">还没有给任何一章打过爽点档。<br>在工作台「写作」面板的快捷操作里点「爽点档」——AI 给本章打一个 0-5 分，你确认后存入本章档案，这里就会画出整本书的爽点曲线。</p>
+        <p class="dim">还没有给任何一章打过爽点档。<br>在工作台「写作」面板的快捷操作里点「爽点档」——AI 给本章打一个 0-5 分，你确认后存入本章档案，这里就会画出整本书的爽点曲线（顺带也会评冲突密度）。</p>
         ${completionBlock(cp)}
       </div>`;
     bindCompletionSection(host, n);
@@ -12336,6 +12550,16 @@ function renderPayoffTab(host, n) {
     return `<circle class="pcv-dot pcv-${payoffTier(c.score)}" cx="${xOf(i).toFixed(1)}" cy="${yOf(c.score).toFixed(1)}" r="4"><title>第 ${c.no} 章 · ${c.score}/5${c.type ? ` · ${esc(c.type)}` : ''}${c.note ? `：${esc(c.note)}` : ''}</title></circle>`;
   }).join('');
   const svg = `<svg class="pcv-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="爽点曲线，最高 5 分">${grid}${xlabels}<line class="pcv-avg" x1="${PL}" x2="${W - PR}" y1="${avgY.toFixed(1)}" y2="${avgY.toFixed(1)}"/><path class="pcv-line" d="${path}"/>${dots}</svg>`;
+  // 冲突密度曲线：与爽点同一套坐标，独立一条线；一次「爽点档」调用就一起返回了
+  const conflictScoredIdx = [];
+  pts.forEach((c, i) => { if (c.conflict !== null && c.conflict !== undefined) conflictScoredIdx.push(i); });
+  const conflictAvgY = yOf(Math.min(5, Math.max(0, p.conflictAvg)));
+  const conflictPath = conflictScoredIdx.map((i, k) => `${k === 0 ? 'M' : 'L'}${xOf(i).toFixed(1)},${yOf(pts[i].conflict).toFixed(1)}`).join(' ');
+  const conflictDots = conflictScoredIdx.map((i) => {
+    const c = pts[i];
+    return `<circle class="pcv-dot pcv-mid" cx="${xOf(i).toFixed(1)}" cy="${yOf(c.conflict).toFixed(1)}" r="4"><title>第 ${c.no} 章 · 冲突密度 ${c.conflict}/5${c.conflictNote ? `：${esc(c.conflictNote)}` : ''}</title></circle>`;
+  }).join('');
+  const conflictSvg = `<svg class="pcv-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="冲突密度曲线，最高 5 分">${grid}${xlabels}<line class="pcv-avg" x1="${PL}" x2="${W - PR}" y1="${conflictAvgY.toFixed(1)}" y2="${conflictAvgY.toFixed(1)}"/><path class="pcv-line conflict-line" d="${conflictPath}"/>${conflictDots}</svg>`;
 
   const bestHtml = p.best ? `<span class="thread-stat">最高 <b>⚡${p.best.score}</b> 第 ${p.best.no} 章</span>` : '';
   const flatHtml = p.flatRuns.length
@@ -12346,21 +12570,24 @@ function renderPayoffTab(host, n) {
   host.innerHTML = `
     <div class="bible-block">
       <h2>爽点曲线</h2>
-      <p class="dim small">「爽点档」是 AI 按起点 / 番茄 / 晋江的尺子给本章打的 0-5 分（打脸 / 反转 / 成长 / 情绪宣泄…），你确认保存后才算。金色是 ≥4，灰的是 2–3，红的是 ≤1；虚线是全书平均分。点圆点或章次可以直接跳到那一章。</p>
+      <p class="dim small">「爽点档」是 AI 按起点 / 番茄 / 晋江的尺子给本章打的 0-5 分（打脸 / 反转 / 成长 / 情绪宣泄…），你确认保存后才算。金色是 ≥4，灰的是 2–3，红的是 ≤1；虚线是全书平均分。点圆点或章次可以直接跳到那一章。顺带一起评了「冲突密度」（阵营对峙 / 误会激化 / 情绪对撞），保存在同一个档——冲突密度不是爽点的子集：吵架也算冲突，爆发才算爽点。</p>
       <div class="thread-stats">
         <span class="thread-stat"><b>${p.scored}</b> / ${p.total} 章打了档</span>
-        <span class="thread-stat"><b>${p.avg}</b> 平均分</span>
+        <span class="thread-stat"><b>${p.avg}</b> 爽点平均</span>
+        ${p.conflictScored ? `<span class="thread-stat"><b>${p.conflictAvg}</b> 冲突均分</span>` : ''}
         ${bestHtml}
         <span class="thread-stat dim-text">满分 5</span>
       </div>
       <div class="pcv-chart">${svg}</div>
+      <h2 class="pcv-sub">冲突密度</h2>
+      ${p.conflictScored ? `<div class="pcv-chart">${conflictSvg}</div>` : '<p class="dim small">还没有冲突密度数据——下次点「爽点档」时会一起返回并计入。</p>'}
       ${flatHtml}
       <div class="pcv-list" id="pcvList">
         ${pts.map((c) => `
           <button type="button" class="pcv-row${c.score === null ? ' pcv-unscored' : ''}" data-chapter="${esc(c.id)}">
             <span class="pcv-no">第 ${c.no} 章</span>
             <span class="pcv-name">${esc(c.title || '未命名')}</span>
-            ${c.score === null ? '<span class="pcv-miss">没打档</span>' : `<span class="ci-payoff ${payoffTier(c.score)}">⚡${c.score}</span><span class="pcv-type">${esc(c.type || '')}</span><span class="pcv-note">${esc(c.note || '')}</span>`}
+            ${c.score === null ? '<span class="pcv-miss">没打档</span>' : `<span class="ci-payoff ${payoffTier(c.score)}">⚡${c.score}</span><span class="pcv-type">${esc(c.type || '')}</span><span class="pcv-note">${esc(c.note || '')}</span>${c.conflict !== null && c.conflict !== undefined ? `<span class="pcv-conflict" title="冲突密度 ${c.conflict}/5${c.conflictNote ? `：${esc(c.conflictNote)}` : ''}">冲${c.conflict}</span>` : ''}`}
           </button>`).join('')}
       </div>
       ${completionBlock(cp)}

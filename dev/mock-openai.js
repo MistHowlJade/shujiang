@@ -252,7 +252,7 @@ const BOOKCHECK = `**总判词**：钩子立住了，人物立住一半，开书
 1. 第 2 章加一个「当下」钩子——别让读者等师门旧事讲完再往前冒，穿插一件现在正在发生的奇怪事。
 2. 谢迟的目标在第 3 章之前要更直接地摆给读者——读者知道主角想干什么，才留得住。
 3. 里程碑密度：前三章落地一个明确承诺（比如「师傅留下的口信要找到」），后面每两三章回收一次。`;
-const PAYOFF = { score: 4, type: '反转', note: '剑鞘秘密第一次被明示，悬念与情绪都立住了', suggestion: '保持这个节奏，第12章揭示前不放水' };
+const PAYOFF = { score: 4, type: '反转', note: '剑鞘秘密第一次被明示，悬念与情绪都立住了', suggestion: '保持这个节奏，第12章揭示前不放水', conflict: 3, conflictNote: '误会激化，两拨人在茶馆门口对峙了半场' };
 const PROPAGATION = [
   { chapter: 2, affected: true, reason: '师傅训话会被这段改写重新定义', evidence: '「师傅说过，剑不会自己开鞘，要等主人开口」', advice: '同步改第2章的训话那一段' },
   { chapter: 3, affected: false, reason: '藏经阁事件和这段无关', evidence: '', advice: '不用改' },
@@ -327,6 +327,8 @@ function decide(text) {
   if (has('分卷大纲')) return 'outline';
   if (has('审稿意见')) return 'review';
   if (has('文风档案')) return 'style';
+  // 按批注改稿：根据请求里的原文动态造一句能匹配上的 quote，顺一跟 tail 改一嘴，稳定通过
+  if (has('按以下批注')) return 'anno_fix';
   if (has('请检查以下文字')) return 'diagnose';
   if (has('只输出修复后的文字')) return 'rewrite';
   if (has('需要判断的章节')) return 'propagation';
@@ -359,6 +361,12 @@ function buildReply(text, model = '') {
       return { kind, content: REVIEW };
     case 'style':
       return { kind, content: STYLE };
+    case 'anno_fix': {
+      const src = quoted(text).replace(/\n+/g, ' ').trim();
+      const q = src.slice(0, Math.min(24, src.length));
+      if (!q) return { kind, content: '[]' };
+      return { kind, content: JSON.stringify([{ anno: 1, quote: q, fix: q.replace(/[。！？]$/u, '') + '，像一根绷到极限的弓弦。', note: '从请求原文截取，稳定能匹配' }]) };
+    }
     case 'diagnose':
       return { kind, content: /他看了一眼酒壶，没有动。/.test(text) ? '[]' : JSON.stringify(DIAGNOSE) };
     case 'rewrite':

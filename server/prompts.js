@@ -392,19 +392,56 @@ export const TASKS = {
     expect: 'json',
     temperature: 0.3,
     maxTokens: 2500,
-    build({ novel, pack, payload }) {
+    build({ novel, pack, payload, chapter }) {
       const text = String(payload?.text || '').slice(-8000);
+      const povName = String(chapter?.pov || '').trim();
+      const povRule = povName
+        ? `\n另外：本章限制在「${povName}」的视角。请额外检查「视角越界」——正文里任何「${povName}」不可能看到、听到、知道、想到的内容（别人心里的念头、远处没人告诉他的事、他不知道的设定），一律按「视角越界」列出（type 写「视角越界」），quote 照抄原句。没有的话不要硬凑、不要为这个类别编造。`
+        : '';
       return {
         messages: [
           sys('你是一位中文长篇小说责编。你的工作是指出问题，不改原文，只给出结构化的问题清单。', head(novel, pack)),
           user(
             `请检查以下文字有没有前后矛盾、设定冲突、时间线问题、人物口吻 / 性格漂移、重复（注水）的段落。
 只返回 JSON 数组，不要任何说明文字、不要 markdown 代码块。每个问题元素结构：
-{"severity":"high|medium|low","type":"设定冲突|时间线|人物口吻|重复|其他","text":"问题一句话","quote":"原文中出问题的那一句（原样复制，不要断章取义）","fix":"一句话修复建议"}
-最多列 8 条，按严重度从高到低排。没有问题就返回 []。text 总长度 30 字以内，fix 总长度 40 字以内，quote 总长度 80 字以内。
+{"severity":"high|medium|low","type":"设定冲突|时间线|人物口吻|重复|视角越界|其他","text":"问题一句话","quote":"原文中出问题的那一句（原样复制，不要断章取义）","fix":"一句话修复建议"}
+最多列 8 条，按严重度从高到低排。没有问题就返回 []。text 总长度 30 字以内，fix 总长度 40 字以内，quote 总长度 80 字以内。${povRule}
 
 以下是正文：
 ${text}`,
+          ),
+        ],
+      };
+    },
+  },
+  /* ---------- 按批注改稿 ---------- */
+  anno_fix: {
+    expect: 'json',
+    temperature: 0.4,
+    maxTokens: 4000,
+    build({ novel, pack, payload }) {
+      const text = String(payload?.text || '').slice(0, 14000);
+      const annos = (Array.isArray(payload?.annotations) ? payload.annotations : [])
+        .slice(0, 40)
+        .map((a, i) => `${i + 1}. 原文位置 #${a.start || 0}：批注——${String(a?.note || '').slice(0, 150)}`)
+        .join('\n');
+      return {
+        messages: [
+          sys('你是一位中文长篇小说的修订编辑。作者会给你一章正文和他的批注，你只负责给出基于批注的最小修改方案：不改情节、不改人物立场、不扩大改动面。', head(novel, pack)),
+          user(
+            `请按以下批注，给出本章需要修改的地方。批注是作者的手写要求，优先级最高；正文里和批注无关的地方不许动。
+
+批注清单（共 ${annos.split('\n').filter(Boolean).length} 条）：
+${annos}
+
+只返回 JSON 数组，不要任何说明文字、不要 markdown 代码块。每个元素结构：
+{"anno":批注序号,"quote":"原文中需要修改的那一句（原样复制，必须在正文里能找到）","fix":"改写后的句子"}
+最多输出 20 条。没有需要修改的地方就返回 []。quote 总长度 80 字以内，fix 同理。
+
+以下是正文：
+"""
+${text}
+"""`,
           ),
         ],
       };
@@ -496,8 +533,9 @@ ${chList}`),
         messages: [
           sys('你是一位懂起点 / 番茄 / 晋江节奏的中文网文责任编辑。你的工作给本章打「爽点」分，给结论，不改原文。', head(novel, pack)),
           user(`请评估这一章的「爽点」质量与密度：读者等这一章等得值不值。看冲突是否爆开、代价是否落地、主角是否有可感知的收获（信息差 / 装逼成熟 / 打脸 / 反转 / 情绪宣泄）。没有爽点也没关系，老实打 0-1 分。
+顺带也看「冲突密度」：这一章正面冲突的次数和烈度——阵营对峙 / 误会激化 / 情绪对撞 / 目标碰撞，有没有真东西。0 = 平铺直叙，5 = 火花四溅。同一句话里不要重复计数。
 只返回 JSON 对象，不要任何说明文字、不要 markdown 代码块。结构：
-{"score": 0-5 的整数, "type": "打脸|反转|成长|揭秘|情绪宣泄|悬念|无爽点", "note": "一句话说明（40 字以内）", "suggestion": "一句话建议（40 字以内；分数 ≥ 4 就写「保持这个节奏」）"}
+{"score": 0-5 的整数, "type": "打脸|反转|成长|揭秘|情绪宣泄|悬念|无爽点", "note": "一句话说明（40 字以内）", "suggestion": "一句话建议（40 字以内；分数 ≥ 4 就写「保持这个节奏」）", "conflict": 0-5 的整数, "conflictNote": "一句话冲突说明（40 字以内）"}
 
 本章正文：
 """
