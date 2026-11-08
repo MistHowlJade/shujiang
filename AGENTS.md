@@ -19,14 +19,14 @@
 
 | 项 | 值 |
 | --- | --- |
-| 版本 | v1.0.7 |
+| 版本 | v1.0.10 |
 | 语言 | JavaScript（ES modules，`"type": "module"`）|
 | 运行时 Node | 18+，但当前用 `tools/node/node.exe` (22.0.0) |
-| 平台 | Windows 为主（`win-unpacked`、`ShuJiang-Portable-1.0.7.exe`、`win-x64.zip`）|
-| 测试 | `npm run regress`（接近 300 项检查）、`npm test` (`lib-test.mjs` 585 项) |
-| 代码量 | ~19000 行 |
+| 平台 | Windows 为主（`win-unpacked`、`ShuJiang-Portable-1.0.10.exe`、`win-x64.zip`）|
+| 测试 | `npm run regress`（288 项检查）、`npm test` (`lib-test.mjs` 635 项) |
+| 代码量 | ~3 万行（server+web+electron+build ≈ 3 万，含 dev/ 约 0.4 万）|
 | 前端 | 原生 JS + 自研设计系统，无 React/Vue/Svelte |
-| HTML/CSS | 630 行 HTML、3129 行 CSS |
+| HTML/CSS | 717 行 HTML、3744 行 CSS |
 | Lighthouse | Accessibility / Best Practices / SEO = 100 / 100 / 100 |
 | 许可证 | MIT（`LICENSE`）|
 | 发布渠道 | GitHub Releases（未签名便携版；签名已放弃——太贵）|
@@ -110,17 +110,17 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
 ## 测试与质量保证
 
 - 每次改完跑 `npm run regress`——mock 起来 288 项、mock 没起 281 项，区别在模型对比/人话错误提示两组会自动跳过
-- 每次改完跑 `npm test`（lib 单元测试 585 项）
+- 每次改完跑 `npm test`（lib 单元测试 635 项）
 - 改完 lib/ 先跑 `npm run check-refs`
 - 改完回到浏览器确认控制台 0 error（见 `tools/node`: Chrome DevTools Console）
 - 做完记得 `git status --short` 确认没有污染的 `.tmp-*` / `dist/` / `data/`
 
 > 数据污染自检过用 `SHU_DATA_DIR=.tmp-regress-data` 隔离。永远不要往 `data/` 里写测试数据——那是用户的真作品。
 
-## 发布流程（v1.0.7 的经验）
+## 发布流程（从 v1.0.2 到 v1.0.10 实测）
 
 1. 本地 `npm run regress` + `npm test` 必须全绿
-2. `npm run dist`（生成 `dist\ShuJiang-Portable-1.0.7.exe` 和 `win-x64.zip`）
+2. `npm run dist`（生成 `dist\ShuJiang-Portable-1.0.10.exe` 和 `win-x64.zip`）
 
    这台机器直接跑 npm 会挂——AppData\Local 写不进、TLS 证书链也不通（v1.0.2 实测踩过两次 EPERM 和 unable to verify the first certificate）。用这个包一层环境变量（不改全局 PATH/系统环境）：
 
@@ -134,8 +134,8 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
    ```
 
    zip 用 win-unpacked 打（内容在 zip 根目录，不是整个文件夹）：`Compress-Archive -Path 'dist\win-unpacked\*' -DestinationPath 'dist\ShuJiang-x.y.z-win-x64.zip' -CompressionLevel Optimal -Force`
-3. 更新 `README.md` / `RELEASE_NOTES.md` 资产名和 tag 到 v1.0.7
-4. `git push` + `git tag v1.0.7` + `git push origin v1.0.7`
+3. 更新 `README.md` / `RELEASE_NOTES.md` 资产名和 tag 到本次版本
+4. `git push` + `git tag v1.0.10` + `git push origin v1.0.10`
 5. 用 Windows Credential Manager 存的 token 上传，替换/新建 GitHub Releases 资产（POST /repos/{owner}/{repo}/releases → uploads.github.com 传两个资产；token 只从 `git credential fill` 读到、仅在内存使用）。**冒烟必须用 GitHub 下载版**（本机新打包 exe 很可能被本机拦截，包括 Portable 和 zip 里的书匠.exe）
 6. 若说 setup="……"，不要自己去买新的证书；发布页上是未签名的，用户自行「更多信息→仍要运行」
 7. 便携版是唯一发布形态；绿色版 zip 备用；Setup 包已删除
@@ -175,3 +175,6 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
 - 商业用／印刷：随便自己来，MIT 的事
 
 > 如你有任何疑问——README.md、RELEASE_NOTES.md、本文档、以及 web/ 里的 inline 注释是唯一权威。其它地方说的话都只是垃圾。
+
+
+

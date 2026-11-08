@@ -15,7 +15,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: 单元测试（lib 层，585 项）
+      - name: 单元测试（lib 层，635 项）
         run: npm test
 
       - name: 模块引用自检
@@ -42,3 +42,4 @@ jobs:
           } finally {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
           }
+
