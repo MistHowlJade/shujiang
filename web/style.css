@@ -1923,6 +1923,20 @@ kbd {
 .prop-row .ar-title { flex: none; width: 128px; }
 .prop-snip { flex: 1; min-width: 0; color: var(--text-4); font-size: 11px; line-height: 1.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* 线索时间线 */
+.thread-timeline-wrap { margin-top: 10px; }
+.thread-timeline {
+  max-height: 200px; overflow: auto; padding: 6px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm);
+}
+.thread-timeline table { border-collapse: collapse; font-size: 10px; color: var(--text-3); width: 100%; }
+.thread-timeline th, .thread-timeline td { padding: 3px 2px; text-align: center; }
+.thread-row-label { text-align: left; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 10.5px; }
+.thread-cell { width: 14px; height: 13px; border: 1px solid var(--border-2); border-radius: 2px; }
+.thread-cell.on.unresolved { background: rgba(226,179,85,.55); }
+.thread-cell.on.foreshadowing { background: rgba(156,163,175,.35); }
+.thread-dot { display: block; width: 6px; height: 6px; border-radius: 50%; margin: 3px auto; background: currentColor; opacity: .35; }
+
 /* 线索追踪 */
 .thread-stats { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0 12px; }
 .thread-stat {

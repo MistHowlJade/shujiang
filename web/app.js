@@ -11851,6 +11851,34 @@ function renderThreadEntry(item, n) {
 }
 
 /** 线索追踪：基于章节记忆自动生成 */
+/** 线索时间线：行 = 唯一线索，列 = 章号；绿点/橙点 = 该章记忆里出现过，首尾成一眼的走势 */
+function renderThreadTimeline(threads, n) {
+  const paidSet = new Set(Array.isArray(n.meta?.threadPaidOff) ? n.meta.threadPaidOff : []);
+  const byText = new Map();
+  for (const t of threads) {
+    const paid = paidSet.has(t.text);
+    const row = byText.get(t.text) || { text: t.text, kind: t.kind || 'unresolved', nos: new Set(), paid };
+    for (const ch of t.chapters || []) row.nos.add(Number(ch.no) || 0);
+    byText.set(t.text, row);
+  }
+  const rows = [...byText.values()]
+    .filter((r) => !r.paid && r.nos.size >= 1)
+    .sort((a, b) => b.nos.size - a.nos.size || String(a.text).localeCompare(String(b.text), 'zh'))
+    .slice(0, 20);
+  const maxNo = Math.max(1, ...(n.chapters || []).map((c) => Number(c.no) || 1));
+  if (!rows.length) return '';
+  const header = Array.from({ length: maxNo }, (_, i) => `<th title="第 ${i + 1} 章">${i + 1}</th>`).join('');
+  const body = rows.map((row) => {
+    const cells = Array.from({ length: maxNo }, (_, i) => {
+      const no = i + 1;
+      const on = row.nos.has(no);
+      return `<td class="thread-cell${on ? ' on ' + row.kind : ''}">${on ? '<span class="thread-dot"></span>' : ''}</td>`;
+    }).join('');
+    return `<tr><td class="thread-row-label" title="${esc(row.text)}${row.paid ? '' : ''}">${esc(row.text)}</td>${cells}</tr>`;
+  }).join('');
+  return `<div class="thread-timeline" role="table" aria-label="线索时间线"><table><thead><tr><th class="thread-row-label">线索</th>${header}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
 function renderThreadsTab(host, n) {
   const threads = collectThreads(n);
   const counts = {
@@ -11881,6 +11909,7 @@ function renderThreadsTab(host, n) {
           ['foreshadowing', '伏笔', counts.foreshadowing],
         ].map(([kind, label, count]) => `<button data-tf="${kind}" class="${filterOf() === kind ? 'on' : ''}">${label} ${count}</button>`).join('')}
       </div>` : ''}
+      <div class="thread-timeline-wrap" id="threadTimelineWrap">${total ? renderThreadTimeline(threads, n) : ''}</div>
       <div class="thread-list" id="threadList"></div>
       ${memCount > 0 && memCount < n.chapters.length ? `<p class="dim small thread-hint">还有 ${n.chapters.length - memCount} 章没有章节记忆，线索可能不完整。</p>` : ''}
     </div>`;
