@@ -18,24 +18,14 @@ jobs:
       - name: 单元测试（lib，635 项）
         run: npm test
 
-      # 启动假模型（dev/mock-openai.js 仅供离线调试，不会调用任何真实模型）
-      - name: 启动假模型
-        shell: pwsh
-        run: Start-Process node -ArgumentList 'dev/mock-openai.js' -NoNewWindow
-
-      # 启动隔离的服务实例：数据写到临时目录，绝不碰任何真实 data/
-      - name: 启动隔离服务
+      # 假模型 + 隔离服务 + 回归跑在同一个 step 里——子进程只活得过本 step，拆开就都没了
+      # 数据写到临时目录，绝不碰任何真实 data/
+      - name: 回归自检（288 项）
         shell: pwsh
         run: |
           $env:SHU_DATA_DIR = Join-Path $env:RUNNER_TEMP 'shujiang-ci'
-          "SHU_DATA_DIR=$env:SHU_DATA_DIR" >> $env:GITHUB_ENV
-          Start-Process node -ArgumentList 'server/server.js' -NoNewWindow
-
-      - name: 等待服务就绪
-        shell: pwsh
-        # 只用 TCP 探测端口：脚本型 HTTP 客户端（Invoke-WebRequest）在带 HTTP_PROXY 的运行器上会把
-        # 127.0.0.1 也送去代理导致永远不通；TCP 探测不走代理，不受影响
-        run: |
+          $mock = Start-Process node -ArgumentList 'dev/mock-openai.js' -NoNewWindow -PassThru
+          $svr  = Start-Process node -ArgumentList 'server/server.js' -NoNewWindow -PassThru
           $deadline = (Get-Date).AddSeconds(90)
           $ok = $false
           while ((Get-Date) -lt $deadline) {
@@ -49,7 +39,7 @@ jobs:
           }
           if (-not $ok) { throw '服务启动 90 秒内 8848 端口没有就绪' }
           Write-Host '端口 8848 已就绪'
-
-      - name: 回归自检（288 项）
-        shell: pwsh
-        run: node dev/regress.mjs
+          node dev/regress.mjs
+          $code = $LASTEXITCODE
+          Stop-Process -Id $mock.Id, $svr.Id -Force -ErrorAction SilentlyContinue
+          if ($code -ne 0) { exit $code }
