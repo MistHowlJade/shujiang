@@ -7,29 +7,92 @@
 <meta name="robots" content="noindex,nofollow" />
 <title>书匠 · AI 长篇小说创作台</title>
 <link rel="stylesheet" href="/style.css?v=1.0.10" />
-<style id="aiDockStyle">
-  /* CTA buttons */
-  .ai-cta { display: inline-flex; align-items: center; gap: 6px; height: 30px !important; padding: 0 12px !important; font-size: 13px !important; font-weight: 650 !important; border-radius: var(--r-md) !important; white-space: nowrap; }
-  .ai-cta .ico { width: 14px !important; height: 14px !important; }
-  .ai-cta.btn-primary { box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 4px 16px rgba(124,135,230,.4), 0 0 0 1px rgba(124,135,230,.3) !important; }
-  .ai-cta.ai-cta-cont { background: linear-gradient(180deg, rgba(124,135,230,.22), rgba(124,135,230,.12)); border-color: var(--accent-line) !important; color: var(--accent-hover) !important; }
-  .ai-cta.ai-cta-cont:hover { background: linear-gradient(180deg, rgba(124,135,230,.32), rgba(124,135,230,.18)); border-color: var(--accent) !important; }
-
-  /* 助手栏 dock 主场（inline 以避开嵌入式缓存钉死） */
-  .dock-main { background: linear-gradient(180deg, rgba(23, 26, 34, .62), rgba(17, 19, 25, .72)) !important; backdrop-filter: blur(18px) saturate(1.3); -webkit-backdrop-filter: blur(18px) saturate(1.3); border-left: 1px solid rgba(255, 255, 255, .08); border-radius: 0; padding: 16px 14px; gap: 12px; display: flex; flex-direction: column; overflow: auto; }
-  .dock-main .dock-body { display: flex; flex-direction: column; gap: 12px; flex: 1; overflow: auto; }
+<style id="designv1011">
+  /* 书匠 · v1.0.11「东方典籍」视觉重写 —— 暖墨：衬线 + 赭金 + 朱砂 */
+  @font-face { font-family: '思源宋体 VF'; src: local('Noto Serif SC'), local('Noto Serif SC VF'), local('NotoSerifSC-VF'); font-display: swap; }
+  body[data-theme="dark"] {
+    --bg:              #15110d;
+    --surface-1:       #1d1812;
+    --surface-2:       #26201a;
+    --surface-3:       #332b23;
+    --surface-4:       #3f352b;
+    --border:          rgba(255, 220, 180, .09);
+    --border-2:        rgba(255, 220, 180, .17);
+    --text-1:          #f2e8da;
+    --text-2:          #c4b7a4;
+    --text-3:          #8f8373;
+    --text-4:          #6a5f51;
+    --accent:          #d9a25f;
+    --accent-hover:    #e4b574;
+    --accent-down:     #c18a4d;
+    --accent-btn-1:    #d8a35d;
+    --accent-btn-2:    #a66a3d;
+    --accent-btn-1-h:  #e2b572;
+    --accent-btn-2-h:  #b27c4e;
+    --accent-bg:       rgba(217, 162, 95, .12);
+    --accent-line:     rgba(217, 162, 95, .38);
+    --success:         #76c79a;
+    --success-bg:      rgba(118, 199, 154, .1);
+    --warning:         #e4b65a;
+    --warning-bg:      rgba(228, 182, 90, .1);
+    --danger:          #e06e5c;
+    --danger-bg:       rgba(224, 110, 92, .1);
+    --danger-solid:    #c84d3c;
+    --paper:           #1d1812;
+    --font-display:    '思源宋体 VF', 'Noto Serif SC', Georgia, 'Songti SC', SimSun, serif;
+    --font-write:      '思源宋体 VF', 'Noto Serif SC', Georgia, 'Songti SC', SimSun, serif;
+    --glow:            radial-gradient(ellipse 90% 65% at 50% -10%, rgba(217,162,95,.16), transparent 60%), radial-gradient(ellipse 45% 55% at 85% 110%, rgba(224,110,92,.08), transparent 65%);
+    --bg-blur:         rgba(21, 17, 13, .72);
+    --sh-1: 0 1px 2px rgba(0,0,0,.4), 0 0 0 1px rgba(255,220,180,.05) inset;
+    --sh-2: 0 6px 18px rgba(0,0,0,.48), 0 0 0 1px rgba(255,220,180,.06) inset;
+    --sh-3: 0 28px 70px rgba(0,0,0,.55), 0 0 0 1px rgba(255,220,180,.07) inset;
+    --mask: rgba(12, 9, 6, .7);
+  }
+  .page-head h1 { font-family: var(--font-display); letter-spacing: .02em; font-weight: 700; }
+  .ch-title { font-family: var(--font-display) !important; letter-spacing: .03em !important; font-weight: 700 !important; font-size: 17px !important; caret-color: var(--accent) !important; }
+  .section-head span, .card-head h2, .card-head h3,
+  .dock-main .card-head h2, .dock-main .card-head h3
+  { font-family: var(--font-display); letter-spacing: .03em; }
+  body { background: radial-gradient(1300px 460px at 50% -200px, rgba(217,162,95,.13), transparent 65%), var(--bg); }
+  .rail { background: linear-gradient(180deg, #1d1812 0%, #181410 100%) !important; }
+  .rail .tab.on { color: var(--accent-hover) !important; box-shadow: inset 0 0 0 1px rgba(217,162,95,.4) !important; isolation: isolate; }
+  .rail .tab.on .ico { color: var(--accent-hover) !important; }
+  .rail-nav { gap: 6px !important; }
+  .topbar { background: linear-gradient(180deg, #1d1812 0%, #1b1612 100%) !important; }
+  .topbar-mid .top-export:hover { border-color: var(--accent-line) !important; color: var(--accent-hover) !important; }
+  .topbar-mid .top-export { color: var(--text-1) !important; border-color: var(--border-2) !important; }
+  .topbar-mid .ico { color: var(--accent-hover) !important; }
+  .dock-main { background: linear-gradient(180deg, rgba(29,24,18,.88), rgba(21,17,13,.92)) !important; }
+  .dock-main .card-head .co-title { color: var(--accent-hover) !important; }
+  .dock-main .assist-hint { border-color: var(--accent-line) !important; color: var(--text-3) !important; font-family: var(--font-ui) !important; }
+  .dock-main .card-head { border-bottom: 1px solid rgba(255,220,180,.08); padding-bottom: 8px; }
+  .dock-main .card-head h2, .dock-main .card-head h3 { color: var(--text-1); font-weight: 600; }
   .dock-main .assist-pane { display: contents; }
   .dock-main .assist-pane:not([data-pane="write"]) { display: none !important; }
   .dock-main .assist-pane > .card { display: block; }
-  .dock-main .assist-pane > .card-head, .dock-main .assist-pane > .card-head h2, .dock-main .assist-pane > .card-head h3 { background: transparent; }
-  .dock-main .card-head { border-bottom: 1px solid rgba(255,255,255,.07); padding-bottom: 8px; }
-  .dock-main .card-head h2, .dock-main .card-head h3 { color: var(--text-1); font-weight: 600; }
-  .dock-main .card-head .co-title { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent-hover); }
-  .dock-main kbd { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.11); }
-  .dock-main .assist-hint { padding: 10px 12px; border-radius: 12px; border: 1px dashed rgba(255,255,255,.09); color: var(--text-3); font-size: 12.5px; }
   .assist-pane, .assist-pane.on { display: contents; animation: none; }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(3px); } }
-  </style>
+  .ai-cta { display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 8px; white-space: nowrap; height: 30px !important; font-size: 13px !important; font-weight: 700 !important; }
+  .ai-cta .ico { width: 14px !important; height: 14px !important; }
+  .ai-cta.btn-primary { box-shadow: inset 0 1px 0 rgba(255,255,255,.24), 0 4px 16px rgba(217,162,95,.35), 0 0 0 1px rgba(217,162,95,.25) !important; }
+  .ai-cta.btn-primary .ico { color: #fff !important; }
+  .ai-cta.ai-cta-cont { background: linear-gradient(180deg, rgba(217,162,95,.18), rgba(217,162,95,.08)); border-color: var(--accent-line) !important; color: var(--accent-hover) !important; }
+  .ai-cta.ai-cta-cont:hover { background: linear-gradient(180deg, rgba(217,162,95,.28), rgba(217,162,95,.14)); }
+  .save-pill { color: var(--accent-hover) !important; border-color: var(--accent-line) !important; font-weight: 700 !important; }
+  .page-head h1 { font-size: 28px !important; font-weight: 700 !important; letter-spacing: .03em !important; }
+  .shelf-grid { padding: 24px 32px !important; }
+  .book h3 { font-family: var(--font-display) !important; font-size: 21px !important; font-weight: 700 !important; letter-spacing: .02em !important; }
+  .page-head { padding: 26px 32px 18px !important; }
+  .output { font-family: var(--font-write); }
+  .editor { font-family: var(--font-write) !important; font-size: 17px !important; line-height: 1.95 !important; letter-spacing: .03em !important; color: var(--text-1) !important; }
+  .editor::placeholder { color: var(--text-4) !important; font-style: normal; }
+  .ch-title:focus { background: rgba(255, 220, 180, .02); }
+  .save-pill, .btn-primary { font-weight: 700 !important; }
+  .assist-hint { font-family: var(--font-ui); }
+  .panel { border-color: var(--border-2) !important; }
+</style>
+
+
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234a7dff'/><path d='M9 8h9a4 4 0 0 1 4 4v12H13a4 4 0 0 0-4 4z' fill='none' stroke='white' stroke-width='2' stroke-linejoin='round'/></svg>" />
 </head>
 <body data-theme="dark">
