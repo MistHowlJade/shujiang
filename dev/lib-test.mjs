@@ -24,6 +24,7 @@ import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
 import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, readerChapterRead, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { buildPropagationReport } from '../web/lib/propagate.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1822,6 +1823,45 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('设定搜索：过滤后仍保留原下标', JSON.stringify(indexes('Alan')) === '[2]', JSON.stringify(indexes('Alan')));
   check('设定搜索：无匹配返回空', indexes('不存在').length === 0);
   check('设定搜索：空列表不报错', filterEntriesBySearch(null, '林昭', textOf).length === 0);
+}
+
+// ---------------------------------------------------------------
+// 跨章节传播分析：命中的设定痕迹在哪些别的章节露头
+{
+  const novel = {
+    bible: {
+      characters: [
+        { id: 'c1', name: '沈砚', role: '主角', keywords: ['剑鞘', '师傅'] },
+        { id: 'c2', name: '路人甲', role: '配角', keywords: [] },
+      ],
+      world: [
+        { id: 'w1', name: '雪岭', category: '地理', desc: '', keywords: ['山门'] },
+      ],
+    },
+    chapters: [
+      { id: 'ch1', no: 1, title: '第一章', content: '沈砚拔不出剑鞘，雪岭风雪很大。' },
+      { id: 'ch2', no: 2, title: '第二章', content: '师傅说过一句话，他一直记着。' },
+      { id: 'ch3', no: 3, title: '第三章', content: '山门外，雪岭的旗子还在飘。' },
+      { id: 'ch4', no: 4, title: '第四章', content: '剑鞘被他藏进了柴房。' },
+      { id: 'ch5', no: 5, title: '第五章', content: '' },
+    ],
+  };
+  const report = buildPropagationReport(novel, '他把剑鞘推进柴房。', { currentChapterId: 'ch1' });
+  const names = report.entities.map((e) => e.name);
+  check('传播分析：名字 / 关键词命中源文本的设定才会报', names.includes('沈砚') && !names.includes('雪岭'), JSON.stringify(names));
+  check('传播分析：源文本没命中时不牵动（姓名只出现在其他关键词里）', !names.includes('路人甲'));
+  check('传播分析：当前章不列入受影响章', report.entities.every((e) => e.chapters.every((c) => c.id !== 'ch1')));
+  const shen = report.entities.find((e) => e.name === '沈砚');
+  check('传播分析：第 4 章通过「剑鞘」命中', shen.chapters.some((c) => c.no === 4 && c.side === 'after'));
+  check('传播分析：源文本没出现的关键词不牵动第 2 章', !shen.chapters.some((c) => c.no === 2));
+  const reportMaster = buildPropagationReport(novel, '他想起师傅。', { currentChapterId: 'ch1' });
+  check('传播分析：源文本命中「师傅」时第 2 章被牵', reportMaster.entities.find((e) => e.name === '沈砚')?.chapters?.some((c) => c.no === 2));
+  check('传播分析：空章节不统计', report.entities.every((e) => e.chapters.every((c) => c.id !== 'ch5')));
+  check('传播分析：未命中的设定不生成结果', buildPropagationReport(novel, '没有人名的一段话。').entities.length === 0);
+  check('传播分析：世界观按名称 / 关键词命中', buildPropagationReport(novel, '雪岭的风比别处硬。').entities.some((e) => e.name === '雪岭' && e.chapters.some((c) => c.no === 3)));
+  check('传播分析：side 区分前文 / 后文', buildPropagationReport(novel, '剑鞘。', { currentChapterId: 'ch3' }).entities
+    .find((e) => e.name === '沈砚').chapters.every((c) => ((c.no < 3) === (c.side === 'before'))));
+  check('传播分析：空作品 / 空文本不报错', buildPropagationReport(null, '').entities.length === 0 && buildPropagationReport({}, 'x').entities.length === 0);
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);

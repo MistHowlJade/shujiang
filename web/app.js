@@ -5,6 +5,7 @@ import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryC
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
+import { buildPropagationReport } from './lib/propagate.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown, CONSISTENCY_KINDS } from './lib/consistency.js';
 import { diffProse, diffHtml, diffSideHtml } from './lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from './lib/goal.js';
@@ -8146,6 +8147,7 @@ function openBatchMemory() {
 $$('[data-quick]').forEach((btn) => btn.addEventListener('click', async () => {
   const kind = btn.dataset.quick;
   if (kind === 'batchMemory') return openBatchMemory();
+  if (kind === 'propagate') return openPropagationAnalysis();
 
   const ch = currentChapter();
   if (!ch) return toast('先选一章', 'err');
@@ -10668,6 +10670,56 @@ function openWorldMentionsModal(entry, chapters) {
     `在正文或章节记忆里提到这个名字 / 关键词的章节，共 ${chapters.length} 章。点击章节可直接打开。`,
     chapters,
   );
+}
+
+/** 跨章节传播分析：这段文字里命中的设定痕迹，在哪些别的章节露过头 */
+function openPropagationAnalysis() {
+  const ch = currentChapter();
+  if (!ch) return toast('先打开一章', 'err');
+  const ta = $('#chContent');
+  const sel = ta && ta.selectionStart !== ta.selectionEnd ? ta.value.slice(ta.selectionStart, ta.selectionEnd) : '';
+  const source = (sel || String(ta?.value ?? ch.content ?? '')).trim();
+  if (!source) return toast('这一章还没有正文——先写几句，或者选一段再分析', 'err');
+  const scope = sel ? `选中的 ${countWords(sel)} 字` : `本章全文 ${countWords(source)} 字`;
+  const r = buildPropagationReport(S.novel, source, { currentChapterId: ch.id });
+  const closeFoot = (label) => `<div class="modal-foot"><button class="btn btn-primary" id="propClose">${label}</button></div>`;
+  if (!r.entities.length) {
+    return showModal(`<h3>影响范围</h3>
+      <p class="modal-sub">分析依据：${esc(scope)}；当前章不计入。</p>
+      <p class="dim" style="margin:14px 0">这段里没有命中设定库里的人物 / 世界观 / 检索关键词——改这里不会牵动设定。如果你觉得应该牵动，去设定库给人物或词条补「检索关键词」（正文里出现这些词，就会被认成这个设定）。</p>
+      ${closeFoot('关闭')}`,
+      (box) => { box.querySelector('#propClose').onclick = closeModal; });
+  }
+  const kindChip = (e) => (e.kind === 'character'
+    ? '<span class="thread-kind unresolved">人物</span>'
+    : `<span class="thread-kind foreshadowing">${esc(e.desc || '设定')}</span>`);
+  const rows = r.entities.map((e) => `
+    <div class="prop-entity">
+      <div class="prop-entity-head">${kindChip(e)}<b>${esc(e.name)}</b>
+        <span class="prop-keys">${e.keys.map(esc).join('、')}</span>
+        <span class="prop-count">前文 ${e.before} 章 · 后文 ${e.after} 章 · ${e.occurrences} 次出现</span>
+      </div>
+      <div class="prop-chapters">${e.chapters.map((c) => `
+        <button type="button" class="appear-row prop-row" data-chapter="${esc(c.id)}" title="${esc(c.snippet)}">
+          <span class="ar-no">第 ${c.no} 章</span>
+          <span class="ar-title">${esc(c.title || '未命名')}</span>
+          <span class="prop-snip">${esc(c.snippet)}</span>
+          <span class="ar-meta">${c.side === 'before' ? '前文' : '后文'} · ${c.fromCap ? '9+' : c.count} 次</span>
+        </button>`).join('')}</div>
+    </div>`).join('');
+  const hitChapters = new Set();
+  for (const e of r.entities) for (const c of e.chapters) hitChapters.add(c.id);
+  showModal(`<h3>影响范围 <span class="health-count">${r.totalEntities} 处设定</span></h3>
+    <p class="modal-sub">分析依据：${esc(scope)}。当前章不计入。共命中 ${r.totalEntities} 处设定，涉及其他 ${hitChapters.size} 章（前文 ${r.totalBefore} 章次 · 后文 ${r.totalAfter} 章次）。</p>
+    <div class="prop-list">${rows}</div>
+    <p class="dim small" style="margin-top:10px">只按名称 / 检索关键词做本地字符串匹配，不判断该不该改；动过的地方，这些章节里可能要跟着看一眼。动手前先看清楚，改完回来再查一次。</p>
+    ${closeFoot('知道了')}`,
+    (box) => {
+      box.querySelector('#propClose').onclick = closeModal;
+      box.querySelectorAll('[data-chapter]').forEach((el) => {
+        el.onclick = () => { closeModal(); openChapterFromIndex(el.dataset.chapter); };
+      });
+    });
 }
 
 function openEntryStatesModal(entry, states) {
@@ -14280,6 +14332,7 @@ function cmdkSource() {
     op('重做', 'redo', () => { setView('studio'); doRedo(); }, 'Ctrl+Shift+Z');
     op('全书查找 / 替换', 'search', () => { setView('studio'); openFind(); }, 'Ctrl+F');
     op('全书体检', 'pulse', () => { setView('studio'); openHealthReport(); });
+    op('影响范围分析', 'git-branch', () => { setView('studio'); openPropagationAnalysis(); });
     op('交稿检查', 'stamp', () => openSubmitCheck());
     op('章节看板', 'columns', () => { setView('studio'); openChapterBoard(); }, 'Ctrl+Alt+B');
     op('文字校对', 'proof', () => { setView('studio'); openProof(); }, 'Ctrl+Alt+P');
