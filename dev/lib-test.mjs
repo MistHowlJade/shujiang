@@ -308,6 +308,15 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   const other = scanProofChapter({ ...ch, id: 'c_y' }, 0);
   check('不同章节指纹不同', other.issues.some((i) => i.key.includes('c_y')));
 
+  // AI 味规则
+  const aiTaste = (content) => scanProofChapter({ id: 'c_aita', no: 1, title: 'AI 味章', content }, 0).issues.filter((i) => i.type === 'ai_taste');
+  const sanCun = aiTaste('首先我们要确认目标。其次我们要明确约束。最后我们再执行。');
+  check('AI 三段式被识别', sanCun.length > 0, JSON.stringify(sanCun.map((i) => i.message)));
+  const notBut = aiTaste('他转过身说：「这不是退让，而是选择。」');
+  check('「不是…而是」句式被识别', notBut.length > 0, JSON.stringify(notBut.map((i) => i.message)));
+  const biz = aiTaste('随后他又想了一会儿，随后走到窗边，随后又看了看自己的手。');
+  check('「随后/随后」句首被识别', biz.length >= 1, JSON.stringify(biz.map((i) => i.message)));
+
   // 全书报告里也一样带着指纹
   const report = buildProofReport({ id: 'n_x', title: '书', chapters: [ch] }, 'book', null);
   check('全书报告里的问题也有指纹', (report.issues || []).every((i) => !!i.key));

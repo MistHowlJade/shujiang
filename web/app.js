@@ -3127,6 +3127,12 @@ function openHealthReport() {
     <span><b class="health-thread-kind">未决</b>${esc(t.text)}</span><em>第 ${t.latest.no} 章</em>
   </button>`, 'thread', t.text, `未决线索：${String(t.text || '').slice(0, 20)}`)).join('');
 
+  // 章纲对齐：这章绑的章纲，正文里多少真的出现了
+  const outlineDrift = buildOutlineDrift(S.novel);
+  const driftRows = outlineDrift.map((r) => withIgnore(`<button type="button" class="health-row" data-health-chapter="${esc(r.id)}">
+    <span><b class="health-thread-kind">偏离</b>第 ${r.no} 章 · ${esc(r.title)}</span><em>${esc(r.reasons.join('；'))}</em>
+  </button>`, 'outline', r.id, `章纲偏离：第 ${r.no} 章`)).join('');
+
   // 爽点连档：连续两章以上 ≤1 分才报；没打过档的章节不参与
   const slumpRows = (r.payoffSlumps || []).map((s) => withIgnore(`<div class="health-slump">
     <div class="health-slump-label">${esc(s.label)}</div>
@@ -3217,6 +3223,12 @@ function openHealthReport() {
         <h4>爽点分布 <span class="health-count">${r.payoffCount || 0}/${total} 章打了档</span></h4>
         <p>给每章打一个 0-5 的爽点分（写作面板快捷操作 → 「爽点档」，AI 评估、你决定存不存）。没打过档的章节不参与判断——不能因为没测就判它没戏。连续两章以上 ≤ 1 分会列在下面，可以点忽略（以后不再提醒）。</p>
         ${slumpRows ? `<div class="health-rows">${slumpRows}</div>` : healthOk(r.payoffCount ? '打了档的章节里没有连续爽点偏低的，节奏立得住。' : '还没给任何一章打过爽点档。去「写作」面板点「爽点档」，AI 帮你看；没打档的章节这里不报警。')}
+      </section>
+
+      <section class="health-card wide">
+        <h4>章纲对齐 <span class="health-count">${driftRows ? `${outlineDrift.length} 处未对齐` : '全部对齐'}</span></h4>
+        <p>绑定了章纲的章，章纲里的人物/场景必须出现在正文里——不然说明正文逃离了大纲。这里只做局部匹配：名字第一次丢失、或约定场景没落笔。丢一两次先看看，丢多了就要回去查章纲或重写。</p>
+        ${driftRows ? `<div class="health-rows">${driftRows}</div>` : healthOk(outlineDrift.length === 0 ? '有章纲的章都对齐了，该有都有。' : '还没有书籍章纲绑定章节，或所有被绑定的章节都对齐了。')}
       </section>
     </div>
     ${r.memCount < total ? `<p class="health-disclaimer">章节记忆覆盖 ${r.memCount}/${total} 章，人物断档与线索统计会受此影响；可在「线索 → 批量补记忆」补齐。</p>` : ''}
@@ -4294,6 +4306,36 @@ function effectiveChapterOutline(ch) {
  * 和「章节记忆」的 status 字段无关：那个是给 AI 存档用的，这里追踪的是人的写作进度。 */
 const STAGE_LABEL = { draft: '草稿', revising: '修改中', done: '定稿' };
 const stageOf = (c) => (c && STAGE_LABEL[c.stage] ? c.stage : 'draft');
+
+/** 章纲对齐：哪一章动了但它绑的章纲人物/场景没全部出场？ */
+function findChapterForOutlineId(novel, outlineId) {
+  return (novel?.chapters || []).find((c) => c?.outlineId === outlineId) || null;
+}
+function buildOutlineDrift(novel) {
+  const out = [];
+  for (const ch of novel?.chapters || []) {
+    if (!ch?.outlineId) continue;
+    const ref = findOutlineRef(novel, ch.outlineId);
+    if (!ref || !ref.entry) continue;
+    const content = String(ch?.content || '');
+    if (!content.trim()) continue;
+    const chars = Array.from(new Set(String(ref.entry?.characters || '').match(/[\u4e00-\u9fff]{2,}/g) || []));
+    const sceneTerms = Array.from(new Set(String(ref.entry?.scene || '').match(/[\u4e00-\u9fff]{2,}/g) || []));
+    const missingChars = chars.filter((name) => !content.includes(name));
+    const sceneOk = sceneTerms.length ? sceneTerms.some((term) => content.includes(term)) : true;
+    if (missingChars.length === 0 && sceneOk) continue;
+    out.push({
+      id: ch.id,
+      no: Number(ch.no) || 0,
+      title: ch.title || '未命名',
+      reasons: [
+        ...missingChars.map((name) => `章纲要求「${name}」出现，正文没找到`),
+        ...(!sceneOk ? [`章纲场景「${String(ref.entry?.scene || '').slice(0, 24)}」没在正文里体现`] : []),
+      ],
+    });
+  }
+  return out;
+}
 const stageMatches = (c, filter) => !filter
   || (filter === 'open' ? stageOf(c) !== 'done' : stageOf(c) === filter);
 // 单章目标字数：0 表示没设，只用于进度提示，不限制写作

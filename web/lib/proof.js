@@ -16,6 +16,7 @@ export const PROOF_KINDS = {
   quote: '引号/括号',
   typo: '叠字',
   ending: '收尾',
+  ai_taste: 'AI 模板',
 };
 export const PROOF_MAX_CHAPTER_ISSUES = 60;
 export const PROOF_PAGE = 120;
@@ -159,6 +160,34 @@ export function scanProofChapter(ch, index) {
       loc: '全章',
       snippet: `${open} ${a} 个 · ${close} ${b} 个`,
     });
+  }
+
+  // AI 模板味：三段式（首先/第一/其次/第二/最后/第三）
+  for (const p of paras) {
+    const t = p?.text || '';
+    if (!t) continue;
+    if (/(首先|第一|其一)/.test(t) && /(其次|第二|其二)/.test(t) && /(最后|第三|其三|末了|最终)/.test(t)) {
+      add('ai_taste', '段落像 AI 三段式（首先 … 其次 … 最后），多半是注水', p.start, p.start + 2);
+    } else if (/(首先|第一|其一)/.test(t) && /(最后|第三|其三)/.test(t) && t.length < 120) {
+      add('ai_taste', '段落疑似 AI 模板（首先 … 最后）', p.start, p.start + 2);
+    }
+  }
+  // AI 模板味：不是 X，而是 Y / 不仅 X，还 Y
+  for (const m of content.matchAll(/不是[^。\n]{1,50}，而是/g)) {
+    add('ai_taste', '「不是…而是…」判断句（AI 偏好结构，改成动作/场景说）', m.index, m.index + m[0].length);
+  }
+  for (const m of content.matchAll(/不仅[^，。！？；\n]{2,40}，还/g)) {
+    add('ai_taste', '「不仅…还…」递进句（AI 模板腔）', m.index, m.index + m[0].length);
+  }
+  // AI 模板味：四字组连发 ≥ 2 次（排比味）
+  for (const p of paras) {
+    const t = p?.text || '';
+    const hits = [...t.matchAll(/[一-龥]{4}[，、][一-龥]{4}[，、][一-龥]{4}(?=[，。；；\n]|$)/g)];
+    if (hits.length >= 2) add('ai_taste', `本段 ${hits.length} 组四字排比，节奏偏「韵」`, p.start, p.start + 4);
+  }
+  // AI 模板味：固定副词句首，提示结构“是 X 的 ……”
+  for (const m of content.matchAll(/^(随后|随后|毕竟|毕竟|事实上|客观来说|实际上|总而言之|总之|综上所述|简单来说)/gm)) {
+    add('ai_taste', `段落以「${m[1]}」开头，AI 抽象总结句首`, m.index, m.index + m[1].length);
   }
 
   for (const p of paras) {
