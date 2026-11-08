@@ -425,7 +425,7 @@ ${text}`,
       return {
         messages: [
           sys('你是一位起点 / 番茄 / 晋江平台的开书编辑，懂市场风向，也懂写作。你的工作是从「让人想点开、想追更」的角度，诊断这部小说的开书底子，给具体可操作的——不要套话。', head(novel, pack)),
-          user(`请诊断这部小说的开书底子，从下面 5 个角度。每个角度先给一行定位（strong / ok / weak），再给一两句证据或具体建议。
+          user(`请诊断这部小说的开书底子，从下面 5 个角度。每个角度给 0-10 的分数，先一行定位（strong / ok / weak），再给一两句证据或具体建议。
 
 【题材定位】题材 + 卖点是否成型？独到的钩子是什么？一句话说清楚。
 【目标读者】更适合起点 / 番茄 / 晋江 / 七猫 / 哪个平台？那个平台的用户吃这一口吗？给三条理由。
@@ -448,21 +448,33 @@ ${outline}`),
   propagation: {
     expect: 'json',
     temperature: 0.2,
-    maxTokens: 1800,
+    maxTokens: 2000,
     build({ novel, pack, payload }) {
       const text = String(payload?.text || '').slice(0, 2000);
       const chapters = (Array.isArray(payload?.chapters) ? payload.chapters : []).slice(0, 6)
-        .map((c) => ({ no: Number(c?.no) || 0, title: String(c?.title || ''), excerpt: String(c?.excerpt || '').slice(0, 600), chars: Number(c?.chars) || 0 }))
+        .map((c) => ({
+          no: Number(c?.no) || 0,
+          title: String(c?.title || '').slice(0, 80),
+          excerpt: String(c?.excerpt || '').slice(0, 500),
+          chars: Number(c?.chars) || 0,
+          memory: String(c?.memory || '').slice(0, 1100),
+        }))
         .filter((c) => c.no > 0);
-      const chList = chapters.map((c) => `第${c.no}章「${c.title}」：\n"""\n${c.excerpt}\n"""`).join('\n\n');
+      const chList = chapters.map((c) => {
+        const mem = c.memory.trim() ? `\n【章节记忆】\n${c.memory.trim()}\n` : '\n（这章没有存章节记忆——只能看正文片段判断）\n';
+        return `第${c.no}章「${c.title}」：${mem}\n【正文片段】\n"""\n${c.excerpt}\n"""`;
+      }).join('\n\n');
       return {
         messages: [
-          sys('你是一位中文长篇小说责编。你的工作判断一段改动会不会牵连到后面的章节，给出结论，不改原文。', head(novel, pack)),
-          user(`作者正在处理下面这段文字（可能是改前也可能是改后），请逐个判断所列章节是否真的受影响。只从情节 / 人物设定 / 揭示节奏 / 伏笔逻辑角度判断，不要只因为「同一个名字出现过」就判受影响。
+          sys('你是一位中文长篇小说责编。你的工作判断一段改动牵连到哪些章，给出结论。', head(novel, pack)),
+          user(`作者正在处理下面这段文字（可能是改前也可能是改后），请逐个判断所列章节是否真的受影响。
+判断只看这四个角度：情节 / 人物设定 / 揭示节奏 / 伏笔逻辑。「同一个名字出现过」不算。
+判断优先级：【章节记忆】里的概要 / 状态变化 / 伏笔 / 未决是这章的事实档案，优先于【正文片段】。
+证据要求：affected=true 时，必须返回 evidence——原文或章节记忆中的原句（原样复制，不断章取义）。没有可引用的原句，就判 false。affected=false 时 evidence 可以为空。
 只返回 JSON 数组，不要任何说明文字、不要 markdown 代码块。每个元素结构：
-{"chapter": 章节号, "affected": true|false, "reason": "一句话理由（30 字以内）", "advice": "一句话建议怎么做（30 字以内；不受影响时写「不用改」）"}
+{"chapter": 章节号, "affected": true|false, "reason": "一句话理由（40 字以内）", "evidence": "受影响的原句（affected=true 必填）", "advice": "一句话怎么改（40 字以内；不受影响时写「不用改」）"}
 
-作者正在处理的一段：
+作者正在处理的一段文字：
 """
 ${text}
 """

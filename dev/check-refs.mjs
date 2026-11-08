@@ -29,6 +29,7 @@ const FILES = [
   'web/lib/trash.js',
   'web/lib/propagate.js',
   'web/lib/payoff.js',
+  'web/lib/bookcheck.js',
 ];
 
 const all = FILES.map((f) => [f.replace(/\\/g, '/'), fs.readFileSync(f, 'utf8')]);

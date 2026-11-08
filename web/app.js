@@ -7,6 +7,7 @@ import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofPara
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
 import { buildPropagationReport } from './lib/propagate.js';
 import { buildPayoffProfile, payoffTier } from './lib/payoff.js';
+import { buildLocalBookCheck } from './lib/bookcheck.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown, CONSISTENCY_KINDS } from './lib/consistency.js';
 import { diffProse, diffHtml, diffSideHtml } from './lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from './lib/goal.js';
@@ -7394,6 +7395,21 @@ function renderDiagnoseList(list) {
   if (allBtn) allBtn.addEventListener('click', () => diagFixAll(list, allBtn));
 }
 
+/** 跑一次诊断，返回问题清单（null = 没按要求返回，调用方自己决定怎么提示） */
+async function collectDiagList(text, chapterId) {
+  const acc = await runStream({
+    task: 'diagnose',
+    novelId: S.novel?.id,
+    chapterId,
+    payload: { text },
+  }, { target: 'diag' });
+  const parsed = parseJsonLoose(acc);
+  if (!parsed) return null;
+  return (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
+    .filter((x) => x && typeof x === 'object' && x.text)
+    .slice(0, 8);
+}
+
 /** 有一份有效的预诊缓存就直接展示；没有再走流式 */
 async function diagnoseOutput() {
   const text = S.out;
@@ -7407,14 +7423,8 @@ async function diagnoseOutput() {
   diagList.hidden = false;
   diagList.innerHTML = '<p class="dim">正在诊断…</p>';
   try {
-    const acc = await runStream({
-      task: 'diagnose',
-      novelId: S.novel?.id,
-      chapterId: S.chapterId,
-      payload: { text },
-    }, { target: 'diag' });
-    const parsed = parseJsonLoose(acc);
-    if (!parsed) {
+    const list = await collectDiagList(text, S.chapterId);
+    if (list === null) {
       const mask = document.querySelector('#modalMask');
       const setupOpen = mask && getComputedStyle(mask).display !== 'none';
       diagList.innerHTML = setupOpen
@@ -7422,9 +7432,6 @@ async function diagnoseOutput() {
         : '<p class="qs-error">AI 没按要求返回清单——可以换个模型再试。</p>';
       return;
     }
-    const list = (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
-      .filter((x) => x && typeof x === 'object' && x.text)
-      .slice(0, 8);
     S.preDiag = { out: text, chapterId: S.chapterId, list };
     renderOutActions();
     renderDiagnoseList(list);
@@ -7447,16 +7454,8 @@ async function runPreDiagnose() {
   const snapshot = S.out;
   const chapterId = S.chapterId;
   if (!snapshot?.trim()) return;
-  const acc = await runStream({
-    task: 'diagnose',
-    novelId: S.novel?.id,
-    chapterId,
-    payload: { text: snapshot },
-  }, { target: 'diag' });
-  const parsed = parseJsonLoose(acc);
-  const list = (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
-    .filter((x) => x && typeof x === 'object' && x.text)
-    .slice(0, 8);
+  const list = await collectDiagList(snapshot, chapterId);
+  if (list === null) return;
   // 生成期间用户动过输出区就不收这份缓存（修复 / 追加已落盘 → 已过期）
   if (S.out === snapshot && S.chapterId === chapterId) {
     S.preDiag = { out: snapshot, chapterId, list };
@@ -7539,6 +7538,63 @@ $('#diagnoseBtn').addEventListener('click', () => {
   if (!S.out?.trim()) return toast('先生成几句话再来诊断', 'err');
   if (S.controller) return toast('生成中——先点「停止」再自检', 'err');
   diagnoseOutput();
+});
+
+/** 「一键自检并修复」：诊断 → 串行修复 → 复诊，最多三轮。只改输出草稿，正文不动 */
+async function runDiagnoseFixAll() {
+  if (S.controller) return toast('正在运行——先点「停止」再来', 'err');
+  if (!S.out?.trim()) return toast('先生成几句话再来', 'err');
+  const btn = $('#diagnoseFixAllBtn');
+  if (!btn) return;
+  const label = btn.textContent;
+  btn.disabled = true;
+  diagList.hidden = false;
+  btn.textContent = '自检中…';
+  let list = await collectDiagList(S.out, S.chapterId);
+  if (list === null) {
+    btn.textContent = label;
+    btn.disabled = false;
+    const mask = document.querySelector('#modalMask');
+    const setupOpen = mask && getComputedStyle(mask).display !== 'none';
+    diagList.innerHTML = setupOpen
+      ? '<p class="qs-error">这次还没发出去——先选个模型，选完再点一次就好。</p>'
+      : '<p class="qs-error">AI 没按要求返回清单——可以换个模型再试。</p>';
+    return;
+  }
+  for (let round = 1; round <= 3 && list.length; round += 1) {
+    let changed = 0;
+    for (let i = 0; i < list.length; i += 1) {
+      btn.textContent = `第 ${round} 轮 · 修复 ${i + 1}/${list.length}…`;
+      // eslint-disable-next-line no-await-in-loop
+      const res = await applyDiagFix(list[i]);
+      if (res === 'ok') changed += 1;
+    }
+    if (round < 3) btn.textContent = `第 ${round + 1} 轮 · 复诊中…`;
+    else btn.textContent = '复诊中…';
+    // eslint-disable-next-line no-await-in-loop
+    const again = await collectDiagList(S.out, S.chapterId);
+    if (again === null) {
+      btn.textContent = label;
+      btn.disabled = false;
+      toast('复诊失败——输出里可能残留问题，你可以再点一次「自检」', 'err');
+      return;
+    }
+    list = again;
+    if (!changed) break;   // 这些能改的已经改完；再复诊也是同一份清单
+  }
+  S.preDiag = { out: S.out, chapterId: S.chapterId, list };
+  renderOutActions();
+  renderDiagnoseList(list);
+  btn.textContent = label;
+  btn.disabled = false;
+  toast(list.length
+    ? `修了一轮，复诊还剩 ${list.length} 条——剩下的需要你自己看`
+    : '自检并修复完成，复诊通过了——满意再「追加到正文」', list.length ? 'err' : 'ok');
+}
+$('#diagnoseFixAllBtn')?.addEventListener('click', () => {
+  if (!S.out?.trim()) return toast('先生成几句话再来', 'err');
+  if (S.controller) return toast('正在运行——先点「停止」再来', 'err');
+  runDiagnoseFixAll();
 });
 $('#copyOut').addEventListener('click', () => { navigator.clipboard.writeText(S.out); toast('已复制', 'ok'); });
 
@@ -10528,21 +10584,42 @@ function renderOutlineTab(host, n) {
 
   $('#bookCheck', host).onclick = async () => {
     if (!(n.chapters || []).some((c) => (c.content || '').trim())) return toast('先写几章再诊断——空书没什么可诊断的', 'err');
-    const text = await runStream({ task: 'bookcheck', novelId: n.id });
-    if (!text.trim()) {
-      // 模型没配置时 runStream 会先弹接入引导——选完再点一次，结论就来了，不重复跑
-      const mask = document.querySelector('#modalMask');
-      const setupOpen = mask && getComputedStyle(mask).display !== 'none';
-      if (setupOpen) return toast('先选个模型，选完再点一次「开书诊断」就好了。', 'ok');
-      return;
-    }
+    // 本地清单：完全确定、不依赖模型，先展示；AI 视角作为补充
+    const local = buildLocalBookCheck(n);
+    const listHtml = local.checks.map((c) => `
+      <div class="bookcheck-row ${c.ok ? 'ok' : 'bad'}">
+        <span class="bookcheck-icon">${c.ok ? '✓' : '✗'}</span>
+        <span class="bookcheck-label">${esc(c.label)}</span>
+        <span class="bookcheck-hint">${esc(c.hint)}</span>
+      </div>`).join('');
     showModal(`<h3>《${esc(n.title || '未名')}》开书诊断</h3>
-      <p class="modal-sub">AI 从题材定位 / 目标读者 / 黄金三章 / 人物记忆点 / 连载留存五个角度看你的开书底子——不是帮你改写，是帮你看清钱该花在哪。</p>
-      <div class="out" style="max-height:56vh">${mdLite(text)}</div>
+      <p class="modal-sub">两段：上半是本地机械自检（✓/✗ 不依赖模型）；下半是 AI 五个角度打分——
+        没有平台告诉你「这部书能拿推荐位」的公式；推荐位由编辑 + 首章数据说了算，这里只能给你最接近的自评。</p>
+      <div class="bookcheck-list">
+        ${listHtml}
+        <div class="bookcheck-summary">${local.passed} / ${local.total} 项通过</div>
+      </div>
+      <div class="bookcheck-ai" id="bcAiOut"><p class="dim small">AI 五角度打分中…</p></div>
       <div class="modal-foot"><button class="btn btn-text" id="bcCopy">复制</button><button class="btn btn-primary" id="bcClose">知道了</button></div>`,
       (box) => {
         box.querySelector('#bcClose').onclick = closeModal;
-        box.querySelector('#bcCopy').onclick = () => { navigator.clipboard.writeText(text); toast('已复制', 'ok'); };
+        box.querySelector('#bcCopy').onclick = () => { navigator.clipboard.writeText(box.querySelector('#bcAiOut')?.innerText || ''); toast('已复制 AI 诊断', 'ok'); };
+        const aiBox = box.querySelector('#bcAiOut');
+        const runAi = async () => {
+          aiBox.innerHTML = '<p class="dim small">AI 五角度打分中…</p>';
+          const acc = await runStream({ task: 'bookcheck', novelId: n.id }, { target: 'diag' });
+          if (String(acc).trim()) {
+            aiBox.innerHTML = `<div class="bookcheck-ai-title">AI 五角度打分 <span class="dim">（满分 10，仅作自评参考）</span></div><div class="out" style="max-height:38vh">${mdLite(acc)}</div>`;
+            return;
+          }
+          const mask = document.querySelector('#modalMask');
+          const setupOpen = mask && getComputedStyle(mask).display !== 'none';
+          aiBox.innerHTML = setupOpen
+            ? '<p class="dim small">AI 诊断需要先接上模型（弹窗正开着呢）——选完在下面点重试。</p><button class="btn btn-sm" id="bcRetry">重试</button>'
+            : '<p class="qs-error">AI 诊断没跑成——可以换个模型再试。</p><button class="btn btn-sm" id="bcRetry">重试</button>';
+          aiBox.querySelector('#bcRetry')?.addEventListener('click', runAi);
+        };
+        runAi();
       });
   };
 
@@ -10832,14 +10909,25 @@ function openPropagationAnalysis() {
         analyzing = true;
         aiBtn.disabled = true;
         aiBtn.textContent = 'AI 判断中…';
-        // 去重 + 排除当前章 + 最多 6 章，丢原文片段给模型
+        // 去重 + 排除当前章 + 最多 6 章，丢正文片段 + 章节记忆给模型
         const seen = new Set();
         const targets = [];
+        const memText = (m, key, max = 400) => (Array.isArray(m?.[key]) ? m[key].join('\n') : String(m?.[key] || '')).slice(0, max);
+        const memBlock = (m) => m
+          ? [
+              m.summary ? `概要：${String(m.summary).slice(0, 300)}` : '',
+              m.characters?.length ? `人物：${m.characters.join('、')}` : '',
+              m.stateChanges?.length ? `状态变化：\n${memText(m, 'stateChanges', 500)}` : '',
+              m.events?.length ? `事件：\n${memText(m, 'events', 500)}` : '',
+              m.foreshadowing?.length ? `伏笔：\n${memText(m, 'foreshadowing', 400)}` : '',
+              m.unresolved?.length ? `未决：\n${memText(m, 'unresolved', 400)}` : '',
+            ].filter(Boolean).join('\n')
+          : '';
         for (const e of r.entities) for (const c of e.chapters) {
           if (seen.has(c.id)) continue;
           seen.add(c.id);
           const full = S.novel?.chapters?.find((x) => x.id === c.id);
-          if (full) targets.push({ id: c.id, no: c.no, title: c.title || '', excerpt: full.content || '', chars: (full.content || '').length });
+          if (full) targets.push({ id: c.id, no: c.no, title: c.title || '', excerpt: full.content || '', chars: (full.content || '').length, memory: memBlock(full.memory) });
         }
         targets.sort((a, b) => a.no - b.no);
         const picked = targets.slice(0, 6);
@@ -10871,10 +10959,12 @@ function openPropagationAnalysis() {
             resultBox.innerHTML = `<div class="prop-ai-head">AI 判断（共 ${list.length} 章）</div>` + list.map((item) => {
               const t = byNo.get(Number(item.chapter));
               const bad = Boolean(item.affected);
+              const evidence = String(item.evidence || '').trim();
               return `<div class="prop-ai-row ${bad ? 'bad' : 'ok'}">
                 <span class="prop-ai-flag">${bad ? '受影响' : '不用改'}</span>
                 <b>第 ${Number(item.chapter)} 章</b>
                 <span class="prop-ai-reason">${esc(String(item.reason || ''))}</span>
+                ${bad ? `<span class="prop-ai-evidence">${evidence ? `证据：${esc(evidence)}` : '（模型没给出可引用的证据，仅供参考）'}</span>` : ''}
                 <span class="prop-ai-advice">${esc(String(item.advice || ''))}</span>
               </div>`;
             }).join('');

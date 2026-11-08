@@ -242,11 +242,11 @@ const INSPIRATION_PROSE = "给你 5 个当下能写的方向，挑一个聊：\n
 
 const BOOKCHECK = `**总判词**：钩子立住了，人物立住一半，开书姿势不错但差一口里程碑驱动的气。
 
-**【题材定位】strong** —— 雪岭问剑题材讨巧：藏剑谍影的开场钩子（剑为何拔不出来）一上来就立住了，这是起点热榜常见的爆款配方。
-**【目标读者】起点（仙侠 / 武侠成长线）** —— 理由一：起点用户吃「藏剑谍影 + 师门往事」这套设定密度高的东西；理由二：番茄用户更偏爽文快节奏，这本精打细磨，不爱给他们冲得快的快餐；理由三：晋江用户对宿命式羁绊接受度高，但篇幅节奏适合做长线权谋，起点承载更自然。
-**【黄金三章】ok** —— 第 1 章钩子够硬（谢迟夜里携剑去青石巷，被疤脸青衫人拦路试探）；第 2 章《师门旧事》补设定偏平；第 3 章《剑痕》转悬念有意思，但最弱的是第 2 章（节奏偏慢，信息密度低）。
-**【人物记忆点】ok** —— 「出不了，但够用」是人物记忆点，手里缠了十七圈的布条是视觉锚点；缺的是反差和一个更直接的短期目标。
-**【连载留存】weak** —— 大纲只铺到第一卷，里程碑埋得不够直出；建议把第 3 卷「井底」相关的爆点提前埋到前两卷，每 3-5 章一个小钩落地。
+**【题材定位】8/10 · strong** —— 雪岭问剑题材讨巧：藏剑谍影的开场钩子（剑为何拔不出来）一上来就立住了，这是起点热榜常见的爆款配方。
+**【目标读者】6/10 · ok** —— 起点（仙侠 / 武侠成长线）。理由一：起点用户吃「藏剑谍影 + 师门往事」这套设定密度高的东西；理由二：番茄用户更偏爽文快节奏，这本精打细磨，快餐节奏接不住；理由三：晋江用户对宿命式羁绊接受度高，但篇幅节奏适合做长线权谋，起点承载更自然。
+**【黄金三章】6/10 · ok** —— 第 1 章钩子够硬（谢迟夜里携剑去青石巷，被疤脸青衫人拦路试探）；第 2 章《师门旧事》补设定偏平；第 3 章《剑痕》转悬念有意思，但最弱的是第 2 章（节奏偏慢，信息密度低）。
+**【人物记忆点】5/10 · ok** —— 「出不了，但够用」是人物记忆点，手里缠了十七圈的布条是视觉锚点；缺的是反差和一个更直接的短期目标。
+**【连载留存】4/10 · weak** —— 大纲只铺到第一卷，里程碑埋得不够直出；建议把第 3 卷「井底」相关的爆点提前埋到前两卷，每 3-5 章一个小钩落地。
 
 **三条最该做的事：**
 1. 第 2 章加一个「当下」钩子——别让读者等师门旧事讲完再往前冒，穿插一件现在正在发生的奇怪事。
@@ -254,9 +254,9 @@ const BOOKCHECK = `**总判词**：钩子立住了，人物立住一半，开书
 3. 里程碑密度：前三章落地一个明确承诺（比如「师傅留下的口信要找到」），后面每两三章回收一次。`;
 const PAYOFF = { score: 4, type: '反转', note: '剑鞘秘密第一次被明示，悬念与情绪都立住了', suggestion: '保持这个节奏，第12章揭示前不放水' };
 const PROPAGATION = [
-  { chapter: 2, affected: true, reason: '师傅训话会被这段改写重新定义', advice: '同步改第2章的训话那一段' },
-  { chapter: 3, affected: false, reason: '藏经阁事件和这段无关', advice: '不用改' },
-  { chapter: 4, affected: true, reason: '剑痕的物理描写和剑鞘直接相关', advice: '对齐第4章剑鞘的破损程度' },
+  { chapter: 2, affected: true, reason: '师傅训话会被这段改写重新定义', evidence: '「师傅说过，剑不会自己开鞘，要等主人开口」', advice: '同步改第2章的训话那一段' },
+  { chapter: 3, affected: false, reason: '藏经阁事件和这段无关', evidence: '', advice: '不用改' },
+  { chapter: 4, affected: true, reason: '剑痕的物理描写和剑鞘直接相关', evidence: '「剑鞘上有一道裂痕，深处有旧血色」', advice: '对齐第4章剑鞘的破损程度' },
 ];
 const DIAGNOSE = [
   {
@@ -318,7 +318,8 @@ function quoted(text) {
 
 function decide(text) {
   const has = (s) => text.includes(s);
-  if (has('开书底子')) return 'bookcheck';
+  // 开书诊断升级为五个维度 0-10 打分：更贴市场，自评用
+  if (has('这部小说的开书底子')) return 'bookcheck';
   if (has('"stateChanges"') || has('记忆档案')) return 'memory';
   if (has('自相矛盾') || has('"level"')) return 'consistency';
   if (has('"appearance"')) return 'characters';
@@ -359,7 +360,7 @@ function buildReply(text, model = '') {
     case 'style':
       return { kind, content: STYLE };
     case 'diagnose':
-      return { kind, content: JSON.stringify(DIAGNOSE) };
+      return { kind, content: /他看了一眼酒壶，没有动。/.test(text) ? '[]' : JSON.stringify(DIAGNOSE) };
     case 'rewrite':
       return { kind, content: /第十七圈/.test(text) ? '师傅亲手系的最后一圈。' : '他看了一眼酒壶，没有动。' };
     case 'propagation':

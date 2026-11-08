@@ -26,6 +26,7 @@ import { countWords, createWordCounter } from '../web/lib/util.js';
 import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, readerChapterRead, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { buildPropagationReport } from '../web/lib/propagate.js';
 import { buildPayoffProfile, payoffTier } from '../web/lib/payoff.js';
+import { buildLocalBookCheck } from '../web/lib/bookcheck.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1895,6 +1896,37 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('爽点曲线：连档 label 可读', r.flatRuns[0].label.includes('第 2–3 章'));
   check('爽点曲线：空作品 / 全没打档', buildPayoffProfile({ title: 'X', chapters: [] }).scored === 0 && buildPayoffProfile({ title: 'Y', chapters: [mk(1, null), mk(2, null)] }).flatRuns.length === 0);
   check('爽点曲线：tier 分档', payoffTier(5) === 'hi' && payoffTier(4) === 'hi' && payoffTier(3) === 'mid' && payoffTier(2) === 'mid' && payoffTier(1) === 'lo' && payoffTier(0) === 'lo' && payoffTier(null) === 'none');
+}
+
+// ---------------------------------------------------------------
+// 开书诊断 · 本地投稿资格清单：确定性，不需要模型
+{
+  const mkChapter = (no, content) => ({ id: `c${no}`, no, title: `第${no}章`, content, stage: 'done' });
+  const full = {
+    title: '雪岭问剑', author: '阿迟', genre: '仙侠',
+    meta: { logline: '一个没带剑的剑客如何成剑。' },
+    outline: { volumes: [{ name: '一', desc: '穿书', chapters: [] }] },
+    bible: { characters: [{ name: '谢迟' }], world: [] },
+    chapters: [
+      mkChapter(1, '青衫人挡在路中央。“你往前走一步，我就让你倒一步。”谢迟抬起眼，石子在月光下落进水里。'.repeat(60)),
+      mkChapter(2, '第二章正文内容。'.repeat(150)),
+      mkChapter(3, '第三章正文内容。'.repeat(150)),
+    ],
+  };
+  const r = buildLocalBookCheck(full);
+  check('投稿清单：完整作品全部通过', r.passed === r.total, `${r.passed}/${r.total}`);
+  check('投稿清单：buildLocalBookCheck 不会调模型就返回', r.checks.length === 10);
+  check('投稿清单：统计通过数', r.checks.filter((c) => c.ok).length === r.passed);
+
+  const empty = buildLocalBookCheck({ title: '', author: '', genre: '', meta: {}, outline: { volumes: [] }, bible: { characters: [], world: [] }, chapters: [] });
+  check('投稿清单：空作品一条都不过', empty.passed === 0, `${empty.passed}`);
+  check('投稿清单：空作品能给出问题数', empty.checks.filter((c) => !c.ok).length === 10);
+
+  const noFirstWords = buildLocalBookCheck({ ...full, chapters: [mkChapter(1, '短。'), mkChapter(2, '第二章。'.repeat(200)), mkChapter(3, '第三章。'.repeat(200))] });
+  check('投稿清单：首章太短不通过', noFirstWords.checks.find((c) => c.id === 'firstWords').ok === false);
+
+  const noDialog = buildLocalBookCheck({ ...full, chapters: [mkChapter(1, '没有引号的一章。'.repeat(120)), mkChapter(2, '第二章。'.repeat(100)), mkChapter(3, '第三章。'.repeat(100))] });
+  check('投稿清单：首章没对话不通过', noDialog.checks.find((c) => c.id === 'dialog').ok === false);
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);

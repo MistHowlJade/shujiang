@@ -1853,11 +1853,33 @@ kbd {
 .ci-payoff.mid { color: var(--text-3); background: var(--surface-3); }
 .ci-payoff.lo { color: var(--text-4); border: 1px dashed var(--border); }
 
+/* 投稿资格清单 */
+.bookcheck-list {
+  display: flex; flex-direction: column; gap: 4px; max-height: 38vh; overflow: auto;
+  border: 1px solid var(--border); border-radius: var(--r-md); padding: 6px; background: var(--surface-2);
+}
+.bookcheck-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 5px 9px;
+  border-radius: var(--r-sm); font-size: 11.5px; line-height: 1.55;
+}
+.bookcheck-row.ok { background: transparent; }
+.bookcheck-row.bad { background: var(--danger-bg); }
+.bookcheck-icon { flex: none; width: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.bookcheck-row.ok .bookcheck-icon { color: var(--success); }
+.bookcheck-row.bad .bookcheck-icon { color: var(--danger); }
+.bookcheck-label { flex: none; min-width: 140px; color: var(--text-1); }
+.bookcheck-hint { flex: 1; min-width: 0; color: var(--text-4); font-size: 10.5px; overflow-wrap: anywhere; }
+.bookcheck-summary {
+  display: flex; justify-content: flex-end; padding: 6px 10px 2px; font-size: 11.5px; font-weight: 600; color: var(--text-2);
+}
+.bookcheck-ai { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 8px; }
+.bookcheck-ai-title { font-size: 11px; font-weight: 600; color: var(--text-3); margin-bottom: 5px; }
+
 /* 影响范围 AI 判断结果 */
 .prop-ai { margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 8px; }
 .prop-ai-head { font-size: 11px; font-weight: 600; color: var(--text-3); margin-bottom: 6px; }
 .prop-ai-row {
-  display: flex; align-items: baseline; gap: 8px; padding: 6px 10px;
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 6px 10px;
   border: 1px solid var(--border); border-radius: var(--r-sm); margin-bottom: 5px; font-size: 11.5px; line-height: 1.6;
 }
 .prop-ai-row.bad { background: var(--danger-bg); border-color: transparent; }
@@ -1866,6 +1888,7 @@ kbd {
 .prop-ai-row.bad .prop-ai-flag { color: var(--danger); }
 .prop-ai-row.ok .prop-ai-flag { color: var(--text-4); }
 .prop-ai-reason { color: var(--text-2); overflow-wrap: anywhere; }
+.prop-ai-evidence { flex-basis: 100%; color: var(--warning); font-size: 10.5px; overflow-wrap: anywhere; padding-left: 46px; }
 .prop-ai-advice { color: var(--text-4); overflow-wrap: anywhere; }
 /* 跨章节传播分析 */
 .prop-list { max-height: 56vh; overflow: auto; margin: 0 -4px; padding: 2px 4px; }
