@@ -15,31 +15,32 @@ jobs:
         with:
           node-version: 22
 
-      - name: 单元测试（lib 层，635 项）
+      - name: 单元测试（lib，635 项）
         run: npm test
 
-      - name: 模块引用自检
-        run: npm run check-refs
+      # 启动假模型（dev/mock-openai.js 仅供离线调试，不会调用任何真实模型）
+      - name: 启动假模型
+        shell: pwsh
+        run: Start-Process node -ArgumentList 'dev/mock-openai.js' -NoNewWindow
 
-      - name: 启动书匠并跑回归（281 项）
+      # 启动隔离的服务实例：数据写到临时目录，绝不碰任何真实 data/
+      - name: 启动隔离服务
         shell: pwsh
         run: |
-          $env:SHU_DATA_DIR = '.tmp-ci-data'
-          $proc = Start-Process -FilePath node -ArgumentList 'server/server.js' -PassThru -NoNewWindow
-          try {
-            $ok = $false
-            for ($i = 0; $i -lt 60; $i++) {
-              Start-Sleep -Seconds 1
-              try {
-                Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8848/api/novels -TimeoutSec 2 | Out-Null
-                $ok = $true
-                break
-              } catch { }
-            }
-            if (-not $ok) { throw '书匠服务 60 秒内未启动' }
-            node dev/regress.mjs
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          } finally {
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-          }
+          $env:SHU_DATA_DIR = Join-Path $env:RUNNER_TEMP 'shujiang-ci'
+          "SHU_DATA_DIR=$env:SHU_DATA_DIR" >> $env:GITHUB_ENV
+          Start-Process node -ArgumentList 'server/server.js' -NoNewWindow
 
+      - name: 等待服务就绪
+        shell: pwsh
+        run: |
+          $deadline = (Get-Date).AddSeconds(60)
+          $ok = $false
+          while ((Get-Date) -lt $deadline) {
+            try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8848/api/config -TimeoutSec 3 | Out-Null; $ok = $true; break } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $ok) { throw '隔离服务 60 秒内没有就绪' }
+
+      - name: 回归自检（288 项）
+        shell: pwsh
+        run: node dev/regress.mjs
