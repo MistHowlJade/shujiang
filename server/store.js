@@ -38,7 +38,8 @@ const CONFIG_DEFAULT = {
   maxTokens: 8192,
   // 分角色模型（留空则用上面的默认模型）
   roleModels: { write: '', summary: '', review: '' },
-  ui: { theme: 'dark' },
+  // 主题：dark（默认）/ light / soft（柔光玻璃，实验）；glassLevel 只对 soft 生效
+  ui: { theme: 'dark', glassLevel: 'mid' },
 };
 
 export function ensureDirs() {

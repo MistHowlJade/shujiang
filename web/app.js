@@ -563,18 +563,68 @@ function syncDocumentTitle() {
 $$('#topnav .tab').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
 $('#brandHome').addEventListener('click', () => setView('shelf'));
 
+const UI_THEMES = ['dark', 'light', 'soft'];
+const GLASS_LEVELS = ['clear', 'mid', 'mist'];
+function normalizeUiTheme(v) { return UI_THEMES.includes(v) ? v : 'dark'; }
+function normalizeGlassLevel(v) { return GLASS_LEVELS.includes(v) ? v : 'mid'; }
+
+function renderAppearance() {
+  const theme = normalizeUiTheme(document.body.dataset.theme);
+  const level = normalizeGlassLevel(document.body.dataset.glass);
+  $$('#uiThemeSeg button').forEach((b) => {
+    const on = b.dataset.uiTheme === theme;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  $$('#glassLevelSeg button').forEach((b) => {
+    const on = b.dataset.glassLevel === level;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  const row = $('#glassLevelRow');
+  if (row) row.style.opacity = theme === 'soft' ? '' : '.55';
+  const hint = $('#glassLevelHint');
+  if (hint) {
+    hint.textContent = theme === 'soft'
+      ? '玻璃浓度只影响观感：清透更透、柔雾更奶白。正文始终是近实色稿纸，不会被背景干扰。'
+      : '玻璃浓度只在「柔光玻璃」主题下生效；低配机器或远程桌面建议用「浅色」。';
+  }
+}
+
+function setUiTheme(next, persist = true) {
+  const theme = normalizeUiTheme(next);
+  document.body.dataset.theme = theme;
+  renderThemeIcon();
+  renderAppearance();
+  if (S.config) S.config.ui = { ...(S.config.ui || {}), theme };
+  if (persist) api.send('/api/config', { ui: { theme } }).catch(() => {});
+}
+
+function setGlassLevel(next, persist = true) {
+  const level = normalizeGlassLevel(next);
+  document.body.dataset.glass = level;
+  renderAppearance();
+  if (S.config) S.config.ui = { ...(S.config.ui || {}), glassLevel: level };
+  if (persist) api.send('/api/config', { ui: { glassLevel: level } }).catch(() => {});
+}
+
 function renderThemeIcon() {
-  const dark = document.body.dataset.theme === 'dark';
-  $('#themeBtn').innerHTML = ico(dark ? 'sun' : 'moon');
-  $('#themeBtn').title = dark ? '切换到浅色主题' : '切换到深色主题';
-  $('#themeBtn').setAttribute('aria-label', dark ? '切换到浅色主题' : '切换到深色主题');
+  const theme = normalizeUiTheme(document.body.dataset.theme);
+  const meta = theme === 'dark'
+    ? { icon: 'sun', next: '浅色主题' }
+    : theme === 'light'
+      ? { icon: 'glass', next: '柔光玻璃（实验）' }
+      : { icon: 'moon', next: '深色主题' };
+  $('#themeBtn').innerHTML = ico(meta.icon);
+  $('#themeBtn').title = `切换到${meta.next}`;
+  $('#themeBtn').setAttribute('aria-label', `切换到${meta.next}`);
 }
 $('#themeBtn').addEventListener('click', () => {
-  const next = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
-  document.body.dataset.theme = next;
-  renderThemeIcon();
-  api.send('/api/config', { ui: { theme: next } }).catch(() => {});
+  const i = UI_THEMES.indexOf(normalizeUiTheme(document.body.dataset.theme));
+  setUiTheme(UI_THEMES[(i + 1) % UI_THEMES.length]);
 });
+$$('#uiThemeSeg button').forEach((b) => b.addEventListener('click', () => setUiTheme(b.dataset.uiTheme)));
+$$('#glassLevelSeg button').forEach((b) => b.addEventListener('click', () => setGlassLevel(b.dataset.glassLevel)));
 
 /* ============================================================
  * 4. 书架
@@ -1477,8 +1527,7 @@ let chatHistory = [];
 let chatStreaming = false;
 
 function chatTabOpen() {
-  const q = document.querySelector('#assistTabs [data-tab="chat"]');
-  if (q && !q.classList.contains('on')) q.click();
+  showAssistTab('chat');
 }
 
 function renderChatLog() {
@@ -4315,6 +4364,45 @@ document.addEventListener('mousedown', (e) => { if (popEl && !popEl.contains(e.t
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePop(); });
 window.addEventListener('resize', closePop);
 window.addEventListener('blur', closePop);
+
+/* --- 正文顶栏「更多」：把不常用的编辑动作收进一个菜单 --- */
+const editorMoreMenu = $('#editorMoreMenu');
+function closeEditorMore() {
+  if (!editorMoreMenu || editorMoreMenu.hidden) return;
+  editorMoreMenu.hidden = true;
+  $('#editorMoreBtn')?.setAttribute('aria-expanded', 'false');
+}
+function toggleEditorMore(force) {
+  const btn = $('#editorMoreBtn');
+  if (!btn || !editorMoreMenu) return;
+  const open = force === undefined ? editorMoreMenu.hidden : !!force;
+  if (!open) { closeEditorMore(); return; }
+  editorMoreMenu.hidden = false;
+  btn.setAttribute('aria-expanded', 'true');
+  const r = btn.getBoundingClientRect();
+  const left = Math.max(8, Math.min(r.right - editorMoreMenu.offsetWidth, window.innerWidth - editorMoreMenu.offsetWidth - 10));
+  const top = Math.max(8, Math.min(r.bottom + 6, window.innerHeight - editorMoreMenu.offsetHeight - 10));
+  editorMoreMenu.style.left = `${left}px`;
+  editorMoreMenu.style.top = `${top}px`;
+}
+$('#editorMoreBtn')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleEditorMore();
+});
+editorMoreMenu?.addEventListener('click', (e) => {
+  if (e.target.closest('button.popmenu-item')) closeEditorMore();
+});
+document.addEventListener('mousedown', (e) => {
+  if (!editorMoreMenu || editorMoreMenu.hidden) return;
+  if (editorMoreMenu.contains(e.target)) return;
+  if ($('#editorMoreBtn')?.contains(e.target)) return;
+  closeEditorMore();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && editorMoreMenu && !editorMoreMenu.hidden) closeEditorMore();
+});
+window.addEventListener('resize', closeEditorMore);
+window.addEventListener('blur', closeEditorMore);
 
 /* ============================================================
  * 5. 工作台
@@ -7433,7 +7521,7 @@ function revealOutput({ toActions = false } = {}) {
   }
   const pane = $('.assist-pane[data-pane="write"]');
   if (!pane || !pane.classList.contains('on')) return;
-  const body = $('.assist-body');
+  const body = $('.dock-body');
   let el = $('#outBox');
   if (!body || !el) return;
   if (toActions && $('#outActions') && !$('#outActions').hidden) el = $('#outActions');
@@ -8618,6 +8706,27 @@ function openBatchMemory() {
   });
 }
 
+/* 「更多 AI 操作」：默认收起，按 Esc 或再点一次收起 */
+function setQuickRow(open) {
+  const row = $('#quickRow');
+  const btn = $('#quickToggle');
+  if (!row || !btn) return;
+  row.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+}
+$('#quickToggle')?.addEventListener('click', () => {
+  const row = $('#quickRow');
+  if (row) setQuickRow(row.hidden);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const row = $('#quickRow');
+  if (!row || row.hidden) return;
+  if ($('#modalMask')?.hidden === false || $('#cmdkMask')?.hidden === false) return;
+  e.preventDefault();
+  setQuickRow(false);
+});
+
 $$('[data-quick]').forEach((btn) => btn.addEventListener('click', async () => {
   const kind = btn.dataset.quick;
   if (kind === 'batchMemory') return openBatchMemory();
@@ -8737,18 +8846,33 @@ assistTabButtons.forEach((b, _, buttons) => b.addEventListener('keydown', (e) =>
   buttons[idx].focus();
   showAssistTab(buttons[idx].dataset.tab);
 }));
+/* 资料 / 场景 / 对话已经折进「写作」页：旧调用名继续有效，
+ * 只是先切回写作页，再把对应的折叠块展开。 */
+const ASSIST_TAB_ALIASES = { context: 'write', scenes: 'write', chat: 'write' };
+function openDockFold(id) {
+  const fold = document.getElementById(id);
+  if (!fold) return;
+  fold.open = true;
+  fold.scrollIntoView({ block: 'nearest' });
+}
 function showAssistTab(name) {
+  const target = ASSIST_TAB_ALIASES[name] || name;
   $$('#assistTabs button').forEach((x) => {
-    const on = x.dataset.tab === name;
+    const on = x.dataset.tab === target;
     x.classList.toggle('on', on);
     x.setAttribute('aria-selected', String(on));
     // 标准 tablist 语义：只有当前页签在 Tab 顺序里
     x.setAttribute('tabindex', on ? '0' : '-1');
   });
-  $$('.assist-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === name));
-  if (name === 'scenes') renderCorkboard();
-  if (name === 'check') renderRevisionCard();
-  if (name === 'annotations') renderAnnotationSidebar();
+  $$('.assist-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === target));
+  if (name === 'scenes') { openDockFold('foldScenes'); renderCorkboard(); }
+  if (name === 'context') openDockFold('foldContext');
+  if (name === 'chat') {
+    openDockFold('foldChat');
+    $('#chatInput')?.focus({ preventScroll: true });
+  }
+  if (target === 'check') renderRevisionCard();
+  if (target === 'annotations') renderAnnotationSidebar();
 }
 
 /* ------------------------------------------------------------
@@ -9660,6 +9784,43 @@ $('#compileScenesBtn').addEventListener('click', async () => {
  * 9. 设定库
  * ============================================================ */
 let bibleTab = 'outline';
+/* 15 个平铺页签收成 3 组：设定 / 结构 / 创作。
+ * 组只是一个显示筛选，bibleTab 与 data-bible 的值保持原样，旧入口不受影响。 */
+const BIBLE_GROUPS = {
+  setting: ['outline', 'characters', 'world', 'timeline', 'timelineViz', 'glossary'],
+  structure: ['beats', 'arcs', 'payoff', 'relations', 'threads', 'reveal'],
+  create: ['inspirations', 'genlog', 'style'],
+};
+let bibleGroup = 'setting';
+function bibleGroupOf(tab) {
+  for (const [group, tabs] of Object.entries(BIBLE_GROUPS)) {
+    if (tabs.includes(tab)) return group;
+  }
+  return '';
+}
+function syncBibleGroup(tab = bibleTab) {
+  bibleGroup = bibleGroupOf(tab) || bibleGroup;
+  $$('#bibleGroups button').forEach((x) => {
+    const on = x.dataset.bibleGroup === bibleGroup;
+    x.classList.toggle('on', on);
+    x.setAttribute('aria-selected', String(on));
+  });
+  const allowed = new Set(BIBLE_GROUPS[bibleGroup] || []);
+  $$('#bibleTabs button').forEach((x) => {
+    x.hidden = !allowed.has(x.dataset.bible);
+  });
+}
+$$('#bibleGroups button').forEach((b) => b.addEventListener('click', () => {
+  const group = b.dataset.bibleGroup;
+  if (!BIBLE_GROUPS[group]) return;
+  bibleGroup = group;
+  const first = BIBLE_GROUPS[group][0];
+  const target = $(`#bibleTabs button[data-bible="${first}"]`);
+  if (target) target.click();
+  else syncBibleGroup();
+}));
+syncBibleGroup();
+
 $$('#bibleTabs button').forEach((b) => b.addEventListener('click', () => {
   bibleTab = b.dataset.bible;
   $$('#bibleTabs button').forEach((x) => x.classList.toggle('on', x === b));
@@ -10612,6 +10773,7 @@ function timelineSearchText(t) {
 }
 
 function renderBible() {
+  syncBibleGroup(bibleTab);
   const host = $('#bibleBody');
   if (!S.novel) { host.innerHTML = '<p class="dim">先打开一部作品。</p>'; return; }
   const n = S.novel;
@@ -13636,6 +13798,7 @@ $$('#paperFont button').forEach((b) => b.addEventListener('click', () => setPape
 $('#paperReset').addEventListener('click', paperReset);
 
 function renderSettings() {
+  renderAppearance();
   const cfg = S.config;
   if (!cfg) return;
   const host = $('#providerList');
@@ -16187,7 +16350,10 @@ sprintRender();
 async function boot() {
   try {
     S.config = await api.get('/api/config');
-    document.body.dataset.theme = S.config.ui?.theme || 'dark';
+    const ui = S.config.ui || {};
+    document.body.dataset.theme = normalizeUiTheme(ui.theme || 'dark');
+    document.body.dataset.glass = normalizeGlassLevel(ui.glassLevel);
+    renderAppearance();
   } catch (err) {
     toast(`无法读取配置：${err.message}`, 'err');
   }

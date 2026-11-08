@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow" />
 <meta name="theme-color" content="#15110d" />
 <title>书匠 · AI 长篇小说创作台</title>
-<link rel="stylesheet" href="/style.css?v=1.0.20" />
+<link rel="stylesheet" href="/style.css?v=1.0.21" />
 <style id="designv1011">
   /* 书匠 · v1.0.11「东方典籍」视觉重写 —— 暖墨：衬线 + 赭金 + 朱砂 */
   @font-face { font-family: '思源宋体 VF'; src: local('Noto Serif SC'), local('Noto Serif SC VF'), local('NotoSerifSC-VF'); font-display: swap; }
@@ -178,6 +178,365 @@
   .rail, .dock-main { backdrop-filter: blur(38px) saturate(2.3) !important; -webkit-backdrop-filter: blur(38px) saturate(2.3) !important; }
 </style>
 
+<style id="designv1021soft">
+  /* ==========================================================================
+     v1.0.21 · 柔光玻璃（实验主题）
+     浅色暖白底 + 应用内极光 + 半透明玻璃面板。
+     只在 body[data-theme="soft"] 下生效；默认主题仍是 dark。
+     窗口本身不透明，不碰 Electron 的 acrylic / Mica。
+     ========================================================================== */
+  body[data-theme="soft"] {
+    --bg:              #f3f1ea;
+    --surface-1:       #faf8f3;
+    --surface-2:       #fffefb;
+    --surface-3:       #f1eee7;
+    --surface-4:       #e8e4db;
+    --border:          rgba(70, 62, 48, .11);
+    --border-2:        rgba(70, 62, 48, .19);
+    --text-1:          #211e18;
+    --text-2:          #4d483e;
+    --text-3:          #746d5f;
+    --text-4:          #9a9385;
+    --accent:          #2f6b63;
+    --accent-hover:    #245a53;
+    --accent-down:     #1d4a44;
+    --accent-btn-1:    #3a756e;
+    --accent-btn-2:    #245a53;
+    --accent-btn-1-h:  #448179;
+    --accent-btn-2-h:  #2b655d;
+    --accent-bg:       rgba(47, 107, 99, .10);
+    --accent-line:     rgba(47, 107, 99, .26);
+    --success:         #2c7a52;
+    --success-bg:      rgba(44, 122, 82, .10);
+    --warning:         #8a5a12;
+    --warning-bg:      rgba(138, 90, 18, .10);
+    --danger:          #b3402f;
+    --danger-bg:       rgba(179, 64, 47, .10);
+    --danger-solid:    #97301f;
+    --paper:           rgba(255, 255, 255, .88);
+    --font-display:    '思源宋体 VF', 'Noto Serif SC', Georgia, 'Songti SC', SimSun, serif;
+    --font-write:      '思源宋体 VF', 'Noto Serif SC', Georgia, 'Songti SC', SimSun, serif;
+    --glow:            radial-gradient(900px 640px at 3% -8%, rgba(255, 198, 160, .62), transparent 62%),
+                       radial-gradient(760px 620px at 102% -2%, rgba(170, 224, 206, .60), transparent 64%),
+                       radial-gradient(720px 560px at 10% 42%, rgba(255, 210, 180, .52), transparent 64%),
+                       radial-gradient(700px 540px at 96% 44%, rgba(172, 220, 240, .46), transparent 64%),
+                       radial-gradient(900px 680px at 78% 112%, rgba(182, 204, 244, .66), transparent 66%),
+                       linear-gradient(118deg, transparent 32%, rgba(255, 255, 255, .62) 46%, transparent 60%),
+                       linear-gradient(165deg, #fdfcf9 0%, #f8f6f1 46%, #f2f2ee 100%);
+    --bg-blur:         rgba(250, 248, 243, .82);
+    --sh-1: 0 1px 2px rgba(88, 78, 58, .08);
+    --sh-2: 0 4px 14px rgba(88, 78, 58, .10), inset 0 1px 0 rgba(255, 255, 255, .55);
+    --sh-3: 0 24px 64px rgba(88, 78, 58, .16), inset 0 1px 0 rgba(255, 255, 255, .6);
+    --mask: rgba(60, 54, 42, .28);
+    /* 玻璃浓度（设置页可调）：mid 更接近草图的乳白半透明 */
+    --glass-a: rgba(255, 255, 255, .70);
+    --glass-b: rgba(255, 255, 255, .40);
+    --glass-c: rgba(255, 255, 255, .54);
+    --glass-glowop: .90;
+    --glass-blur: 30px;
+  }
+  body[data-theme="soft"][data-glass="clear"] {
+    --glass-a: rgba(255, 255, 255, .48);
+    --glass-b: rgba(255, 255, 255, .28);
+    --glass-c: rgba(255, 255, 255, .40);
+    --glass-glowop: .68;
+    --glass-blur: 20px;
+  }
+  body[data-theme="soft"][data-glass="mist"] {
+    --glass-a: rgba(255, 255, 255, .86);
+    --glass-b: rgba(255, 255, 255, .66);
+    --glass-c: rgba(255, 255, 255, .78);
+    --glass-glowop: 1;
+    --glass-blur: 36px;
+  }
+  body[data-theme="soft"] { background: var(--bg); }
+  body[data-theme="soft"] .app {
+    background:
+      /* 两处偏移的柔光高亮（不糊中心） */
+      radial-gradient(38% 34% at 22% 10%, rgba(255, 255, 255, var(--glass-glowop)), transparent 62%),
+      radial-gradient(30% 30% at 84% 60%, rgba(255, 255, 255, var(--glass-glowop)), transparent 62%),
+      /* 斜向扫光 */
+      linear-gradient(118deg, transparent 30%, rgba(255, 255, 255, .55) 46%, transparent 62%),
+      /* 四角晨光（微彩） */
+      radial-gradient(58% 66% at 0% -12%, rgba(255, 196, 158, .62), transparent 64%),
+      radial-gradient(48% 56% at 102% -4%, rgba(170, 224, 208, .60), transparent 64%),
+      radial-gradient(46% 46% at 58% -18%, rgba(255, 232, 196, .55), transparent 66%),
+      radial-gradient(64% 62% at 76% 116%, rgba(184, 206, 244, .66), transparent 68%),
+      linear-gradient(165deg, #fdfcfa 0%, #f8f6f1 46%, #f2f2ee 100%);
+  }
+  /* 纸纹颗粒轻一点，浅色底上不显脏 */
+  body[data-theme="soft"]::before { opacity: .025; }
+
+  /* ---- 悬浮圆角面板：缝隙透出晨光（对标草图的舞台布局） ---- */
+  body[data-theme="soft"] .app {
+    padding: 12px; gap: 12px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), inset 0 -1px 0 rgba(120, 100, 70, .06);
+  }
+  body[data-theme="soft"] .rail {
+    border: 0; border-radius: 16px;
+    box-shadow: var(--sh-2), inset 0 1px 0 rgba(255, 255, 255, .8), inset 0 0 0 1px rgba(255, 255, 255, .34);
+  }
+  body[data-theme="soft"] .shell { gap: 12px; }
+  body[data-theme="soft"] .topbar {
+    border: 0; border-radius: 14px;
+    box-shadow: var(--sh-2), inset 0 1px 0 rgba(255, 255, 255, .85);
+  }
+  /* 顶栏仍保留一根细光线 */
+  body[data-theme="soft"] .topbar::after { bottom: 0; border-radius: inherit; }
+  body[data-theme="soft"] .studio { gap: 12px; }
+  body[data-theme="soft"] .pane-chapters {
+    border: 0; border-radius: 16px;
+    box-shadow: var(--sh-2), 0 34px 90px rgba(140, 110, 80, .10), inset 0 1px 0 rgba(255, 255, 255, .7), inset 0 0 0 1px rgba(255, 255, 255, .3);
+  }
+  body[data-theme="soft"] .pane-editor {
+    border-radius: 16px; overflow: hidden;
+    box-shadow: var(--sh-2), inset 0 0 0 1px rgba(255, 255, 255, .5);
+  }
+  body[data-theme="soft"] .pane-assist {
+    border: 0; border-radius: 16px;
+    box-shadow: var(--sh-2), 0 34px 90px rgba(140, 110, 80, .10), inset 0 1px 0 rgba(255, 255, 255, .7), inset 0 0 0 1px rgba(255, 255, 255, .3);
+  }
+  /* 稿纸区边缘留光不填充：只留柔外阴影，不叠 rim */
+  body[data-theme="soft"] .pane-editor {
+    box-shadow: var(--sh-2), 0 34px 90px rgba(140, 110, 80, .10), inset 0 0 0 1px rgba(255, 255, 255, .5);
+  }
+  /* 彩色 rim 渐变描边（暖→薄荷→蓝），只做 1px 外缘，不盖内容 */
+  body[data-theme="soft"] .rail,
+  body[data-theme="soft"] .pane-chapters,
+  body[data-theme="soft"] .pane-assist {
+    position: relative;
+  }
+  body[data-theme="soft"] .rail::after,
+  body[data-theme="soft"] .pane-chapters::after,
+  body[data-theme="soft"] .pane-assist::after {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px;
+    pointer-events: none; z-index: 0;
+    background: linear-gradient(135deg, rgba(255, 208, 178, .60), rgba(255, 255, 255, .15) 30%, rgba(176, 224, 214, .50) 58%, rgba(184, 208, 246, .46) 82%, rgba(255, 255, 255, .65));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude;
+    opacity: .5;
+  }
+  body[data-theme="soft"] .modal::after,
+  body[data-theme="soft"] .cmdk::after {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px;
+    pointer-events: none;
+    background: linear-gradient(135deg, rgba(255, 208, 178, .60), rgba(255, 255, 255, .15) 30%, rgba(176, 224, 214, .50) 58%, rgba(184, 208, 246, .46) 82%, rgba(255, 255, 255, .65));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude;
+    opacity: .55;
+  }
+
+  /* ---- 外壳玻璃 ---- */
+  body[data-theme="soft"] .rail,
+  body[data-theme="soft"] .topbar,
+  body[data-theme="soft"] .pane-chapters,
+  body[data-theme="soft"] .dock-main {
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+    backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  }
+  body[data-theme="soft"] .rail {
+    background: linear-gradient(180deg, var(--glass-a), var(--glass-b) 62%, var(--glass-c)) !important;
+    border-right: 1px solid rgba(70, 62, 48, .10);
+    box-shadow: inset -1px 0 0 rgba(255, 255, 255, .72), 0 18px 50px rgba(88, 78, 58, .07);
+  }
+  body[data-theme="soft"] .rail-logo {
+    background: linear-gradient(160deg, #4d8880 0%, #357069 55%, #245a53 100%);
+    color: #fff;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .42), 0 2px 8px rgba(47, 107, 99, .26), 0 0 0 1px rgba(47, 107, 99, .32);
+  }
+  body[data-theme="soft"] .rail .tab.on {
+    box-shadow: inset 0 0 0 1px var(--accent-line), inset 3px 0 0 var(--accent) !important;
+  }
+  body[data-theme="soft"] .topbar {
+    background: linear-gradient(180deg, var(--glass-a), var(--glass-b)) !important;
+    border-bottom: 1px solid rgba(70, 62, 48, .09);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 12px 34px rgba(88, 78, 58, .06);
+  }
+  body[data-theme="soft"] .topbar::after {
+    background: linear-gradient(90deg, transparent 3%, rgba(255, 196, 158, .48) 18%, rgba(255, 236, 214, .72) 34%, rgba(176, 224, 214, .52) 56%, rgba(184, 208, 246, .46) 78%, transparent 97%);
+    opacity: .62;
+  }
+  body[data-theme="soft"] .pane-chapters {
+    background: linear-gradient(170deg, var(--glass-a), var(--glass-b) 58%, var(--glass-c)) !important;
+    border-right: 1px solid rgba(70, 62, 48, .09);
+    box-shadow: inset -1px 0 0 rgba(255, 255, 255, .66);
+  }
+  body[data-theme="soft"] .dock-main {
+    background: linear-gradient(155deg, var(--glass-a), var(--glass-b) 55%, var(--glass-c)) !important;
+    border-left: 1px solid rgba(70, 62, 48, .09);
+    box-shadow: inset 1px 0 0 rgba(255, 255, 255, .7), 0 18px 50px rgba(88, 78, 58, .06);
+  }
+  /* ---- 章节栏右上角「+」：soft 下墨青实心 ---- */
+  body[data-theme="soft"] #addChapterBtn {
+    background: linear-gradient(180deg, var(--accent-btn-1), var(--accent-btn-2));
+    border-color: transparent;
+    color: #fff;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .30), inset 0 -1px 0 rgba(0, 0, 0, .10),
+                0 4px 10px rgba(47, 107, 99, .24), 0 0 0 1px rgba(47, 107, 99, .18);
+  }
+  body[data-theme="soft"] #addChapterBtn:hover {
+    background: linear-gradient(180deg, var(--accent-btn-1-h), var(--accent-btn-2-h));
+    border-color: transparent; color: #fff;
+  }
+
+  /* 稿纸：近实色，保证长时间读不累 */
+  body[data-theme="soft"] .pane-editor {
+    background: linear-gradient(180deg, rgba(255, 255, 255, .92), rgba(255, 253, 249, .88));
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, .92), rgba(255, 253, 249, .88));
+    -webkit-backdrop-filter: blur(18px) saturate(120%);
+    backdrop-filter: blur(18px) saturate(120%);
+    box-shadow: inset 1px 0 0 rgba(255, 255, 255, .7), inset -1px 0 0 rgba(255, 255, 255, .7);
+  }
+
+  /* ---- 卡片与浮层 ---- */
+  body[data-theme="soft"] .dock-main .assist-pane > .card {
+    background: rgba(255, 255, 255, .68);
+    border: 1px solid rgba(70, 62, 48, .10);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 3px 12px rgba(88, 78, 58, .05);
+  }
+  body[data-theme="soft"] .dock-main .card-head {
+    border-bottom-color: rgba(70, 62, 48, .10);
+    border-top-color: rgba(47, 107, 99, .24);
+    background: rgba(255, 255, 255, .22);
+  }
+  body[data-theme="soft"] .dock-main kbd {
+    background: rgba(70, 62, 48, .06);
+    border-color: rgba(70, 62, 48, .13);
+  }
+  body[data-theme="soft"] .shelf-spotlight {
+    background: linear-gradient(135deg, rgba(255, 208, 178, .38), rgba(255, 255, 255, .52) 55%, rgba(184, 224, 214, .30));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 18px 48px rgba(88, 78, 58, .12);
+  }
+  body[data-theme="soft"] .modal-mask::before {
+    background: radial-gradient(900px 600px at 50% -12%, rgba(255, 255, 255, .45), transparent 62%) !important;
+  }
+  body[data-theme="soft"] .modal {
+    position: relative;
+    background: linear-gradient(166deg, rgba(255, 255, 255, .95), rgba(255, 252, 246, .90)) !important;
+    -webkit-backdrop-filter: blur(34px) saturate(150%) !important;
+    backdrop-filter: blur(34px) saturate(150%) !important;
+    border: 1px solid rgba(255, 255, 255, .92) !important;
+    box-shadow: 0 30px 86px rgba(88, 78, 58, .24), 0 0 0 1px rgba(70, 62, 48, .08), inset 0 1px 0 rgba(255, 255, 255, .98) !important;
+  }
+  body[data-theme="soft"] .cmdk {
+    position: relative;
+    background: linear-gradient(170deg, rgba(255, 255, 255, .95), rgba(255, 252, 246, .90)) !important;
+    -webkit-backdrop-filter: blur(34px) saturate(150%) !important;
+    backdrop-filter: blur(34px) saturate(150%) !important;
+    border: 1px solid rgba(255, 255, 255, .92) !important;
+    box-shadow: 0 30px 86px rgba(88, 78, 58, .24), 0 0 0 1px rgba(70, 62, 48, .08), inset 0 1px 0 rgba(255, 255, 255, .98) !important;
+  }
+
+  /* ---- 按钮与选区：把暖棕换成墨青 ---- */
+  body[data-theme="soft"] .btn-primary {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .30), inset 0 -1px 0 rgba(0, 0, 0, .10),
+                0 5px 16px rgba(47, 107, 99, .24), 0 0 0 1px rgba(47, 107, 99, .18);
+  }
+  body[data-theme="soft"] .ai-cta.btn-primary {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .30), 0 4px 16px rgba(47, 107, 99, .28), 0 0 0 1px rgba(47, 107, 99, .20) !important;
+  }
+  body[data-theme="soft"] .ai-cta.ai-cta-cont {
+    background: linear-gradient(180deg, rgba(47, 107, 99, .14), rgba(47, 107, 99, .07));
+    border-color: var(--accent-line) !important;
+    color: var(--accent-hover) !important;
+  }
+  body[data-theme="soft"] .ai-cta.ai-cta-cont:hover {
+    background: linear-gradient(180deg, rgba(47, 107, 99, .21), rgba(47, 107, 99, .10));
+  }
+  body[data-theme="soft"] ::selection {
+    background: rgba(47, 107, 99, .22) !important;
+    color: var(--text-1);
+    text-shadow: none;
+  }
+  body[data-theme="soft"] .editor::selection { background: rgba(47, 107, 99, .24) !important; }
+
+  /* ---- 设置页的主题选择：长标签换行，不挤爆 ---- */
+  #uiThemeSeg { flex-wrap: wrap; }
+  #uiThemeSeg button { flex: 1 1 auto; }
+  #glassLevelRow { transition: opacity 160ms var(--ease); }
+</style>
+
+<style id="layoutv1021">
+  /* ==========================================================================
+     v1.0.21 · 布局重排第一刀
+     章节归章节栏、正文归正文、AI 归右栏；同一种功能不再散在三处。
+     ========================================================================== */
+
+  /* ---- 右栏：资料 / 场景 / 对话折进「写作」，只留 3 个页签 ---- */
+  .dock-fold {
+    flex: 0 0 auto;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .dock-fold > summary {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 11px; cursor: pointer; list-style: none; user-select: none;
+    color: var(--text-2); font-size: 13px; font-weight: 600;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+  .dock-fold > summary::-webkit-details-marker { display: none; }
+  .dock-fold > summary::after {
+    content: ''; flex: 0 0 auto; width: 7px; height: 7px; margin-left: 6px;
+    border-right: 1.5px solid var(--text-4); border-bottom: 1.5px solid var(--text-4);
+    transform: rotate(-45deg); transition: transform 160ms var(--ease);
+  }
+  .dock-fold[open] > summary::after { transform: rotate(45deg); }
+  .dock-fold > summary:hover { background: var(--surface-3); color: var(--text-1); }
+  .dock-fold-hint {
+    margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; color: var(--text-4); font-size: 11.5px; font-weight: 400;
+  }
+  .dock-fold-hint:empty { display: none; }
+  .dock-fold-body { padding: 0 11px 11px; border-top: 1px solid var(--border); }
+  .dock-fold-body > .tip { margin-top: 10px; }
+  .dock-fold-body > .btn-row:first-child { margin-top: 10px; }
+  .dock-fold .chat-panel { height: auto; }
+  .dock-fold .chat-log { flex: none; min-height: 148px; max-height: 300px; }
+  .dock-fold .corkboard { min-height: 120px; padding: 8px 0 0; overflow: visible; }
+
+  /* 更多 AI 操作 */
+  #quickRow { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+  .quick-toggle { margin-top: 8px; color: var(--text-3); }
+  .quick-toggle .ico { width: 13px; height: 13px; }
+  .quick-toggle[aria-expanded="true"] { color: var(--accent-hover); background: var(--accent-bg); }
+
+  /* ---- 正文顶栏：视角 / 撤销 / 排版 / 计时 / 体检收进「更多」 ---- */
+  .editor-more { min-width: 208px; padding: 5px; }
+  .editor-more-row { display: flex; align-items: center; gap: 8px; padding: 6px 7px; }
+  .editor-more-label { flex: 0 0 auto; color: var(--text-3); font-size: 12px; }
+  .editor-more-row .pov-select { flex: 1; max-width: none; }
+  .editor-more-item { display: flex; align-items: center; gap: 8px; }
+  .editor-more-item .ico { width: 14px; height: 14px; color: var(--text-3); }
+  .editor-more-item:hover:not(:disabled) .ico { color: var(--text-1); }
+
+  /* ---- 设定库：15 个平铺页签 → 3 组 ---- */
+  .bible-head { align-items: flex-start; flex-wrap: wrap; row-gap: 10px; }
+  .bible-tabbar { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+  #bibleGroups { padding: 3px; }
+  #bibleGroups button { height: 24px; padding: 0 11px; font-size: 12px; border-radius: 5px; }
+  #bibleGroups button.on { font-weight: 600; }
+  #bibleTabs { flex-wrap: wrap; row-gap: 4px; }
+  #bibleTabs button[hidden] { display: none; }
+
+  /* 柔光玻璃下的折叠块：和卡片同一层玻璃 */
+  body[data-theme="soft"] .dock-fold {
+    background: rgba(255, 255, 255, .58);
+    border-color: rgba(70, 62, 48, .10);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .82), 0 2px 8px rgba(88, 78, 58, .04);
+  }
+  body[data-theme="soft"] .dock-fold > summary:hover { background: rgba(255, 255, 255, .72); }
+  body[data-theme="soft"] .dock-fold-body { border-top-color: rgba(70, 62, 48, .09); }
+  body[data-theme="soft"] .dock-fold .chat-log { background: rgba(255, 255, 255, .50); }
+
+  @media (max-width: 920px) {
+    .bible-tabbar { width: 100%; }
+    #bibleTabs { max-width: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    #bibleTabs::-webkit-scrollbar { display: none; }
+  }
+</style>
+
 
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2315110d'/><path d='M9 8h9a4 4 0 0 1 4 4v12H13a4 4 0 0 0-4 4z' fill='none' stroke='%23d9a25f' stroke-width='2' stroke-linejoin='round'/></svg>" />
 </head>
@@ -233,6 +592,7 @@
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></symbol>
   <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
   <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></symbol>
+  <symbol id="i-glass" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M3.5 11c3.4 0 4.8-2.4 8.5-2.4s5.1 2.4 8.5 2.4"/><path d="M7.5 15.5h4"/></symbol>
   <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h13"/><path d="m13 6 6 6-6 6"/></symbol>
   <symbol id="i-book-open" viewBox="0 0 24 24"><path d="M12 6.5C10.5 5 8.3 4.3 4.5 4.3v13.4c3.8 0 6 .7 7.5 2.3 1.5-1.6 3.7-2.3 7.5-2.3V4.3c-3.8 0-6 .7-7.5 2.2Z"/><path d="M12 6.5V20"/></symbol>
@@ -405,17 +765,25 @@
                   <option value="revising">修改中</option>
                   <option value="done">定稿</option>
                 </select>
-                <select id="chPov" class="pov-select" aria-label="本章视角" title="本章POV视角：限定一位人物，要求 AI 只写他能看到/知道的——限制多视角穿帮" disabled></select>
                 <button type="button" class="chip chip-target" id="chWords" title="设置本章目标字数" aria-label="设置本章目标字数" aria-haspopup="dialog" aria-expanded="false" disabled>0 字</button>
-                <button class="icon-btn sm" id="undoBtn" title="撤销（Ctrl+Z）" aria-label="撤销" disabled><svg class="ico"><use href="#i-undo" /></svg></button>
-                <button class="icon-btn sm" id="redoBtn" title="重做（Ctrl+Shift+Z）" aria-label="重做" disabled><svg class="ico"><use href="#i-redo" /></svg></button>
-                <button class="icon-btn sm" id="formatBtn" title="一键排版：段落首行缩进两格" aria-label="一键排版"><svg class="ico"><use href="#i-indent" /></svg></button>
                 <button type="button" class="btn btn-primary btn-sm ai-cta" id="aiGenBtn" title="按章纲生成本章初稿——满意后点「追加到正文」，AI 不会覆盖已有正文" aria-label="AI 生成本章"><svg class="ico"><use href="#i-spark" /></svg><span>生成本章</span></button>
                 <button type="button" class="btn btn-sm ai-cta ai-cta-cont" id="aiContBtn" title="从当前正文接着写；没有正文时等同于「生成本章」" aria-label="AI 续写"><svg class="ico"><use href="#i-pen" /></svg><span>续写</span></button>
                 <button class="icon-btn sm" id="previewBtn" title="阅读模式（可翻章、调字号）" aria-label="阅读模式"><svg class="ico"><use href="#i-eye" /></svg></button>
-                <button class="icon-btn sm" id="sprintBtn" title="写作冲刺计时器（Ctrl+Alt+S）" aria-label="写作冲刺计时器" aria-pressed="false"><svg class="ico"><use href="#i-clock" /></svg></button>
-                <button class="icon-btn sm" id="healthBtn" title="全书体检：本地统计，不花 token" aria-label="全书体检"><svg class="ico"><use href="#i-pulse" /></svg></button>
+                <button class="icon-btn sm" id="editorMoreBtn" title="更多：视角、撤销、排版、写作计时、全书体检" aria-label="更多编辑操作" aria-haspopup="menu" aria-expanded="false"><svg class="ico"><use href="#i-more" /></svg></button>
               </div>
+            </div>
+            <div class="popmenu editor-more" id="editorMoreMenu" role="menu" hidden>
+              <div class="editor-more-row">
+                <span class="editor-more-label">视角</span>
+                <select id="chPov" class="pov-select" aria-label="本章视角" title="本章POV视角：限定一位人物，要求 AI 只写他能看到/知道的——限制多视角穿帮" disabled></select>
+              </div>
+              <div class="popmenu-sep"></div>
+              <button class="popmenu-item editor-more-item" id="undoBtn" type="button" role="menuitem" title="撤销（Ctrl+Z）" disabled><svg class="ico"><use href="#i-undo" /></svg>撤销</button>
+              <button class="popmenu-item editor-more-item" id="redoBtn" type="button" role="menuitem" title="重做（Ctrl+Shift+Z）" disabled><svg class="ico"><use href="#i-redo" /></svg>重做</button>
+              <button class="popmenu-item editor-more-item" id="formatBtn" type="button" role="menuitem" title="一键排版：段落首行缩进两格"><svg class="ico"><use href="#i-indent" /></svg>一键排版</button>
+              <div class="popmenu-sep"></div>
+              <button class="popmenu-item editor-more-item" id="sprintBtn" type="button" role="menuitem" title="写作冲刺计时器（Ctrl+Alt+S）" aria-pressed="false"><svg class="ico"><use href="#i-clock" /></svg>写作冲刺计时器</button>
+              <button class="popmenu-item editor-more-item" id="healthBtn" type="button" role="menuitem" title="全书体检：本地统计，不花 token"><svg class="ico"><use href="#i-pulse" /></svg>全书体检</button>
             </div>
             <div class="editor-wrap">
               <textarea id="chContent" class="editor" spellcheck="false" aria-label="正文" placeholder="在这里写正文，或者用右侧助手生成……&#10;&#10;选中任意段落后会弹出快捷菜单：润色 / 扩写 / 精简 / 改写。"></textarea>
@@ -461,10 +829,7 @@
             <div class="segmented" id="assistTabs" role="tablist" aria-label="助手页签">
               <button data-tab="write" id="tabAssistWrite" class="on" role="tab" aria-selected="true" aria-controls="paneAssistWrite" tabindex="0">写作</button>
               <button data-tab="check" id="tabAssistCheck" role="tab" aria-selected="false" aria-controls="paneAssistCheck" tabindex="-1">检查</button>
-              <button data-tab="context" id="tabAssistContext" role="tab" aria-selected="false" aria-controls="paneAssistContext" tabindex="-1">资料</button>
-              <button data-tab="scenes" id="tabAssistScenes" role="tab" aria-selected="false" aria-controls="paneAssistScenes" tabindex="-1">场景</button>
               <button data-tab="annotations" id="tabAssistAnnotations" role="tab" aria-selected="false" aria-controls="paneAssistAnnotations" tabindex="-1">批注</button>
-              <button data-tab="chat" id="tabAssistChat" role="tab" aria-selected="false" aria-controls="paneAssistChat" tabindex="-1">对话</button>
             </div>
             <div class="dock-body">
               <!-- 写作 -->
@@ -507,7 +872,8 @@
                   <div class="btn-row">
                     <button class="btn btn-block" id="cmpBtn" title="同一段上下文跑两个模型，并排看，选一个采用"><svg class="ico"><use href="#i-columns" /></svg>对比模型</button>
                   </div>
-                  <div class="btn-row wrap" hidden aria-hidden="true">
+                  <button type="button" class="btn btn-sm btn-text quick-toggle" id="quickToggle" aria-expanded="false" aria-controls="quickRow"><svg class="ico"><use href="#i-more" /></svg>更多 AI 操作</button>
+                  <div class="btn-row wrap" id="quickRow" hidden>
                     <button class="btn btn-sm btn-text" data-quick="memory" title="把本章的人物 / 伏笔 / 状态存下来，生成后续章节时会自动带上"><svg class="ico"><use href="#i-refresh" /></svg>存章节记忆</button>
                     <button class="btn btn-sm btn-text" data-quick="batchMemory" title="把还没存记忆的章节批量补上；会逐章调用模型">批量补记忆</button>
                     <button class="btn btn-sm btn-text" data-quick="propagate" title="分析这段文字里命中的设定痕迹，在其他章节哪里出现过——改动这里会牵动哪些章">影响范围</button>
@@ -520,7 +886,7 @@
                     <button class="btn btn-sm btn-text" data-quick="summarize" title="给本章写一句概要">生成概要</button>
                     <button class="btn btn-sm btn-text" data-quick="titles">起名</button>
                   </div>
-                  <p class="assist-hint">按 <kbd>Esc</kbd> 收起 AI 手动按钮，<kbd>Ctrl</kbd><kbd>K</kbd> 搜「生成」「续写」「体检」——所有 AI 功能都在命令面板里，不占屏幕。</p>
+                  <p class="assist-hint">按 <kbd>Esc</kbd> 收起「更多 AI 操作」；<kbd>Ctrl</kbd><kbd>K</kbd> 搜「生成」「续写」「体检」——所有 AI 功能都在命令面板里，不占屏幕。</p>
                 </div>
                 <div class="payoff-card" id="payoffCard" hidden></div>
 
@@ -540,6 +906,69 @@
                   <button class="btn btn-sm btn-text" id="clearOut">清空</button>
                 </div>
                 <div class="diag-list" id="diagList" hidden></div>
+
+                <!-- 资料：折进写作页，不再单占页签 -->
+                <details class="dock-fold" id="foldContext">
+                  <summary>
+                    <span>本次上下文</span>
+                    <span class="dock-fold-hint">自动挑选的设定与前情</span>
+                  </summary>
+                  <div class="dock-fold-body">
+                    <div class="tip">
+                      <svg class="ico"><use href="#i-info" /></svg>
+                      <span>每次生成都会按相关度自动挑选设定与前情喂给模型。这里能看到实际发出去的内容，也可以改完再发。</span>
+                    </div>
+                    <div class="btn-row">
+                      <button class="btn" id="previewCtxBtn"><svg class="ico"><use href="#i-eye" /></svg>查看本次上下文</button>
+                      <button class="btn btn-primary" id="sendEditedBtn" hidden><svg class="ico"><use href="#i-spark" /></svg>按此内容生成</button>
+                    </div>
+                    <div class="ctx-stats" id="ctxStats"></div>
+                    <pre class="ctx-preview" id="ctxPreview"></pre>
+                  </div>
+                </details>
+
+                <!-- 场景卡片：折进写作页 -->
+                <details class="dock-fold" id="foldScenes">
+                  <summary>
+                    <span>场景卡片</span>
+                    <span class="dock-fold-hint" id="scenesInfo"></span>
+                  </summary>
+                  <div class="dock-fold-body">
+                    <div class="btn-row wrap">
+                      <button class="btn btn-sm btn-primary" id="scenesFromOutline">从章纲生成场景</button>
+                      <button class="btn btn-sm" id="addSceneBtn"><svg class="ico"><use href="#i-plus" /></svg>新增场景</button>
+                      <button class="btn btn-sm btn-primary" id="compileScenesBtn"><svg class="ico"><use href="#i-download" /></svg>编译成正文</button>
+                      <button class="btn btn-sm" id="scenesExportBtn" title="导出场景卡片"><svg class="ico"><use href="#i-download" /></svg>导出</button>
+                      <button class="btn btn-sm" id="scenesImportBtn" title="导入场景卡片"><svg class="ico"><use href="#i-upload" /></svg>导入</button>
+                      <button class="btn btn-sm btn-text" id="scenesClear">清空</button>
+                    </div>
+                    <p class="dim small">拖拽卡片调整顺序；双击卡片编辑；点「编译成正文」将场景梗概按顺序拼接为章节内容（保留原有正文前的内容）。</p>
+                    <div class="corkboard" id="corkboard"></div>
+                  </div>
+                </details>
+
+                <!-- 对话：折进写作页；命令面板或快捷键会直接展开 -->
+                <details class="dock-fold" id="foldChat">
+                  <summary>
+                    <span>AI 对话</span>
+                    <span class="dock-fold-hint">边聊边改，不直接动正文</span>
+                  </summary>
+                  <div class="dock-fold-body">
+                    <div class="chat-panel">
+                      <div class="chat-log" id="chatLog" aria-live="polite"></div>
+                      <div class="chat-suggest" id="chatSuggest">
+                        <button class="chip" data-chat-suggest="续写当前章，给个悬念钩子">续写当前章</button>
+                        <button class="chip" data-chat-suggest="把这章改成更冷的风格">换个风格</button>
+                        <button class="chip" data-chat-suggest="总结这章，存进记忆">总结本章</button>
+                        <button class="chip" data-chat-suggest="帮我写下一章的初稿">生成下一章</button>
+                      </div>
+                      <div class="chat-input-row">
+                        <textarea id="chatInput" class="input chat-input" rows="2" maxlength="500" placeholder="说说你想干什么…"></textarea>
+                        <button class="btn btn-primary" id="chatSend" aria-label="发送"><svg class="ico"><use href="#i-spark" /></svg></button>
+                      </div>
+                    </div>
+                  </div>
+                </details>
               </div>
 
               <!-- 检查 -->
@@ -578,40 +1007,6 @@
                 <div class="output output-plain" id="checkBox"></div>
               </div>
 
-              <!-- 资料 -->
-              <div class="assist-pane" data-pane="context" role="tabpanel" id="paneAssistContext" aria-labelledby="tabAssistContext">
-                <div class="tip">
-                  <svg class="ico"><use href="#i-info" /></svg>
-                  <span>每次生成都会按相关度自动挑选设定与前情喂给模型。这里能看到实际发出去的内容，也可以改完再发。</span>
-                </div>
-                <div class="btn-row">
-                  <button class="btn" id="previewCtxBtn"><svg class="ico"><use href="#i-eye" /></svg>查看本次上下文</button>
-                  <button class="btn btn-primary" id="sendEditedBtn" hidden><svg class="ico"><use href="#i-spark" /></svg>按此内容生成</button>
-                </div>
-                <div class="ctx-stats" id="ctxStats"></div>
-                <pre class="ctx-preview" id="ctxPreview"></pre>
-              </div>
-
-              <!-- 场景拆解 / 幕布 -->
-              <div class="assist-pane" data-pane="scenes" role="tabpanel" id="paneAssistScenes" aria-labelledby="tabAssistScenes">
-                <div class="card">
-                  <div class="card-head">
-                    <h3>场景卡片</h3>
-                    <span class="dim small" id="scenesInfo"></span>
-                  </div>
-                  <div class="btn-row wrap">
-                    <button class="btn btn-sm btn-primary" id="scenesFromOutline">从章纲生成场景</button>
-                    <button class="btn btn-sm" id="addSceneBtn"><svg class="ico"><use href="#i-plus" /></svg>新增场景</button>
-                    <button class="btn btn-sm btn-primary" id="compileScenesBtn"><svg class="ico"><use href="#i-download" /></svg>编译成正文</button>
-                    <button class="btn btn-sm" id="scenesExportBtn" title="导出场景卡片"><svg class="ico"><use href="#i-download" /></svg>导出</button>
-                    <button class="btn btn-sm" id="scenesImportBtn" title="导入场景卡片"><svg class="ico"><use href="#i-upload" /></svg>导入</button>
-                    <button class="btn btn-sm btn-text" id="scenesClear">清空</button>
-                  </div>
-                  <p class="dim small">拖拽卡片调整顺序；双击卡片编辑；点「编译成正文」将场景梗概按顺序拼接为章节内容（保留原有正文前的内容）。</p>
-                </div>
-                <div class="corkboard" id="corkboard"></div>
-              </div>
-
               <!-- 批注/高亮 -->
               <div class="assist-pane" data-pane="annotations" role="tabpanel" id="paneAssistAnnotations" aria-labelledby="tabAssistAnnotations">
                 <div class="card">
@@ -623,22 +1018,6 @@
                   <div id="annotationSidebar"></div>
                 </div>
               </div>
-              <!-- 对话 -->
-              <div class="assist-pane" data-pane="chat" role="tabpanel" id="paneAssistChat" aria-labelledby="tabAssistChat">
-                <div class="chat-panel">
-                  <div class="chat-log" id="chatLog" aria-live="polite"></div>
-                  <div class="chat-suggest" id="chatSuggest">
-                    <button class="chip" data-chat-suggest="续写当前章，给个悬念钩子">续写当前章</button>
-                    <button class="chip" data-chat-suggest="把这章改成更冷的风格">换个风格</button>
-                    <button class="chip" data-chat-suggest="总结这章，存进记忆">总结本章</button>
-                    <button class="chip" data-chat-suggest="帮我写下一章的初稿">生成下一章</button>
-                  </div>
-                  <div class="chat-input-row">
-                    <textarea id="chatInput" class="input chat-input" rows="2" maxlength="500" placeholder="说说你想干什么…"></textarea>
-                    <button class="btn btn-primary" id="chatSend" aria-label="发送"><svg class="ico"><use href="#i-spark" /></svg></button>
-                  </div>
-                </div>
-              </div>
             </div>
           </aside>
         </div>
@@ -646,25 +1025,32 @@
 
       <!-- ==================== 设定库 ==================== -->
       <section class="view" id="view-bible">
-        <div class="page-head page-head-tabs">
-          <div class="segmented lg" id="bibleTabs">
-            <button data-bible="outline" class="on">大纲</button>
-            <button data-bible="characters">人物</button>
-            <button data-bible="world">世界观</button>
-            <button data-bible="timeline">时间线</button>
-            <button data-bible="timelineViz">时间轴</button>
-            <button data-bible="beats">结构/节拍</button>
-            <button data-bible="arcs">人物弧光</button>
-            <button data-bible="payoff">爽点</button>
-            <button data-bible="relations">关系图谱</button>
-            <button data-bible="threads">线索</button>
-            <button data-bible="inspirations">灵感</button>
-            <button data-bible="glossary">术语</button>
-            <button data-bible="genlog">生成记录</button>
-            <button data-bible="reveal">揭示计划</button>
-            <button data-bible="style">文风与规则</button>
+        <div class="page-head page-head-tabs bible-head">
+          <div class="bible-tabbar">
+            <div class="segmented" id="bibleGroups" role="tablist" aria-label="设定库分组">
+              <button data-bible-group="setting" class="on">设定</button>
+              <button data-bible-group="structure">结构</button>
+              <button data-bible-group="create">创作</button>
+            </div>
+            <div class="segmented lg" id="bibleTabs" role="tablist" aria-label="设定库页签">
+              <button data-bible="outline" class="on">大纲</button>
+              <button data-bible="characters">人物</button>
+              <button data-bible="world">世界观</button>
+              <button data-bible="timeline">时间线</button>
+              <button data-bible="timelineViz">时间轴</button>
+              <button data-bible="beats">结构/节拍</button>
+              <button data-bible="arcs">人物弧光</button>
+              <button data-bible="payoff">爽点</button>
+              <button data-bible="relations">关系图谱</button>
+              <button data-bible="threads">线索</button>
+              <button data-bible="inspirations">灵感</button>
+              <button data-bible="glossary">术语</button>
+              <button data-bible="genlog">生成记录</button>
+              <button data-bible="reveal">揭示计划</button>
+              <button data-bible="style">文风与规则</button>
+            </div>
           </div>
-          <div class="page-actions" style="margin-top: 8px; justify-content: flex-end;">
+          <div class="page-actions" style="justify-content: flex-end;">
             <button class="btn btn-sm btn-text" id="bibleTrashBtn" title="最近删除的设定条目（保存在本机浏览器）"><svg class="ico"><use href="#i-undo" /></svg>最近删除</button>
             <button class="btn btn-sm btn-text" id="bibleExportBtn" title="导出设定库（JSON / Markdown）"><svg class="ico"><use href="#i-download" /></svg>导出设定</button>
             <button class="btn btn-sm btn-text" id="bibleImportBtn" title="导入设定库（JSON / Markdown）"><svg class="ico"><use href="#i-upload" /></svg>导入设定</button>
@@ -718,6 +1104,33 @@
               <button class="btn btn-primary" id="saveCfgBtn">保存设置</button>
               <span class="dim-text" id="cfgMsg"></span>
             </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>外观</h2>
+              <span class="tag">立即生效</span>
+            </div>
+            <p class="desc">主题只影响界面显示，不改作品内容。柔光玻璃是实验主题：暖白柔光底 + 半透明玻璃面板。默认不启用，选「深色」或「浅色」即可关掉。</p>
+            <div class="paper-opts">
+              <div class="paper-row">
+                <span class="paper-lbl">主题</span>
+                <div class="segmented" id="uiThemeSeg" role="group" aria-label="界面主题">
+                  <button type="button" data-ui-theme="dark">深色</button>
+                  <button type="button" data-ui-theme="light">浅色</button>
+                  <button type="button" data-ui-theme="soft">柔光玻璃（实验）</button>
+                </div>
+              </div>
+              <div class="paper-row" id="glassLevelRow">
+                <span class="paper-lbl">玻璃</span>
+                <div class="segmented" id="glassLevelSeg" role="group" aria-label="柔光玻璃浓度">
+                  <button type="button" data-glass-level="clear">清透</button>
+                  <button type="button" data-glass-level="mid">标准</button>
+                  <button type="button" data-glass-level="mist">柔雾</button>
+                </div>
+              </div>
+            </div>
+            <p class="dim-text" id="glassLevelHint">玻璃浓度只在「柔光玻璃」主题下生效；低配机器或远程桌面建议用「浅色」。</p>
           </div>
 
           <div class="card">
