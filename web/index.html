@@ -55,7 +55,8 @@
   { font-family: var(--font-display); letter-spacing: .03em; }
   body { background: radial-gradient(1300px 460px at 50% -200px, rgba(217,162,95,.13), transparent 65%), var(--bg); }
   .rail { background: linear-gradient(180deg, #1d1812 0%, #181410 100%) !important; }
-  .rail .tab.on { color: var(--accent-hover) !important; box-shadow: inset 0 0 0 1px rgba(217,162,95,.4) !important; isolation: isolate; }
+  .rail .tab.on { color: var(--accent-hover) !important; box-shadow: inset 0 0 0 1px rgba(217,162,95,.4), inset 3px 0 0 var(--accent) !important; }
+  .dock-main .card-head { border-bottom: 1px solid rgba(255,220,180,.08); border-top: 1px solid rgba(217,162,95,.38); border-radius: 10px; padding: 8px 10px 8px 12px; margin: 2px -2px 0 -2px; width: calc(100% + 4px); background: rgba(255,220,180,.02); }
   .rail .tab.on .ico { color: var(--accent-hover) !important; }
   .rail-nav { gap: 6px !important; }
   .topbar { background: linear-gradient(180deg, #1d1812 0%, #1b1612 100%) !important; }

@@ -581,13 +581,13 @@ async function loadNovels() {
 }
 
 const COVERS = [
-  'linear-gradient(90deg,#5b8cff,#8a6bff)',
-  'linear-gradient(90deg,#00c2a8,#4ad9a0)',
-  'linear-gradient(90deg,#ff8a65,#ff5e7e)',
-  'linear-gradient(90deg,#f0b429,#f97316)',
-  'linear-gradient(90deg,#8a6bff,#d16bff)',
-  'linear-gradient(90deg,#2f9ee0,#5b8cff)',
-  'linear-gradient(90deg,#ef6d8a,#f0b429)',
+  'linear-gradient(90deg,#4da6a8,#2f6e72)',   // 玉龙 · 玉青
+  'linear-gradient(90deg,#c84d3c,#8a2a1f)',   // 朱砂 · 朱红
+  'linear-gradient(90deg,#5b8a7a,#345a4d)',   // 青玉 · 玉绿
+  'linear-gradient(90deg,#d9a25f,#9a6b3f)',   // 锦绣 · 赭金
+  'linear-gradient(90deg,#7a4b5c,#4b2535)',   // 紫檀 · 檀紫
+  'linear-gradient(90deg,#c2873d,#7e4e1f)',   // 琥珀 · 琥珀
+  'linear-gradient(90deg,#3a444c,#1f242c)',   // 墨玉 · 墨
 ];
 function coverOf(title) {
   let h = 0;
