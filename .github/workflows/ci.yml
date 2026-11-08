@@ -33,13 +33,22 @@ jobs:
 
       - name: 等待服务就绪
         shell: pwsh
+        # 只用 TCP 探测端口：脚本型 HTTP 客户端（Invoke-WebRequest）在带 HTTP_PROXY 的运行器上会把
+        # 127.0.0.1 也送去代理导致永远不通；TCP 探测不走代理，不受影响
         run: |
-          $deadline = (Get-Date).AddSeconds(60)
+          $deadline = (Get-Date).AddSeconds(90)
           $ok = $false
           while ((Get-Date) -lt $deadline) {
-            try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8848/api/config -TimeoutSec 3 | Out-Null; $ok = $true; break } catch { Start-Sleep -Seconds 1 }
+            try {
+              $tcp = [System.Net.Sockets.TcpClient]::new()
+              $iar = $tcp.BeginConnect('127.0.0.1', 8848, $null, $null)
+              if ($iar.AsyncWaitHandle.WaitOne(1500) -and $tcp.Connected) { $tcp.EndConnect($iar); $ok = $true; $tcp.Close(); break }
+              $tcp.Close()
+            } catch { }
+            Start-Sleep -Seconds 1
           }
-          if (-not $ok) { throw '隔离服务 60 秒内没有就绪' }
+          if (-not $ok) { throw '服务启动 90 秒内 8848 端口没有就绪' }
+          Write-Host '端口 8848 已就绪'
 
       - name: 回归自检（288 项）
         shell: pwsh
