@@ -229,6 +229,8 @@
                 <button class="icon-btn sm" id="undoBtn" title="撤销（Ctrl+Z）" aria-label="撤销" disabled><svg class="ico"><use href="#i-undo" /></svg></button>
                 <button class="icon-btn sm" id="redoBtn" title="重做（Ctrl+Shift+Z）" aria-label="重做" disabled><svg class="ico"><use href="#i-redo" /></svg></button>
                 <button class="icon-btn sm" id="formatBtn" title="一键排版：段落首行缩进两格" aria-label="一键排版"><svg class="ico"><use href="#i-indent" /></svg></button>
+                <button type="button" class="btn btn-primary btn-sm ai-cta" id="aiGenBtn" title="按章纲生成本章初稿——满意后点「追加到正文」，AI 不会覆盖已有正文" aria-label="AI 生成本章"><svg class="ico"><use href="#i-spark" /></svg><span>生成本章</span></button>
+                <button type="button" class="btn btn-sm ai-cta ai-cta-cont" id="aiContBtn" title="从当前正文接着写；没有正文时等同于「生成本章」" aria-label="AI 续写"><svg class="ico"><use href="#i-pen" /></svg><span>续写</span></button>
                 <button class="icon-btn sm" id="previewBtn" title="阅读模式（可翻章、调字号）" aria-label="阅读模式"><svg class="ico"><use href="#i-eye" /></svg></button>
                 <button class="icon-btn sm" id="sprintBtn" title="写作冲刺计时器（Ctrl+Alt+S）" aria-label="写作冲刺计时器" aria-pressed="false"><svg class="ico"><use href="#i-clock" /></svg></button>
                 <button class="icon-btn sm" id="healthBtn" title="全书体检：本地统计，不花 token" aria-label="全书体检"><svg class="ico"><use href="#i-pulse" /></svg></button>
@@ -709,6 +711,53 @@
     <button class="btn btn-primary" id="diffAccept"><svg class="ico"><use href="#i-check" /></svg>接受替换</button>
     <button class="btn" id="diffRetry"><svg class="ico"><use href="#i-refresh" /></svg>再生成一次</button>
     <button class="btn btn-text" id="diffReject">丢弃</button>
+  </div>
+</div>
+
+<!-- 悬浮 AI 助手：常驻右下，帮你随时看本章进度、调用 AI 生成/续写/检查/自检 -->
+<div class="ai-dock" id="aiDock" role="complementary" aria-label="AI 助手" aria-expanded="false">
+  <div class="ai-dock-head">
+    <button class="ai-dock-toggle" id="aiDockToggle" title="展开 / 收起 AI 助手" aria-label="展开或收起 AI 助手"><svg class="ico"><use href="#i-spark" /></svg><span class="ai-dock-label">AI 助手</span><svg class="ico ai-dock-chev" id="aiDockChev"><use href="#i-chev-right" /></svg></button>
+    <button class="icon-btn sm ai-dock-collapse-btn" id="aiDockCollapse" title="收起 AI 助手" aria-label="收起 AI 助手"><svg class="ico"><use href="#i-x" /></svg></button>
+  </div>
+
+  <div class="ai-dock-body" id="aiDockBody">
+    <!-- 本章 -->
+    <div class="ai-dock-section ai-dock-chapter">
+      <div class="ai-dock-row">
+        <div class="ai-dock-chapter-info">
+          <div class="ai-dock-kicker">本章</div>
+          <div class="ai-dock-title" id="aiDockChapterTitle">还没打开作品</div>
+        </div>
+        <div class="ai-dock-counter"><b id="aiDockWords">0</b><span>字</span></div>
+      </div>
+      <div class="ai-dock-progress" title="本章目标完成进度" aria-hidden="true"><i id="aiDockProgressBar" style="width:0%"></i></div>
+        <div class="ai-dock-row meta-row">
+        <span id="aiDockPov">POV：任意人</span>
+        <span id="aiDockStage">草稿</span>
+      </div>
+      <div class="ai-dock-row">
+        <label class="field-label" for="aiDockTargetWords">本章目标字数
+          <input id="aiDockTargetWords" type="number" min="200" step="100" class="input ai-dock-target-input" placeholder="3000" /></label>
+      </div>
+    </div>
+
+    <!-- AI 快速操作 -->
+    <div class="ai-dock-section">
+      <div class="ai-dock-section-title">AI 操作</div>
+      <div class="ai-dock-actions">
+        <button class="btn btn-primary ai-dock-action" id="aiDockGenerate"><svg class="ico"><use href="#i-spark" /></svg>生成本章</button>
+        <button class="btn ai-dock-action" id="aiDockContinue"><svg class="ico"><use href="#i-pen" /></svg>续写</button>
+        <button class="btn ai-dock-action" id="aiDockCheck"><svg class="ico"><use href="#i-pulse" /></svg>自检并修复</button>
+        <button class="btn ai-dock-action" id="aiDockProof"><svg class="ico"><use href="#i-proof" /></svg>文字校对</button>
+      </div>
+    </div>
+
+    <!-- 下一步提示 -->
+    <div class="ai-dock-section ai-dock-hint" id="aiDockHint"><span class="dim small">打开作品后显示本章建议。</span></div>
+
+    <!-- footer -->
+    <div class="ai-dock-footer"><span class="dim small">Esc 收起 · 悬窗可拖动</span></div>
   </div>
 </div>
 

@@ -5580,6 +5580,7 @@ function renderStudio({ list = true } = {}) {
   updateFoot();
   renderChapterOutlineCard();
   renderRevisionCard();
+  renderAiDock();
   renderTopbarActions();
 }
 
@@ -8778,6 +8779,64 @@ function renderRevisionCard() {
     ? ordered.map(revisionItemHtml).join('')
     : '<li class="rev-empty">还没有修订项。选中正文里的句子，再在这里记一条，之后能一键跳回原处。</li>';
 }
+
+/* ---------- 悬浮 AI 助手面板：本章状态 + AI 一键入口 ---------- */
+function aiDockExpanded() {
+  try { return localStorage.getItem('aiDock.expanded') !== '0'; } catch { return true; }
+}
+function setAiDockExpanded(expanded) {
+  const dock = $('#aiDock');
+  if (!dock) return;
+  dock.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  $('#aiDockChev')?.setAttribute('href', expanded ? '#i-chev-right' : '#i-chev-right');
+  try { localStorage.setItem('aiDock.expanded', expanded ? '1' : '0'); } catch { /* 隐私模式关掉 */ }
+}
+function renderAiDock() {
+  const dock = $('#aiDock');
+  if (!dock) return;
+  const ch = currentChapter();
+  const words = ch ? wordsOf(ch) : 0;
+  $('#aiDockWords').textContent = String(words);
+  const measuredTarget = ch ? (targetOf(ch) || 3000) : 3000;
+  const targetInput = $('#aiDockTargetWords');
+  if (document.activeElement !== targetInput) targetInput.value = String(targetOf(ch) || 3000);
+  const bar = $('#aiDockProgressBar');
+  if (bar) bar.style.width = `${ch ? progressOf(ch) : 0}%`;
+  $('#aiDockChapterTitle').textContent = ch ? `第 ${ch.no} 章 · ${ch.title || '未命名'}` : '还没打开作品';
+  $('#aiDockPov').textContent = ch?.pov ? `POV：${ch.pov}` : 'POV：任意人';
+  $('#aiDockStage').textContent = ch ? ({ draft: '草稿', revising: '修改中', done: '定稿' }[stageOf(ch)] || '草稿') : '—';
+  const hint = $('#aiDockHint');
+  if (!ch) { hint.innerHTML = '<span class="dim small">还没打开作品。先去「书架」选一本或新建一部。</span>'; return; }
+  if (($('#chContent')?.value || '').trim()) {
+    const out = S.outTask && S.out?.trim() && PROSE_OUT_TASKS.has(S.outTask) ? S.out.trim() : '';
+    const note = out ? `输出区已有 AI 草稿——满意就点「追加到正文」，不满意就直接让 AI 重新生成。` : '继续写吧。卡住了让 AI 续写一段，接着往下走。';
+    hint.innerHTML = `<span>${esc(note)}</span>`;
+  } else {
+    hint.innerHTML = `<span>正文还没动笔。${ch.outline || ch.outlineId ? '让 AI 按章纲写初稿' : '让 AI 按大纲生成一章'}。</span>`;
+  }
+}
+function bindAiDock() {
+  const dock = $('#aiDock');
+  if (!dock) return;
+  $('#aiDockToggle')?.addEventListener('click', () => setAiDockExpanded(!aiDockExpanded()));
+  $('#aiDockCollapse')?.addEventListener('click', () => setAiDockExpanded(false));
+  $('#aiDockGenerate')?.addEventListener('click', () => $('#genChapterBtn')?.click());
+  $('#aiDockContinue')?.addEventListener('click', () => $('#contBtn')?.click());
+  $('#aiDockCheck')?.addEventListener('click', () => diagnoseOutput());
+  $('#aiDockProof')?.addEventListener('click', () => $('#proofBtn')?.click());
+  $('#aiDockTargetWords')?.addEventListener('change', () => {
+    const ch = currentChapter();
+    if (!ch) return;
+    const v = Number($('#aiDockTargetWords').value);
+    ch.targetWords = Number.isFinite(v) && v >= 0 ? Math.round(v) : 0;
+    renderWordChip();
+    markChapterDirty(ch);
+    renderAiDock();
+    toast(ch.targetWords ? `本章目标 ${fmtWords(ch.targetWords)} 字` : '已清除本章目标', 'ok');
+  });
+  setAiDockExpanded(aiDockExpanded());
+}
+bindAiDock();
 
 function addRevision() {
   const ch = currentChapter();
