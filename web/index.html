@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow" />
 <meta name="theme-color" content="#15110d" />
 <title>书匠 · AI 长篇小说创作台</title>
-<link rel="stylesheet" href="/style.css?v=1.0.15" />
+<link rel="stylesheet" href="/style.css?v=1.0.16" />
 <style id="designv1011">
   /* 书匠 · v1.0.11「东方典籍」视觉重写 —— 暖墨：衬线 + 赭金 + 朱砂 */
   @font-face { font-family: '思源宋体 VF'; src: local('Noto Serif SC'), local('Noto Serif SC VF'), local('NotoSerifSC-VF'); font-display: swap; }
@@ -111,10 +111,10 @@
   .dock-main .assist-hint { border-color: var(--accent-line) !important; color: var(--text-3) !important; font-family: var(--font-ui) !important; }
   .dock-main .card-head { border-bottom: 1px solid rgba(255,220,180,.08); padding-bottom: 8px; }
   .dock-main .card-head h2, .dock-main .card-head h3 { color: var(--text-1); font-weight: 600; }
-  .dock-main .assist-pane { display: contents; }
-  .dock-main .assist-pane:not([data-pane="write"]) { display: none !important; }
+  .dock-main .assist-pane { display: none !important; }
+  .dock-main .assist-pane.on { display: contents !important; }
   .dock-main .assist-pane > .card { display: block; }
-  .assist-pane, .assist-pane.on { display: contents; animation: none; }
+  .assist-pane.on { animation: none; }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(3px); } }
   .ai-cta { display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 8px; white-space: nowrap; height: 30px !important; font-size: 13px !important; font-weight: 700 !important; }
   .ai-cta .ico { width: 14px !important; height: 14px !important; }
@@ -457,6 +457,14 @@
 
           <!-- 助手栏（Dock 主场：主 CTA 卡片 + 更多隐去） -->
           <aside class="pane-assist dock-main" id="assistPane" aria-label="AI 助手">
+            <div class="segmented" id="assistTabs" role="tablist" aria-label="助手页签">
+              <button data-tab="write" id="tabAssistWrite" class="on" role="tab" aria-selected="true" aria-controls="paneAssistWrite" tabindex="0">写作</button>
+              <button data-tab="check" id="tabAssistCheck" role="tab" aria-selected="false" aria-controls="paneAssistCheck" tabindex="-1">检查</button>
+              <button data-tab="context" id="tabAssistContext" role="tab" aria-selected="false" aria-controls="paneAssistContext" tabindex="-1">资料</button>
+              <button data-tab="scenes" id="tabAssistScenes" role="tab" aria-selected="false" aria-controls="paneAssistScenes" tabindex="-1">场景</button>
+              <button data-tab="annotations" id="tabAssistAnnotations" role="tab" aria-selected="false" aria-controls="paneAssistAnnotations" tabindex="-1">批注</button>
+              <button data-tab="chat" id="tabAssistChat" role="tab" aria-selected="false" aria-controls="paneAssistChat" tabindex="-1">对话</button>
+            </div>
             <div class="dock-body">
               <!-- 写作 -->
               <div class="assist-pane on" data-pane="write" role="tabpanel" id="paneAssistWrite" aria-labelledby="tabAssistWrite">
