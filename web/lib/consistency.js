@@ -2,6 +2,7 @@
 // 检查：设定冲突、时间线矛盾、人物行为一致性、口吻/语风
 import { esc, countWords, toast } from './util.js';
 import { buildCharacterAppearances, collectThreads } from './data.js';
+import { buildAuthorDrift } from './style.js';
 
 /* ============================================================
  * 一致性检查种类
@@ -1106,9 +1107,15 @@ export function detectPerson(text) {
  * 主入口：扫描全书一致性
  * ============================================================ */
 export function scanConsistency(novel, scope = 'book', currentChapterId = null) {
-  const chapters = scope === 'book'
-    ? novel?.chapters || []
-    : (novel?.chapters || []).filter(c => c.id === currentChapterId);
+  // scope 支持：'current' 单章 / 'last3' / 'last5' / 'book' 全书
+  const all = novel?.chapters || [];
+  const chapters = scope === 'current'
+    ? all.filter(c => c.id === currentChapterId)
+    : scope === 'last3'
+      ? all.slice(-3)
+      : scope === 'last5'
+        ? all.slice(-5)
+        : all;
 
   if (!chapters.length) return { scope, issues: [], issueKinds: 0 };
 
@@ -1120,10 +1127,13 @@ export function scanConsistency(novel, scope = 'book', currentChapterId = null) 
   const charIssues = checkCharacterConsistency(novel);
   // 人物姓名笔误（全书范围）
   const nameIssues = checkNameTypos(novel);
-  // 口吻/语风（仅全书范围有意义）
-  const voiceIssues = scope === 'book' ? checkVoiceConsistency(novel) : [];
+  // 口吻/语风（多章范围有意义）
+  const multi = scope === 'book' || scope === 'last3' || scope === 'last5';
+  const voiceIssues = multi ? checkVoiceConsistency(novel) : [];
+  // 作者体测：前 3 章为基准，后面每一章漂了多少——慢性风格漂移，要有数字地盯着
+  const driftIssues = multi ? buildAuthorDrift(novel) : [];
 
-  const allIssues = [...settingIssues, ...timelineIssues, ...charIssues, ...nameIssues, ...voiceIssues];
+  const allIssues = [...settingIssues, ...timelineIssues, ...charIssues, ...nameIssues, ...voiceIssues, ...driftIssues];
   allIssues.sort((a, b) => (a.chapterNo || 0) - (b.chapterNo || 0) || (a.start || 0) - (b.start || 0));
 
   const issueKinds = new Set(allIssues.map(i => i.kind)).size;
@@ -1138,7 +1148,7 @@ export function scanConsistency(novel, scope = 'book', currentChapterId = null) 
       timeline: timelineIssues.length,
       character: charIssues.length,
       name: nameIssues.length,
-      voice: voiceIssues.length,
+      voice: voiceIssues.length + driftIssues.length,
     },
   };
 }

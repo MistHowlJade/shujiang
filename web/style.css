@@ -1740,6 +1740,24 @@ kbd {
 .ar-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
 .ar-meta { flex: none; color: var(--text-4); font-size: 11px; }
 
+/* 读者完读率 */
+.pcv-section { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px; }
+.pcv-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.pcv-section-head h3 { font-size: 13px; color: var(--text-1); margin: 0; }
+.cpl-list { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow: auto; margin-top: 8px; }
+.cpl-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 5px 10px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm);
+}
+.cpl-row.good { border-color: rgba(76,195,138,.35); }
+.cpl-row.mid { border-color: rgba(226,179,85,.35); }
+.cpl-row.bad { border-color: rgba(239,68,68,.3); }
+.cpl-field { display: flex; align-items: baseline; gap: 4px; color: var(--text-4); font-size: 11px; white-space: nowrap; margin-left: auto; }
+.cpl-input { width: 56px; padding: 3px 6px; font-size: 11.5px; text-align: right; }
+.pcv-dot.cpl-good { fill: var(--success); }
+.pcv-dot.cpl-mid { fill: var(--warning); }
+.pcv-dot.cpl-bad { fill: var(--danger); }
+
 /* 爽点曲线 */
 .pcv-svg { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); margin: 8px 0 12px; }
 .pcv-grid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }

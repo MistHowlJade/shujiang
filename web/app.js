@@ -7,6 +7,7 @@ import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofPara
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
 import { buildPropagationReport } from './lib/propagate.js';
 import { buildPayoffProfile, payoffTier } from './lib/payoff.js';
+import { buildCompletionProfile, completionTier } from './lib/completion.js';
 import { buildLocalBookCheck } from './lib/bookcheck.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown, CONSISTENCY_KINDS } from './lib/consistency.js';
 import { diffProse, diffHtml, diffSideHtml } from './lib/diff.js';
@@ -8855,9 +8856,11 @@ function renderConsistencyReport(report) {
       S.novel.meta = { ...(S.novel.meta || {}), consistencyIgnored: ign };
       toast('已加入忽略清单', 'ok');
       // 重新渲染
-      const scope = $('#checkScope').value;
-      const currentChapterId = scope === 'current' ? S.chapterId : null;
-      const report = scanConsistency(S.novel, scope === 'bible' ? 'book' : scope, currentChapterId);
+      const scopeValue = $('#checkScope').value;
+      const scopeMap = { current: 'current', last3: 'last3', last5: 'last5', all: 'book', bible: 'book' };
+      const scope = scopeMap[scopeValue] || 'book';
+      const currentChapterId = scopeValue === 'current' ? S.chapterId : null;
+      const report = scanConsistency(S.novel, scope, currentChapterId);
       const filtered = applyConsistencyIgnored(report, ign);
       renderConsistencyReport(filtered);
     };
@@ -8866,9 +8869,11 @@ function renderConsistencyReport(report) {
 
 $('#consistencyBtn').addEventListener('click', async () => {
   if (!S.novel) return toast('先打开作品', 'err');
-  const scope = $('#checkScope').value;
-  const currentChapterId = scope === 'current' ? S.chapterId : null;
-  const report = scanConsistency(S.novel, scope === 'bible' ? 'book' : scope, currentChapterId);
+  const scopeValue = $('#checkScope').value;
+  const scopeMap = { current: 'current', last3: 'last3', last5: 'last5', all: 'book', bible: 'book' };
+  const scope = scopeMap[scopeValue] || 'book';
+  const currentChapterId = scopeValue === 'current' ? S.chapterId : null;
+  const report = scanConsistency(S.novel, scope, currentChapterId);
   // 应用忽略清单
   const ignored = S.novel.meta?.consistencyIgnored || [];
   const filtered = applyConsistencyIgnored(report, ignored);
@@ -12002,8 +12007,78 @@ function renderRevealPlanTab(host, n) {
 }
 
 /** ---- 爽点档案：从第 1 章到第 N 章的爽点曲线 ---- */
+/** 完读率区块：文字说明 + SVG 曲线 + 每章输入框（两条提交路径共用） */
+function completionBlock(cp) {
+  return `
+    <div class="pcv-section cpl-block">
+      <div class="pcv-section-head">
+        <h3>读者完读率</h3>
+        <div class="thread-stats" style="margin:0">
+          ${cp.first ? `<span class="thread-stat">第 1 章 <b>${cp.first.rate}%</b></span>` : ''}
+          ${cp.scored ? `<span class="thread-stat">前 3 章 <b>${cp.first3Avg}%</b></span>` : ''}
+          ${cp.scored ? `<span class="thread-stat"><b>${cp.avg}</b>% 平均</span>` : ''}
+        </div>
+      </div>
+      <p class="dim small">从平台后台抄数字填进去。完读率 = 从上一章点进来的读者中，读到本章末尾的份数。我们只算数，不调模型——读者用脚投票，这里诚实呈现。</p>
+      ${cpSvg(cp)}
+      <div class="cpl-list" id="cplList">
+        ${cp.chapters.map((c) => `
+          <div class="cpl-row${c.rate === null ? '' : ' ' + completionTier(c.rate)}" data-cpl-chapter="${esc(c.id)}">
+            <span class="pcv-no">第 ${c.no} 章</span>
+            <span class="pcv-name" title="${esc(c.title || '未命名')}">${esc(c.title || '未命名')}</span>
+            <label class="cpl-field"><input class="input cpl-input" type="number" min="0" max="100" step="1" inputmode="numeric" placeholder="完读 %" value="${c.rate ?? ''}" data-cpl-input aria-label="第 ${c.no} 章完读率" /> <span>%</span></label>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+/** 完读率 section 的事件绑定（两条 render 路径共用） */
+function bindCompletionSection(host, n) {
+  const commitCompletion = async (input) => {
+    const row = input.closest('[data-cpl-chapter]');
+    const ch = (n.chapters || []).find((c) => c.id === row?.dataset.cplChapter);
+    if (!ch) return;
+    const v = String(input.value).trim();
+    const n2 = v === '' ? null : Math.max(0, Math.min(100, Math.round(Number(v))));
+    if (v !== '' && !Number.isFinite(Number(v))) { toast('完读率是 0-100 的整数', 'err'); input.value = ch.completionRate ?? ''; return; }
+    try {
+      await api.send(`/api/novels/${n.id}/chapters/${ch.id}`, { completionRate: n2 }, 'PUT');
+      ch.completionRate = n2 === null ? undefined : n2;
+    } catch (err) {
+      toast(`保存失败：${err?.message || String(err)}`, 'err');
+      input.value = ch.completionRate ?? '';
+    }
+  };
+  host.querySelectorAll('[data-cpl-input]').forEach((input) => {
+    input.addEventListener('change', () => commitCompletion(input));
+  });
+}
+
+/** ---- 爽点档案：从第 1 章到第 N 章的爽点曲线 ---- */
+/** 完读率曲线 SVG：只连有完读数据的章节，0-100%，绿≥50 / 黄25-49 / 红<25 */
+function cpSvg(cp) {
+  const pts = cp.chapters;
+  const W = 720, H = 170, PL = 30, PR = 8, PT = 12, PB = 24;
+  const xOf = (i) => PL + (pts.length > 1 ? (i / (pts.length - 1)) * (W - PL - PR) : (W - PL - PR) / 2);
+  const yOf = (v) => PT + (1 - v / 100) * (H - PT - PB);
+  const grid = [0, 20, 40, 60, 80, 100].map((g) => `<line class="pcv-grid${g === 0 ? ' zero' : ''}" x1="${PL}" x2="${W - PR}" y1="${yOf(g)}" y2="${yOf(g)}"/><text class="pcv-ylabel" x="4" y="${yOf(g) + 4}">${g}</text>`).join('');
+  const step = Math.max(1, Math.ceil(pts.length / 8));
+  const xlabels = pts.map((c, i) => (i % step === 0 || i === pts.length - 1)
+    ? `<text class="pcv-xlabel" x="${xOf(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${c.no}</text>` : '').join('');
+  const scoredIdx = [];
+  pts.forEach((c, i) => { if (c.rate !== null) scoredIdx.push(i); });
+  const path = scoredIdx.map((i, k) => `${k === 0 ? 'M' : 'L'}${xOf(i).toFixed(1)},${yOf(pts[i].rate).toFixed(1)}`).join(' ');
+  const dots = scoredIdx.map((i) => {
+    const c = pts[i];
+    return `<circle class="pcv-dot cpl-${completionTier(c.rate)}" cx="${xOf(i).toFixed(1)}" cy="${yOf(c.rate).toFixed(1)}" r="4"><title>第 ${c.no} 章 · ${c.rate}%</title></circle>`;
+  }).join('');
+  const avgY = scoredIdx.length ? yOf(Math.min(100, Math.max(0, cp.avg))) : null;
+  return `<svg class="pcv-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="读者完读率曲线，0-100%">${grid}${xlabels}${avgY !== null ? `<line class="pcv-avg" x1="${PL}" x2="${W - PR}" y1="${avgY.toFixed(1)}" y2="${avgY.toFixed(1)}"/>` : ''}${path ? `<path class="pcv-line" d="${path}"/>` : ''}${dots}</svg>`;
+}
+
 function renderPayoffTab(host, n) {
   const p = buildPayoffProfile(n);
+  const cp = buildCompletionProfile(n);
   const scored = p.scoredChapters;
 
   if (!p.scored) {
@@ -12011,7 +12086,9 @@ function renderPayoffTab(host, n) {
       <div class="bible-block">
         <h2>爽点曲线</h2>
         <p class="dim">还没有给任何一章打过爽点档。<br>在工作台「写作」面板的快捷操作里点「爽点档」——AI 给本章打一个 0-5 分，你确认后存入本章档案，这里就会画出整本书的爽点曲线。</p>
+        ${completionBlock(cp)}
       </div>`;
+    bindCompletionSection(host, n);
     return;
   }
 
@@ -12061,11 +12138,13 @@ function renderPayoffTab(host, n) {
             ${c.score === null ? '<span class="pcv-miss">没打档</span>' : `<span class="ci-payoff ${payoffTier(c.score)}">⚡${c.score}</span><span class="pcv-type">${esc(c.type || '')}</span><span class="pcv-note">${esc(c.note || '')}</span>`}
           </button>`).join('')}
       </div>
+      ${completionBlock(cp)}
     </div>`;
 
   host.querySelectorAll('[data-chapter]').forEach((el) => {
     el.addEventListener('click', () => openChapterFromIndex(el.dataset.chapter));
   });
+  bindCompletionSection(host, n);
 }
 
 /** 人物弧光追踪：基于章节记忆自动生成每个角色的情感/状态曲线 */

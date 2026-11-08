@@ -26,7 +26,9 @@ import { countWords, createWordCounter } from '../web/lib/util.js';
 import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, readerChapterRead, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { buildPropagationReport } from '../web/lib/propagate.js';
 import { buildPayoffProfile, payoffTier } from '../web/lib/payoff.js';
+import { buildCompletionProfile, completionTier } from '../web/lib/completion.js';
 import { buildLocalBookCheck } from '../web/lib/bookcheck.js';
+import { buildAuthorDrift, buildAuthorBaseline } from '../web/lib/style.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1927,6 +1929,43 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
 
   const noDialog = buildLocalBookCheck({ ...full, chapters: [mkChapter(1, '没有引号的一章。'.repeat(120)), mkChapter(2, '第二章。'.repeat(100)), mkChapter(3, '第三章。'.repeat(100))] });
   check('投稿清单：首章没对话不通过', noDialog.checks.find((c) => c.id === 'dialog').ok === false);
+}
+
+// ---------------------------------------------------------------
+// 完读率档案：曲线汇总 + 首章 / 前三章均值
+{
+  const mk = (no, rate) => ({ id: `c${no}`, no, title: `第${no}章`, content: '正文。'.repeat(20), stage: 'done', completionRate: rate });
+  const novel = { title: 'T', chapters: [mk(1, 50), mk(2, 40), mk(3, 30), mk(4, null), mk(5, 20)] };
+  const r = buildCompletionProfile(novel);
+  check('完读率：统计有值的章节数', r.scored === 4, String(r.scored));
+  check('完读率：平均值', r.avg === 35, String(r.avg));
+  check('完读率：最大单步跌幅', r.maxDrop === -10, String(r.maxDrop));
+  check('完读率：首章', r.first?.rate === 50);
+  check('完读率：前三章均值', r.first3Avg === 40, String(r.first3Avg));
+  check('完读率：空作品 / 全没填', buildCompletionProfile({ title: 'X', chapters: [] }).scored === 0 && buildCompletionProfile({ title: 'Y', chapters: [mk(1, null), mk(2, null)] }).scored === 0);
+  check('完读率：越界值被夹到 0-100', buildCompletionProfile({ title: 'Z', chapters: [{ id: 'a', no: 1, title: 'a', content: '正文。'.repeat(20), completionRate: 130 }, { id: 'b', no: 2, title: 'b', content: '正文。'.repeat(20), completionRate: -10 }] }).chapters.every((c) => c.rate === 100 || c.rate === 0));
+  check('完读率：tier 分档', completionTier(50) === 'good' && completionTier(25) === 'mid' && completionTier(0) === 'bad' && completionTier(null) === 'none');
+}
+
+// ---------------------------------------------------------------
+// 作者体测：前 3 章当基准，漂移抓出来
+{
+  const sentence = '灯光暗下来的时候，他停住了脚。'.repeat(60);
+  const mk = (no, content) => ({ id: `c${no}`, no, title: `第${no}章`, content: content || sentence.repeat(6), stage: 'done' });
+  // 基准章：短句 + 有对话，够长过 MIN_WORDS
+  const baseline = mk(1, '小X说：「走吧，别等了。」他们走了。巷子里只有脚步声。灯光从窗户里一点点垂下来。风很冷。他把手按在剑柄上，没回答。'.repeat(12));
+  const same1 = mk(2, '小Y说：「行。」他们走了。巷子里只有脚步声。灯光从窗户里一点点垂下来。风很冷。他把手按在剑柄上，没回答。'.repeat(12));
+  const same2 = mk(3, '他说：「行。」他就走了。巷子里只有脚步声。灯光从窗户里一点点垂下来。风很冷。他把手按在剑柄上，没回答。'.repeat(12));
+  // 漂移章：句长暴增 + 几乎无对话 + 人称切换
+  const drifted = mk(4, '他横亘在风中，长长叹息一声，环顾四周没有人影，心头涌上一种难以言喻的复杂情绪，暗沉的天色像是在压他的心口，他终于直起身子，深吸一口气，慢慢开始向前走去，脚步声在空无一人的巷子里回荡不绝，他心想自己这一生都不会再回这里来，连灰尘都要被他带走。'.repeat(16));
+  const novel = { title: 'T', chapters: [baseline, same1, same2, drifted] };
+  const issues = buildAuthorDrift(novel);
+  check('作者体测：漂移章被检出', issues.some((i) => i.fingerprint.includes('styleDrift')), JSON.stringify(issues));
+  check('作者体测：无漂移书零问题', buildAuthorDrift({ title: 'T', chapters: [baseline, same1, same2, same2] }).length === 0);
+  const sc = scanConsistency(novel, 'book', null);
+  check('作者体测：出现在一致性报告 voice 类里', sc.byKind.voice > 0, JSON.stringify(sc.byKind));
+  const bl = buildAuthorBaseline({ title: 'T', chapters: [baseline, same1, same2] });
+  check('作者体测：baseline 给出平均句长', bl && bl.avgSentLen > 0 && bl.person !== 'mixed');
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
