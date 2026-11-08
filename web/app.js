@@ -403,6 +403,7 @@ const S = {
   saveErr: null,
   controller: null,
   batchController: null,   // 批量补记忆：跑的时候不许关弹窗，也不许再起别的 AI 任务
+  preDiag: null,           // 生成后后台预诊的缓存 { out, chapterId, list }：「自检」按钮显示角标，直接展示
   stageFilter: '',         // 章节列表筛选：'' / 'open' / 'draft' / 'revising' / 'done'
   chapterSearch: '',       // 章节列表搜索词：标题 / 章号
   chapterCursor: '',       // 章节搜索的键盘光标：当前高亮结果的章节 id
@@ -7159,6 +7160,12 @@ function renderOutActions() {
   if (!next) return;
   next.hidden = !canApply;
   if (canApply) next.textContent = outNextText();
+  // 自检按钮：有一份有效预诊缓存就亮出条数角标
+  const diagBtn = $('#diagnoseBtn');
+  if (diagBtn) {
+    const cached = S.preDiag && S.preDiag.out === S.out && S.preDiag.chapterId === S.chapterId ? S.preDiag : null;
+    diagBtn.innerHTML = cached && cached.list.length ? `自检 <span class="qs-dot">${cached.list.length}</span>` : '自检';
+  }
 }
 
 function renderOut() {
@@ -7293,6 +7300,8 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
       renderOut();
       // 流式输出停在底部，生成结束后把「追加到正文」也带进视野
       if (S.out && PROSE_OUT_TASKS.has(S.outTask)) revealOutput({ toActions: true });
+      // 正文类任务完成：后台默默跑一份诊断缓存，自检按钮亮出条数
+      if (S.out && PROSE_OUT_TASKS.has(S.outTask) && !streamFailed) schedulePreDiagnose();
     }
   }
   if (!streamFailed && !acc.trim()) {
@@ -7360,10 +7369,41 @@ $('#clearOut').addEventListener('click', () => { S.out = ''; S.reasoning = ''; $
 
 /* —— 诊断：AI 指出问题，逐条一键修 —— */
 const diagList = $('#diagList');
+/** 生成完成后后台默默跑的一份预诊结果；按钮里显示计数角标，点击自检直接展示，不重复烧 token */
+let preDiagTimer = 0;
 
+function renderDiagnoseList(list) {
+  if (!list.length) {
+    diagList.innerHTML = '<p class="dim">没发现明显问题，或者模型没给出清单。不等于没有问题，但至少结构层过了。</p>';
+    return;
+  }
+  const head = list.length > 1
+    ? `<div class="diag-head"><span class="diag-count">${list.length} 个问题</span><button type="button" class="btn btn-sm btn-text" id="diagFixAll">全部修复</button></div>`
+    : '';
+  diagList.innerHTML = head + list.map((item, i) => `
+    <div class="diag-item severity-${String(item.severity || 'medium').toLowerCase()}">
+      <span class="diag-type">${esc(item.type || '其他')}</span>
+      <div class="diag-text">${esc(item.text || '')}</div>
+      <div class="diag-fix"><span class="diag-fix-label">修复：</span>${esc(item.fix || '')}</div>
+      <button type="button" class="btn btn-sm btn-text diag-fix-btn" data-idx="${i}">按此修复</button>
+    </div>`).join('');
+  diagList.querySelectorAll('.diag-fix-btn').forEach((btn) => {
+    btn.addEventListener('click', () => diagFixOne(list[Number(btn.dataset.idx)]));
+  });
+  const allBtn = diagList.querySelector('#diagFixAll');
+  if (allBtn) allBtn.addEventListener('click', () => diagFixAll(list, allBtn));
+}
+
+/** 有一份有效的预诊缓存就直接展示；没有再走流式 */
 async function diagnoseOutput() {
   const text = S.out;
   if (!text?.trim()) return toast('没有内容可诊断', 'err');
+  const cached = S.preDiag && S.preDiag.out === text && S.preDiag.chapterId === S.chapterId ? S.preDiag : null;
+  if (cached) {
+    diagList.hidden = false;
+    renderDiagnoseList(cached.list);
+    return;
+  }
   diagList.hidden = false;
   diagList.innerHTML = '<p class="dim">正在诊断…</p>';
   try {
@@ -7385,27 +7425,42 @@ async function diagnoseOutput() {
     const list = (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
       .filter((x) => x && typeof x === 'object' && x.text)
       .slice(0, 8);
-    if (!list.length) {
-      diagList.innerHTML = '<p class="dim">没发现明显问题，或者模型没给出清单。不等于没有问题，但至少结构层过了。</p>';
-      return;
-    }
-    const head = list.length > 1
-      ? `<div class="diag-head"><span class="diag-count">${list.length} 个问题</span><button type="button" class="btn btn-sm btn-text" id="diagFixAll">全部修复</button></div>`
-      : '';
-    diagList.innerHTML = head + list.map((item, i) => `
-      <div class="diag-item severity-${String(item.severity || 'medium').toLowerCase()}">
-        <span class="diag-type">${esc(item.type || '其他')}</span>
-        <div class="diag-text">${esc(item.text || '')}</div>
-        <div class="diag-fix"><span class="diag-fix-label">修复：</span>${esc(item.fix || '')}</div>
-        <button type="button" class="btn btn-sm btn-text diag-fix-btn" data-idx="${i}">按此修复</button>
-      </div>`).join('');
-    diagList.querySelectorAll('.diag-fix-btn').forEach((btn) => {
-      btn.addEventListener('click', () => diagFixOne(list[Number(btn.dataset.idx)]));
-    });
-    const allBtn = diagList.querySelector('#diagFixAll');
-    if (allBtn) allBtn.addEventListener('click', () => diagFixAll(list, allBtn));
+    S.preDiag = { out: text, chapterId: S.chapterId, list };
+    renderOutActions();
+    renderDiagnoseList(list);
   } catch (err) {
     diagList.innerHTML = `<p class="qs-error">诊断失败：${esc(err?.message || String(err))}</p>`;
+  }
+}
+
+/** 生成完成后：静默跑一遍诊断存缓存（不 toast、不抢 controller），只在按钮上亮个数 */
+function schedulePreDiagnose() {
+  if (preDiagTimer) clearTimeout(preDiagTimer);
+  preDiagTimer = setTimeout(() => {
+    preDiagTimer = 0;
+    runPreDiagnose().catch(() => { /* 静默 */ });
+  }, 900);
+}
+
+async function runPreDiagnose() {
+  if (S.controller || S.batchController) return;
+  const snapshot = S.out;
+  const chapterId = S.chapterId;
+  if (!snapshot?.trim()) return;
+  const acc = await runStream({
+    task: 'diagnose',
+    novelId: S.novel?.id,
+    chapterId,
+    payload: { text: snapshot },
+  }, { target: 'diag' });
+  const parsed = parseJsonLoose(acc);
+  const list = (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
+    .filter((x) => x && typeof x === 'object' && x.text)
+    .slice(0, 8);
+  // 生成期间用户动过输出区就不收这份缓存（修复 / 追加已落盘 → 已过期）
+  if (S.out === snapshot && S.chapterId === chapterId) {
+    S.preDiag = { out: snapshot, chapterId, list };
+    renderOutActions();
   }
 }
 
@@ -7482,6 +7537,7 @@ async function diagFixAll(list, btn) {
 
 $('#diagnoseBtn').addEventListener('click', () => {
   if (!S.out?.trim()) return toast('先生成几句话再来诊断', 'err');
+  if (S.controller) return toast('生成中——先点「停止」再自检', 'err');
   diagnoseOutput();
 });
 $('#copyOut').addEventListener('click', () => { navigator.clipboard.writeText(S.out); toast('已复制', 'ok'); });
@@ -10176,6 +10232,7 @@ function renderOutlineTab(host, n) {
         <span style="flex:1"></span>
         <button class="btn btn-sm" id="aiOutline">AI 生成大纲</button>
         <button class="btn btn-sm" id="aiFullOutline">从一句话生成全书大纲</button>
+        <button class="btn btn-sm" id="bookCheck" title="AI 从题材定位、黄金三章、人物记忆点、连载留存几个角度，诊断你的开书底子">开书诊断</button>
       </h2>
       <div class="grid2">
         ${novelField('书名', 'title', n)}
@@ -10467,6 +10524,26 @@ function renderOutlineTab(host, n) {
     n.outline.volumes.push({ name: `${n.outline.volumes.length + 1}`, desc: '', chapters: [] });
     renderBible();
     saveNovelPart({ outline: n.outline });
+  };
+
+  $('#bookCheck', host).onclick = async () => {
+    if (!(n.chapters || []).some((c) => (c.content || '').trim())) return toast('先写几章再诊断——空书没什么可诊断的', 'err');
+    const text = await runStream({ task: 'bookcheck', novelId: n.id });
+    if (!text.trim()) {
+      // 模型没配置时 runStream 会先弹接入引导——选完再点一次，结论就来了，不重复跑
+      const mask = document.querySelector('#modalMask');
+      const setupOpen = mask && getComputedStyle(mask).display !== 'none';
+      if (setupOpen) return toast('先选个模型，选完再点一次「开书诊断」就好了。', 'ok');
+      return;
+    }
+    showModal(`<h3>《${esc(n.title || '未名')}》开书诊断</h3>
+      <p class="modal-sub">AI 从题材定位 / 目标读者 / 黄金三章 / 人物记忆点 / 连载留存五个角度看你的开书底子——不是帮你改写，是帮你看清钱该花在哪。</p>
+      <div class="out" style="max-height:56vh">${mdLite(text)}</div>
+      <div class="modal-foot"><button class="btn btn-text" id="bcCopy">复制</button><button class="btn btn-primary" id="bcClose">知道了</button></div>`,
+      (box) => {
+        box.querySelector('#bcClose').onclick = closeModal;
+        box.querySelector('#bcCopy').onclick = () => { navigator.clipboard.writeText(text); toast('已复制', 'ok'); };
+      });
   };
 
   $('#aiOutline', host).onclick = async () => {

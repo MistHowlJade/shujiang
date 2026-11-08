@@ -1651,6 +1651,13 @@ kbd {
 
 /* 人物出场索引 / 世界观提及索引 */
 .diag-list { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
+.qs-dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 17px; height: 17px; padding: 0 5px; margin-left: 4px;
+  border-radius: var(--r-full); font-size: 10px; font-weight: 700;
+  background: var(--warning-bg); color: var(--warning);
+  font-variant-numeric: tabular-nums; vertical-align: 1px;
+}
 .diag-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
   padding: 5px 10px; font-size: 11px; background: var(--surface-2);
