@@ -15738,6 +15738,14 @@ function cmdkSource() {
     op(S.focusMode ? '退出专注写作' : '进入专注写作', 'focus', toggleFocus, 'Ctrl+Alt+F');
     op('续写当前章', 'pen', () => { setView('studio'); showAssistTab('write'); continueWriting(); }, 'Ctrl+↵');
     op('对比两个模型', 'columns', () => { setView('studio'); showAssistTab('write'); openModelCompare(); });
+    op('爽点档', 'pulse', () => { setView('studio'); showAssistTab('write'); runPayoffAnalysis(); });
+    op('毒点检查', 'shield', () => { setView('studio'); showAssistTab('write'); runPoisonCheck(); });
+    op('断章评估', 'clock', () => { setView('studio'); showAssistTab('write'); runHookCheck(); });
+    op('敏感内容提醒', 'shield', () => { setView('studio'); showAssistTab('write'); runSensitivityCheck(); });
+    op('结构检查', 'columns', () => { setView('studio'); showAssistTab('write'); runSceneCheck(); });
+    op('本章设定记忆', 'refresh', () => { setView('studio'); showAssistTab('write'); $('[data-quick="memory"]')?.click(); });
+    op('生成本章概要', 'check', () => { setView('studio'); showAssistTab('write'); $('[data-quick="summarize"]')?.click(); });
+    op('起名 / 改名', 'pen', () => { setView('studio'); showAssistTab('write'); $('[data-quick="titles"]')?.click(); });
     op('一致性检查', 'shield', () => { setView('studio'); showAssistTab('check'); $('#consistencyBtn').click(); });
     op('责编评审', 'stamp', () => { setView('studio'); showAssistTab('check'); $('#reviewBtn').click(); });
     op('导入文稿', 'upload', () => { setView('studio'); openImportModal(); });

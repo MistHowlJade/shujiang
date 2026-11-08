@@ -380,19 +380,20 @@
                   <div class="btn-row">
                     <button class="btn btn-block" id="cmpBtn" title="同一段上下文跑两个模型，并排看，选一个采用"><svg class="ico"><use href="#i-columns" /></svg>对比模型</button>
                   </div>
-                  <div class="btn-row wrap">
+                  <div class="btn-row wrap" hidden aria-hidden="true">
                     <button class="btn btn-sm btn-text" data-quick="memory" title="把本章的人物 / 伏笔 / 状态存下来，生成后续章节时会自动带上"><svg class="ico"><use href="#i-refresh" /></svg>存章节记忆</button>
                     <button class="btn btn-sm btn-text" data-quick="batchMemory" title="把还没存记忆的章节批量补上；会逐章调用模型">批量补记忆</button>
                     <button class="btn btn-sm btn-text" data-quick="propagate" title="分析这段文字里命中的设定痕迹，在其他章节哪里出现过——改动这里会牵动哪些章">影响范围</button>
-                    <button class="btn btn-sm btn-text" data-quick="payoff" title="AI 给本章打一个 0-5 的爽点分，觉得靠谱再存入本章档案（全书体检会看「连续爽点偏低」）">爽点档</button>
-                    <button class="btn btn-sm btn-text" data-quick="poison" title="AI 从读者角度找出这一章会让人弃书的点（降智 / 注水 / 反转用滥 / 价值冒犯……）——只提示，不改原文">毒点检查</button>
-                    <button class="btn btn-sm btn-text" data-quick="hook" title="评估本章结尾适不适合连载断更：钩子强度 0-5 + 更好的断章位置">断章评估</button>
-                    <button class="btn btn-sm btn-text" data-quick="sensitivity" title="让 AI 圈出「可能踩线」的位置（暴力 / 歧视 / 违法 / 敏感）——不是过滤器，以你和平台判断为准">敏感内容提醒</button>
-                    <button class="btn btn-sm btn-text" data-quick="focus" title="写之前先看一眼：本章 POV / 章纲缺口 / 出场人物最新状态 / 未决线索">聚焦</button>
-                    <button class="btn btn-sm btn-text" data-quick="scene" title="AI 把本章拆成场景序列，按目标—冲突—结果评估推进，给出删减与合并建议——只分析，不改原文">结构检查</button>
-                    <button class="btn btn-sm btn-text" data-quick="summarize" title="给本章写一句概要，方便之后快速定位">生成概要</button>
+                    <button class="btn btn-sm btn-text" data-quick="payoff" title="AI 给本章打一个 0-5 的爽点分">爽点档</button>
+                    <button class="btn btn-sm btn-text" data-quick="poison" title="AI 找出弃书点">毒点检查</button>
+                    <button class="btn btn-sm btn-text" data-quick="hook" title="评估断章位置">断章评估</button>
+                    <button class="btn btn-sm btn-text" data-quick="sensitivity" title="圈出可能踩线的位置">敏感内容提醒</button>
+                    <button class="btn btn-sm btn-text" data-quick="focus" title="本章 POV / 章纲缺口 / 未决线索">聚焦</button>
+                    <button class="btn btn-sm btn-text" data-quick="scene" title="拆成场景序列评估推进">结构检查</button>
+                    <button class="btn btn-sm btn-text" data-quick="summarize" title="给本章写一句概要">生成概要</button>
                     <button class="btn btn-sm btn-text" data-quick="titles">起名</button>
                   </div>
+                  <p class="assist-hint">按 <kbd>Esc</kbd> 收起 AI 手动按钮，<kbd>Ctrl</kbd><kbd>K</kbd> 搜「生成」「续写」「体检」——所有 AI 功能都在命令面板里，不占屏幕。</p>
                 </div>
                 <div class="payoff-card" id="payoffCard" hidden></div>
 
