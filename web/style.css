@@ -1733,6 +1733,42 @@ kbd {
 .ar-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
 .ar-meta { flex: none; color: var(--text-4); font-size: 11px; }
 
+/* 爽点曲线 */
+.pcv-svg { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); margin: 8px 0 12px; }
+.pcv-grid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }
+.pcv-grid.zero { stroke-dasharray: none; opacity: 1; }
+.pcv-ylabel { fill: var(--text-4); font-size: 10px; }
+.pcv-xlabel { fill: var(--text-4); font-size: 10px; }
+.pcv-avg { stroke: var(--text-4); stroke-width: 1.2; stroke-dasharray: 5 4; opacity: 0.9; }
+.pcv-line { fill: none; stroke: var(--warning); stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+.pcv-dot { stroke: var(--surface-2); stroke-width: 1.6; cursor: pointer; }
+.pcv-dot.pcv-hi { fill: var(--warning); }
+.pcv-dot.pcv-mid { fill: var(--text-4); }
+.pcv-dot.pcv-lo { fill: var(--danger); }
+.pcv-flats { margin-top: 8px; }
+.pcv-flat-title { font-size: 11px; font-weight: 600; color: var(--text-2); margin-bottom: 6px; }
+.pcv-flat { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-bottom: 5px; }
+.pcv-flat-label { font-size: 10.5px; color: var(--danger); }
+.pcv-flat-chip {
+  border: 1px solid var(--border); background: var(--surface-3); color: var(--text-2);
+  border-radius: var(--r-full); padding: 0 8px; font-size: 10px; line-height: 1.9; cursor: pointer;
+}
+.pcv-flat-chip:hover { border-color: var(--border-2); color: var(--text-1); }
+.pcv-list { display: flex; flex-direction: column; gap: 5px; max-height: 42vh; overflow: auto; margin-top: 10px; }
+.pcv-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; text-align: left;
+  font: inherit; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm);
+  color: var(--text-1); cursor: pointer;
+}
+.pcv-row:hover { border-color: var(--border-2); background: var(--surface-3); }
+.pcv-row:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.pcv-no { flex: none; width: 44px; color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.pcv-name { flex: none; width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.pcv-miss { flex: none; color: var(--text-5, var(--text-4)); font-size: 10.5px; font-style: italic; }
+.pcv-type { flex: none; font-size: 10px; padding: 0 6px; border-radius: var(--r-full); background: var(--warning-bg); color: var(--warning); }
+.pcv-note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-4); font-size: 10.5px; }
+.pcv-unscored .pcv-name { color: var(--text-4); }
+
 /* 揭示计划 */
 .reveal-list { display: flex; flex-direction: column; gap: 7px; max-height: 60vh; overflow: auto; }
 .reveal-row {

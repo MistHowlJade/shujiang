@@ -6,6 +6,7 @@ import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTr
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
 import { buildPropagationReport } from './lib/propagate.js';
+import { buildPayoffProfile, payoffTier } from './lib/payoff.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown, CONSISTENCY_KINDS } from './lib/consistency.js';
 import { diffProse, diffHtml, diffSideHtml } from './lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from './lib/goal.js';
@@ -10160,6 +10161,7 @@ function renderBible() {
   if (bibleTab === 'timelineViz') return renderTimelineVizTab(host, n);
   if (bibleTab === 'beats') return renderBeatsTab(host, n);
   if (bibleTab === 'arcs') return renderArcsTab(host, n);
+  if (bibleTab === 'payoff') return renderPayoffTab(host, n);
   if (bibleTab === 'relations') return renderRelationsTab(host, n);
   if (bibleTab === 'threads') return renderThreadsTab(host, n);
   if (bibleTab === 'reveal') return renderRevealPlanTab(host, n);
@@ -11829,6 +11831,73 @@ function renderRevealPlanTab(host, n) {
       toast(`「${entry.name || '条目'}」已标记为已揭示`, 'ok');
       renderBible();
     });
+  });
+}
+
+/** ---- 爽点档案：从第 1 章到第 N 章的爽点曲线 ---- */
+function renderPayoffTab(host, n) {
+  const p = buildPayoffProfile(n);
+  const scored = p.scoredChapters;
+
+  if (!p.scored) {
+    host.innerHTML = `
+      <div class="bible-block">
+        <h2>爽点曲线</h2>
+        <p class="dim">还没有给任何一章打过爽点档。<br>在工作台「写作」面板的快捷操作里点「爽点档」——AI 给本章打一个 0-5 分，你确认后存入本章档案，这里就会画出整本书的爽点曲线。</p>
+      </div>`;
+    return;
+  }
+
+  // SVG 曲线：只连「打过档」的章节，低档 / 高档圆点分级上色
+  const pts = p.chapters;
+  const W = 720, H = 180, PL = 26, PR = 8, PT = 12, PB = 24;
+  const maxY = 5;
+  const xOf = (i) => PL + (pts.length > 1 ? (i / (pts.length - 1)) * (W - PL - PR) : (W - PL - PR) / 2);
+  const yOf = (s) => PT + (1 - s / maxY) * (H - PT - PB);
+  const grid = [0, 1, 2, 3, 4, 5].map((g) => `<line class="pcv-grid${g === 0 ? ' zero' : ''}" x1="${PL}" x2="${W - PR}" y1="${yOf(g)}" y2="${yOf(g)}"/><text class="pcv-ylabel" x="4" y="${yOf(g) + 4}">${g}</text>`).join('');
+  const step = Math.max(1, Math.ceil(pts.length / 8));
+  const xlabels = pts.map((c, i) => (i % step === 0 || i === pts.length - 1)
+    ? `<text class="pcv-xlabel" x="${xOf(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${c.no}</text>` : '').join('');
+  const avgY = yOf(Math.min(5, Math.max(0, p.avg)));
+  const scoredIdx = [];
+  pts.forEach((c, i) => { if (c.score !== null) scoredIdx.push(i); });
+  const path = scoredIdx.map((i, k) => `${k === 0 ? 'M' : 'L'}${xOf(i).toFixed(1)},${yOf(pts[i].score).toFixed(1)}`).join(' ');
+  const dots = scoredIdx.map((i) => {
+    const c = pts[i];
+    return `<circle class="pcv-dot pcv-${payoffTier(c.score)}" cx="${xOf(i).toFixed(1)}" cy="${yOf(c.score).toFixed(1)}" r="4"><title>第 ${c.no} 章 · ${c.score}/5${c.type ? ` · ${esc(c.type)}` : ''}${c.note ? `：${esc(c.note)}` : ''}</title></circle>`;
+  }).join('');
+  const svg = `<svg class="pcv-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="爽点曲线，最高 5 分">${grid}${xlabels}<line class="pcv-avg" x1="${PL}" x2="${W - PR}" y1="${avgY.toFixed(1)}" y2="${avgY.toFixed(1)}"/><path class="pcv-line" d="${path}"/>${dots}</svg>`;
+
+  const bestHtml = p.best ? `<span class="thread-stat">最高 <b>⚡${p.best.score}</b> 第 ${p.best.no} 章</span>` : '';
+  const flatHtml = p.flatRuns.length
+    ? `<div class="pcv-flats"><div class="pcv-flat-title">连档提醒 <span class="dim small">连续两章及以上爽点偏低</span></div>${p.flatRuns.slice(0, 4).map((r) => `
+        <div class="pcv-flat"><span class="pcv-flat-label">${esc(r.label)}</span>${r.chapters.map((c) => `<button type="button" class="pcv-flat-chip" data-chapter="${esc(c.id)}" title="打开第 ${c.no} 章《${esc(c.title || '未命名')}》">第 ${c.no} 章</button>`).join('')}</div>`).join('')}</div>`
+    : '<p class="health-ok">没有连档——打过档的章节里，爽点分布得住。</p>';
+
+  host.innerHTML = `
+    <div class="bible-block">
+      <h2>爽点曲线</h2>
+      <p class="dim small">「爽点档」是 AI 按起点 / 番茄 / 晋江的尺子给本章打的 0-5 分（打脸 / 反转 / 成长 / 情绪宣泄…），你确认保存后才算。金色是 ≥4，灰的是 2–3，红的是 ≤1；虚线是全书平均分。点圆点或章次可以直接跳到那一章。</p>
+      <div class="thread-stats">
+        <span class="thread-stat"><b>${p.scored}</b> / ${p.total} 章打了档</span>
+        <span class="thread-stat"><b>${p.avg}</b> 平均分</span>
+        ${bestHtml}
+        <span class="thread-stat dim-text">满分 5</span>
+      </div>
+      <div class="pcv-chart">${svg}</div>
+      ${flatHtml}
+      <div class="pcv-list" id="pcvList">
+        ${pts.map((c) => `
+          <button type="button" class="pcv-row${c.score === null ? ' pcv-unscored' : ''}" data-chapter="${esc(c.id)}">
+            <span class="pcv-no">第 ${c.no} 章</span>
+            <span class="pcv-name">${esc(c.title || '未命名')}</span>
+            ${c.score === null ? '<span class="pcv-miss">没打档</span>' : `<span class="ci-payoff ${payoffTier(c.score)}">⚡${c.score}</span><span class="pcv-type">${esc(c.type || '')}</span><span class="pcv-note">${esc(c.note || '')}</span>`}
+          </button>`).join('')}
+      </div>
+    </div>`;
+
+  host.querySelectorAll('[data-chapter]').forEach((el) => {
+    el.addEventListener('click', () => openChapterFromIndex(el.dataset.chapter));
   });
 }
 

@@ -28,6 +28,7 @@ const FILES = [
   'web/lib/markdown.js',
   'web/lib/trash.js',
   'web/lib/propagate.js',
+  'web/lib/payoff.js',
 ];
 
 const all = FILES.map((f) => [f.replace(/\\/g, '/'), fs.readFileSync(f, 'utf8')]);

@@ -25,6 +25,7 @@ import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMa
 import { countWords, createWordCounter } from '../web/lib/util.js';
 import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, readerChapterRead, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
 import { buildPropagationReport } from '../web/lib/propagate.js';
+import { buildPayoffProfile, payoffTier } from '../web/lib/payoff.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from '../web/lib/trash.js';
 
 let pass = 0;
@@ -1879,6 +1880,21 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('爽点：全部忽略后 issueKinds 少一类', ignoredAll.issueKinds === r.issueKinds - 1, `${ignoredAll.issueKinds} vs ${r.issueKinds}`);
   check('爽点：没有打档的章节不参与连档判断', !buildHealthReport({ title: 'X', chapters: [mk(1, null), mk(2, null), mk(3, null)] }).payoffSlumps.length);
   check('爽点：断档的低分不连档', !buildHealthReport({ title: 'Y', chapters: [mk(1, 1), mk(2, 5), mk(3, 0)] }).payoffSlumps.length);
+}
+
+// ---------------------------------------------------------------
+// 爽点档案：曲线汇总 + 连档提醒
+{
+  const mk = (no, score) => ({ id: `c${no}`, no, title: `第${no}章`, content: '', stage: 'draft', payoff: score === null ? undefined : { score, type: '打脸', note: 'n' } });
+  const novel = { title: 'T', chapters: [mk(1, 4), mk(2, 1), mk(3, 0), mk(4, null), mk(5, 1), mk(6, 1)] };
+  const r = buildPayoffProfile(novel);
+  check('爽点曲线：打了档的章节数', r.scored === 5, String(r.scored));
+  check('爽点曲线：平均分', r.avg === 1.4, String(r.avg));
+  check('爽点曲线：没打档的章节不参与，断档即中断连档', r.flatRuns.length === 2 && r.flatRuns[0].id === '2-3' && r.flatRuns[1].id === '5-6', JSON.stringify(r.flatRuns.map((x) => x.id)));
+  check('爽点曲线：最佳一章', r.best?.no === 1 && r.best?.score === 4);
+  check('爽点曲线：连档 label 可读', r.flatRuns[0].label.includes('第 2–3 章'));
+  check('爽点曲线：空作品 / 全没打档', buildPayoffProfile({ title: 'X', chapters: [] }).scored === 0 && buildPayoffProfile({ title: 'Y', chapters: [mk(1, null), mk(2, null)] }).flatRuns.length === 0);
+  check('爽点曲线：tier 分档', payoffTier(5) === 'hi' && payoffTier(4) === 'hi' && payoffTier(3) === 'mid' && payoffTier(2) === 'mid' && payoffTier(1) === 'lo' && payoffTier(0) === 'lo' && payoffTier(null) === 'none');
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
