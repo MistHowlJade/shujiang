@@ -9619,16 +9619,19 @@ let bibleTab = 'outline';
 $$('#bibleTabs button').forEach((b) => b.addEventListener('click', () => {
   bibleTab = b.dataset.bible;
   $$('#bibleTabs button').forEach((x) => x.classList.toggle('on', x === b));
-  // 切换设定库标签页时刷新最新数据，避免缓存过期
+  setView('bible');
+  renderBible();                  // 先把本地内存画出来（含还没落盘的输入）——体感优先
   if (S.novel) {
-    api.get(`/api/novels/${S.novel.id}`).then(({ novel }) => {
-      S.novel = novel;
-      setView('bible');
-      renderBible();
-    }).catch(() => { setView('bible'); renderBible(); });  // 网络失败时用本地缓存兜底
-  } else {
-    setView('bible');
-    renderBible();
+    // 先冲刷未落盘的设定/大纲编辑，再拉最新版覆盖——否则旧的 pending 会晚到覆盖刚拉下来的
+    // 磁盘状态，而 UI 已经切走了，用户看不见这次回跳。
+    saveNovelPart.flush()
+      .then(() => api.get(`/api/novels/${S.novel.id}`))
+      .then(({ novel }) => {
+        S.novel = novel;
+        setView('bible');
+        renderBible();
+      })
+      .catch(() => { /* 网络失败：保留本地这份 */ });
   }
 }));
 
