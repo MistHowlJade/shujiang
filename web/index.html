@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow" />
 <meta name="theme-color" content="#15110d" />
 <title>书匠 · AI 长篇小说创作台</title>
-<link rel="stylesheet" href="/style.css?v=1.0.23" />
+<link rel="stylesheet" href="/style.css?v=1.0.24" />
 <style id="designv1011">
   /* 书匠 · v1.0.11「东方典籍」视觉重写 —— 暖墨：衬线 + 赭金 + 朱砂 */
   @font-face { font-family: '思源宋体 VF'; src: local('Noto Serif SC'), local('Noto Serif SC VF'), local('NotoSerifSC-VF'); font-display: swap; }
@@ -462,7 +462,7 @@
      章节归章节栏、正文归正文、AI 归右栏；同一种功能不再散在三处。
      ========================================================================== */
 
-  /* ---- 右栏：资料 / 场景 / 对话折进「写作」，只留 3 个页签 ---- */
+  /* ---- 右栏：上下文 / 场景 / 对话整合为一个「辅助工具」 ---- */
   .dock-fold {
     flex: 0 0 auto;
     border: 1px solid var(--border);
@@ -492,6 +492,13 @@
   .dock-fold-body { padding: 0 11px 11px; border-top: 1px solid var(--border); }
   .dock-fold-body > .tip { margin-top: 10px; }
   .dock-fold-body > .btn-row:first-child { margin-top: 10px; }
+  .dock-subtabs { margin-top: 10px; }
+  .dock-subtabs button { font-size: 12.5px; padding: 0 8px; }
+  .assist-subpane { margin-top: 10px; }
+  .assist-subpane:not(.on) { display: none; }
+  .assist-subpane .tip { margin-top: 0; }
+  .assist-subpane .btn-row:first-of-type { margin-top: 10px; }
+  .assist-subpane-meta { min-height: 17px; margin: 0 0 8px; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
   .dock-fold .chat-panel { height: auto; }
   .dock-fold .chat-log { flex: none; min-height: 148px; max-height: 300px; }
   .dock-fold .corkboard { min-height: 120px; padding: 8px 0 0; overflow: visible; }
@@ -906,64 +913,59 @@
                 </div>
                 <div class="diag-list" id="diagList" hidden></div>
 
-                <!-- 资料：折进写作页，不再单占页签 -->
-                <details class="dock-fold" id="foldContext">
+                <!-- 辅助面板：上下文 / 场景卡片 / AI 对话，放在一起 -->
+                <details class="dock-fold" id="foldAssist">
                   <summary>
-                    <span>本次上下文</span>
-                    <span class="dock-fold-hint">自动挑选的设定与前情</span>
+                    <span>辅助工具</span>
+                    <span class="dock-fold-hint">上下文 · 场景 · AI 对话</span>
                   </summary>
                   <div class="dock-fold-body">
-                    <div class="tip">
-                      <svg class="ico"><use href="#i-info" /></svg>
-                      <span>每次生成都会按相关度自动挑选设定与前情喂给模型。这里能看到实际发出去的内容，也可以改完再发。</span>
+                    <div class="segmented dock-subtabs" id="assistSubtabs" role="tablist" aria-label="辅助工具">
+                      <button type="button" data-subtab="context" id="subtabContext" class="on" role="tab" aria-selected="true" aria-controls="subpaneContext">上下文</button>
+                      <button type="button" data-subtab="scenes" id="subtabScenes" role="tab" aria-selected="false" aria-controls="subpaneScenes">场景卡片</button>
+                      <button type="button" data-subtab="chat" id="subtabChat" role="tab" aria-selected="false" aria-controls="subpaneChat">AI 对话</button>
                     </div>
-                    <div class="btn-row">
-                      <button class="btn" id="previewCtxBtn"><svg class="ico"><use href="#i-eye" /></svg>查看本次上下文</button>
-                      <button class="btn btn-primary" id="sendEditedBtn" hidden><svg class="ico"><use href="#i-spark" /></svg>按此内容生成</button>
-                    </div>
-                    <div class="ctx-stats" id="ctxStats"></div>
-                    <pre class="ctx-preview" id="ctxPreview"></pre>
-                  </div>
-                </details>
 
-                <!-- 场景卡片：折进写作页 -->
-                <details class="dock-fold" id="foldScenes">
-                  <summary>
-                    <span>场景卡片</span>
-                    <span class="dock-fold-hint" id="scenesInfo"></span>
-                  </summary>
-                  <div class="dock-fold-body">
-                    <div class="btn-row wrap">
-                      <button class="btn btn-sm btn-primary" id="scenesFromOutline">从章纲生成场景</button>
-                      <button class="btn btn-sm" id="addSceneBtn"><svg class="ico"><use href="#i-plus" /></svg>新增场景</button>
-                      <button class="btn btn-sm btn-primary" id="compileScenesBtn"><svg class="ico"><use href="#i-download" /></svg>编译成正文</button>
-                      <button class="btn btn-sm" id="scenesExportBtn" title="导出场景卡片"><svg class="ico"><use href="#i-download" /></svg>导出</button>
-                      <button class="btn btn-sm" id="scenesImportBtn" title="导入场景卡片"><svg class="ico"><use href="#i-upload" /></svg>导入</button>
-                      <button class="btn btn-sm btn-text" id="scenesClear">清空</button>
-                    </div>
-                    <p class="dim small">拖拽卡片调整顺序；双击卡片编辑；点「编译成正文」将场景梗概按顺序拼接为章节内容（保留原有正文前的内容）。</p>
-                    <div class="corkboard" id="corkboard"></div>
-                  </div>
-                </details>
-
-                <!-- 对话：折进写作页；命令面板或快捷键会直接展开 -->
-                <details class="dock-fold" id="foldChat">
-                  <summary>
-                    <span>AI 对话</span>
-                    <span class="dock-fold-hint">边聊边改，不直接动正文</span>
-                  </summary>
-                  <div class="dock-fold-body">
-                    <div class="chat-panel">
-                      <div class="chat-log" id="chatLog" aria-live="polite"></div>
-                      <div class="chat-suggest" id="chatSuggest">
-                        <button class="chip" data-chat-suggest="续写当前章，给个悬念钩子">续写当前章</button>
-                        <button class="chip" data-chat-suggest="把这章改成更冷的风格">换个风格</button>
-                        <button class="chip" data-chat-suggest="总结这章，存进记忆">总结本章</button>
-                        <button class="chip" data-chat-suggest="帮我写下一章的初稿">生成下一章</button>
+                    <div class="assist-subpane on" id="subpaneContext" data-subpane="context" role="tabpanel" aria-labelledby="subtabContext">
+                      <div class="tip">
+                        <svg class="ico"><use href="#i-info" /></svg>
+                        <span>每次生成都会按相关度自动挑选设定与前情喂给模型。这里能看到实际发出去的内容，也可以改完再发。</span>
                       </div>
-                      <div class="chat-input-row">
-                        <textarea id="chatInput" class="input chat-input" rows="2" maxlength="500" placeholder="说说你想干什么…"></textarea>
-                        <button class="btn btn-primary" id="chatSend" aria-label="发送"><svg class="ico"><use href="#i-spark" /></svg></button>
+                      <div class="btn-row">
+                        <button class="btn" id="previewCtxBtn"><svg class="ico"><use href="#i-eye" /></svg>查看本次上下文</button>
+                        <button class="btn btn-primary" id="sendEditedBtn" hidden><svg class="ico"><use href="#i-spark" /></svg>按此内容生成</button>
+                      </div>
+                      <div class="ctx-stats" id="ctxStats"></div>
+                      <pre class="ctx-preview" id="ctxPreview"></pre>
+                    </div>
+
+                    <div class="assist-subpane" id="subpaneScenes" data-subpane="scenes" role="tabpanel" aria-labelledby="subtabScenes" hidden>
+                      <div class="assist-subpane-meta" id="scenesInfo"></div>
+                      <div class="btn-row wrap">
+                        <button class="btn btn-sm btn-primary" id="scenesFromOutline">从章纲生成场景</button>
+                        <button class="btn btn-sm" id="addSceneBtn"><svg class="ico"><use href="#i-plus" /></svg>新增场景</button>
+                        <button class="btn btn-sm btn-primary" id="compileScenesBtn"><svg class="ico"><use href="#i-download" /></svg>编译成正文</button>
+                        <button class="btn btn-sm" id="scenesExportBtn" title="导出场景卡片"><svg class="ico"><use href="#i-download" /></svg>导出</button>
+                        <button class="btn btn-sm" id="scenesImportBtn" title="导入场景卡片"><svg class="ico"><use href="#i-upload" /></svg>导入</button>
+                        <button class="btn btn-sm btn-text" id="scenesClear">清空</button>
+                      </div>
+                      <p class="dim small">拖拽卡片调整顺序；双击卡片编辑；点「编译成正文」将场景梗概按顺序拼接为章节内容（保留原有正文前的内容）。</p>
+                      <div class="corkboard" id="corkboard"></div>
+                    </div>
+
+                    <div class="assist-subpane" id="subpaneChat" data-subpane="chat" role="tabpanel" aria-labelledby="subtabChat" hidden>
+                      <div class="chat-panel">
+                        <div class="chat-log" id="chatLog" aria-live="polite"></div>
+                        <div class="chat-suggest" id="chatSuggest">
+                          <button class="chip" data-chat-suggest="续写当前章，给个悬念钩子">续写当前章</button>
+                          <button class="chip" data-chat-suggest="把这章改成更冷的风格">换个风格</button>
+                          <button class="chip" data-chat-suggest="总结这章，存进记忆">总结本章</button>
+                          <button class="chip" data-chat-suggest="帮我写下一章的初稿">生成下一章</button>
+                        </div>
+                        <div class="chat-input-row">
+                          <textarea id="chatInput" class="input chat-input" rows="2" maxlength="500" placeholder="说说你想干什么…"></textarea>
+                          <button class="btn btn-primary" id="chatSend" aria-label="发送"><svg class="ico"><use href="#i-spark" /></svg></button>
+                        </div>
                       </div>
                     </div>
                   </div>

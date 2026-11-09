@@ -8891,15 +8891,34 @@ assistTabButtons.forEach((b, _, buttons) => b.addEventListener('keydown', (e) =>
   buttons[idx].focus();
   showAssistTab(buttons[idx].dataset.tab);
 }));
-/* 资料 / 场景 / 对话已经折进「写作」页：旧调用名继续有效，
- * 只是先切回写作页，再把对应的折叠块展开。 */
+/* 上下文 / 场景 / AI 对话已经整合为「写作」页里的一个「辅助工具」折叠块：
+ * 旧调用名继续有效，只是先切回写作页，再展开折叠块并打开对应子页签。 */
 const ASSIST_TAB_ALIASES = { context: 'write', scenes: 'write', chat: 'write' };
-function openDockFold(id) {
-  const fold = document.getElementById(id);
-  if (!fold) return;
-  fold.open = true;
-  fold.scrollIntoView({ block: 'nearest' });
+const ASSIST_SUBTABS = ['context', 'scenes', 'chat'];
+function setAssistSubtab(name, { focusChat = false } = {}) {
+  const target = ASSIST_SUBTABS.includes(name) ? name : 'context';
+  $$('#assistSubtabs button[data-subtab]').forEach((btn) => {
+    const on = btn.dataset.subtab === target;
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-selected', String(on));
+  });
+  $$('.assist-subpane').forEach((pane) => {
+    const on = pane.dataset.subpane === target;
+    pane.classList.toggle('on', on);
+    pane.hidden = !on;
+  });
+  if (target === 'scenes') renderCorkboard();
+  if (focusChat && target === 'chat') $('#chatInput')?.focus({ preventScroll: true });
 }
+function openAssistTool(name) {
+  const fold = $('#foldAssist');
+  if (fold) fold.open = true;
+  setAssistSubtab(name, { focusChat: name === 'chat' });
+  fold?.scrollIntoView({ block: 'nearest' });
+}
+$$('#assistSubtabs button[data-subtab]').forEach((btn) => {
+  btn.addEventListener('click', () => setAssistSubtab(btn.dataset.subtab, { focusChat: btn.dataset.subtab === 'chat' }));
+});
 function showAssistTab(name) {
   const target = ASSIST_TAB_ALIASES[name] || name;
   $$('#assistTabs button').forEach((x) => {
@@ -8910,12 +8929,7 @@ function showAssistTab(name) {
     x.setAttribute('tabindex', on ? '0' : '-1');
   });
   $$('.assist-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === target));
-  if (name === 'scenes') { openDockFold('foldScenes'); renderCorkboard(); }
-  if (name === 'context') openDockFold('foldContext');
-  if (name === 'chat') {
-    openDockFold('foldChat');
-    $('#chatInput')?.focus({ preventScroll: true });
-  }
+  if (ASSIST_SUBTABS.includes(name)) openAssistTool(name);
   if (target === 'check') renderRevisionCard();
   if (target === 'annotations') renderAnnotationSidebar();
 }
