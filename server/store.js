@@ -346,7 +346,7 @@ export function listNovels() {
     if (!f.endsWith('.json')) continue;
     const n = readJson(path.join(NOVELS_DIR, f), null);
     if (!n || !n.id) continue;
-    const words = (n.chapters || []).reduce((s, c) => s + (c.words || 0), 0);
+    const words = (n.chapters || []).reduce((s, c) => s + (c.words || countWords(c.content || '')), 0);
     out.push({
       id: n.id,
       title: n.title,
@@ -401,7 +401,7 @@ export function getNovel(id) {
   return n;
 }
 
-export function saveNovel(novel) {
+export function saveNovel(novel, { skipShrink = false } = {}) {
   novel.updatedAt = Date.now();
   novel.chapters = (novel.chapters || []).map((c, i) => ({
     ...c,
@@ -414,7 +414,7 @@ export function saveNovel(novel) {
   // 常规快照有 10 分钟节流；字数骤降（手滑删掉大段正文）时不等节流，立刻补一份。
   const words = novel.chapters.reduce((s, c) => s + c.words, 0);
   const prev = lastWrittenWords.get(novel.id);
-  const shrunk = typeof prev === 'number' && prev - words >= SHRINK_CHARS;
+  const shrunk = !skipShrink && typeof prev === 'number' && prev - words >= SHRINK_CHARS;
   try {
     createSnapshot(novel, shrunk
       ? { kind: 'before-shrink', label: '大幅删减前', force: true }
@@ -454,6 +454,18 @@ export function createSampleNovel() {
   const chapterIds = new Map();
   const volumeIds = new Map();
   const outlineIds = new Map();
+  // 嵌套结构里凡是指向章节 / 章纲的旧 id，都要换成新 id
+  const remapNested = (value) => {
+    if (Array.isArray(value)) return value.map(remapNested);
+    if (!value || typeof value !== 'object') return value;
+    const next = {};
+    for (const [key, val] of Object.entries(value)) {
+      if (key === 'chapterId' && typeof val === 'string') next[key] = chapterIds.get(val) || '';
+      else if (key === 'outlineId' && typeof val === 'string') next[key] = outlineIds.get(val) || '';
+      else next[key] = remapNested(val);
+    }
+    return next;
+  };
 
   n.chapters = (n.chapters || []).map((c, i) => {
     const id = newId('c');
@@ -473,19 +485,23 @@ export function createSampleNovel() {
     const oldVolumeId = v.id;
     v.id = newId('v');
     if (oldVolumeId) volumeIds.set(oldVolumeId, v.id);
-    v.chapters = (v.chapters || [])
-      .map((o) => {
-        const id = newId('o');
-        if (o.id) outlineIds.set(o.id, id);
-        return { ...o, id, chapterId: chapterIds.get(o.chapterId) || '' };
-      })
-      .filter((o) => o.chapterId);
+    // 章纲里即使没有 chapterId（还没写的那几章）也要保留，只重映射能对上的
+    v.chapters = (v.chapters || []).map((o) => {
+      const id = newId('o');
+      if (o.id) outlineIds.set(o.id, id);
+      return { ...o, id, chapterId: chapterIds.get(o.chapterId) || '' };
+    });
   }
 
   n.chapters = n.chapters.map((c) => {
     const next = { ...c };
     if (next.outlineId) next.outlineId = outlineIds.get(next.outlineId) || '';
     if (next.volumeId) next.volumeId = volumeIds.get(next.volumeId) || '';
+    // 场景 / 批注 / 修订等嵌套结构里的 chapterId / outlineId 也换掉
+    for (const key of Object.keys(next)) {
+      if (['id', 'no', 'outlineId', 'volumeId', 'createdAt', 'updatedAt', 'words', 'content', 'title', 'stage'].includes(key)) continue;
+      next[key] = remapNested(next[key]);
+    }
     return next;
   });
 
@@ -494,6 +510,8 @@ export function createSampleNovel() {
   n.bible.characters = (n.bible.characters || []).map((x) => ({ ...x, id: newId('ch') }));
   n.bible.world = (n.bible.world || []).map((x) => ({ ...x, id: newId('w') }));
   n.bible.timeline = (n.bible.timeline || []).map((x) => ({ ...x, id: newId('t') }));
+  // 防御性：万一设定库里有 chapterId 引用，也换成新 id
+  n.bible = remapNested(n.bible);
   n.outline ||= { volumes: [], notes: '' };
   n.outline.volumes = volumes;
 
@@ -516,6 +534,10 @@ export function deleteNovel(id, { keepBackup = true } = {}) {
   fs.rmSync(f);
   if (!keepBackup) {
     try { fs.rmSync(path.join(DATA_DIR, 'backups', id), { recursive: true, force: true }); } catch {}
+    // 永久删除时连封面一起删掉，别留下孤儿文件
+    for (const ext of ['png', 'jpg', 'gif']) {
+      try { fs.rmSync(path.join(DATA_DIR, 'covers', `${id}.${ext}`), { force: true }); } catch {}
+    }
   }
   return true;
 }

@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="description" content="书匠：跑在本机的中文长篇小说创作台。AI 起稿、续写、润色，查证设定，作品只在本机 data/ 目录保存。" />
 <meta name="robots" content="noindex,nofollow" />
-<meta name="theme-color" content="#15110d" />
+<meta name="theme-color" content="#f3f1ea" />
 <title>书匠 · AI 长篇小说创作台</title>
-<link rel="stylesheet" href="/style.css?v=1.0.24" />
+<link rel="stylesheet" href="/style.css?v=1.0.25" />
 <style id="designv1011">
   /* 书匠 · v1.0.11「东方典籍」视觉重写 —— 暖墨：衬线 + 赭金 + 朱砂 */
   @font-face { font-family: '思源宋体 VF'; src: local('Noto Serif SC'), local('Noto Serif SC VF'), local('NotoSerifSC-VF'); font-display: swap; }
@@ -484,9 +484,10 @@
   }
   .dock-fold[open] > summary::after { transform: rotate(45deg); }
   .dock-fold > summary:hover { background: var(--surface-3); color: var(--text-1); }
+  .dock-fold > summary:focus-visible { outline: none; background: var(--surface-3); color: var(--text-1); box-shadow: inset 0 0 0 2px var(--accent-line); }
   .dock-fold-hint {
     margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-    white-space: nowrap; color: var(--text-4); font-size: 11.5px; font-weight: 400;
+    white-space: nowrap; color: var(--text-3); font-size: 11.5px; font-weight: 400;
   }
   .dock-fold-hint:empty { display: none; }
   .dock-fold-body { padding: 0 11px 11px; border-top: 1px solid var(--border); }
@@ -547,7 +548,7 @@
 
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2315110d'/><path d='M9 8h9a4 4 0 0 1 4 4v12H13a4 4 0 0 0-4 4z' fill='none' stroke='%23d9a25f' stroke-width='2' stroke-linejoin='round'/></svg>" />
 </head>
-<body data-theme="dark">
+<body data-theme="soft">
 <a class="skip-link" href="#main">跳到主要内容</a>
 
 <!-- ================= 图标库（线性图标，stroke 1.6，24 网格） ================= -->
@@ -619,12 +620,12 @@
     <button class="rail-logo" id="brandHome" title="书匠 · 回到书架" aria-label="书匠 · 回到书架">
       <svg class="ico"><use href="#i-book-open" /></svg>
     </button>
-    <nav class="rail-nav" id="topnav">
+    <div class="rail-nav" id="topnav" role="presentation">
       <button class="tab" data-view="shelf" aria-label="书架" title="书架"><svg class="ico"><use href="#i-book" /></svg><span>书架</span></button>
       <button class="tab" data-view="studio" aria-label="工作台" title="工作台"><svg class="ico"><use href="#i-pen" /></svg><span>工作台</span></button>
       <button class="tab" data-view="bible" aria-label="设定库" title="设定库"><svg class="ico"><use href="#i-layers" /></svg><span>设定库</span></button>
       <button class="tab rail-bottom" data-view="settings" aria-label="设置" title="设置"><svg class="ico"><use href="#i-settings" /></svg><span>设置</span></button>
-    </nav>
+    </div>
   </aside>
 
   <div class="shell">
@@ -783,16 +784,16 @@
               </div>
             </div>
             <div class="popmenu editor-more" id="editorMoreMenu" role="menu" hidden>
-              <div class="editor-more-row">
+              <div class="editor-more-row" role="group" aria-label="本章视角">
                 <span class="editor-more-label">视角</span>
                 <select id="chPov" class="pov-select" aria-label="本章视角" title="本章POV视角：限定一位人物，要求 AI 只写他能看到/知道的——限制多视角穿帮" disabled></select>
               </div>
-              <div class="popmenu-sep"></div>
+              <div class="popmenu-sep" role="separator"></div>
               <button class="popmenu-item editor-more-item" id="undoBtn" type="button" role="menuitem" title="撤销（Ctrl+Z）" disabled><svg class="ico"><use href="#i-undo" /></svg>撤销</button>
               <button class="popmenu-item editor-more-item" id="redoBtn" type="button" role="menuitem" title="重做（Ctrl+Shift+Z）" disabled><svg class="ico"><use href="#i-redo" /></svg>重做</button>
               <button class="popmenu-item editor-more-item" id="formatBtn" type="button" role="menuitem" title="一键排版：段落首行缩进两格"><svg class="ico"><use href="#i-indent" /></svg>一键排版</button>
-              <div class="popmenu-sep"></div>
-              <button class="popmenu-item editor-more-item" id="sprintBtn" type="button" role="menuitem" title="写作冲刺计时器（Ctrl+Alt+S）" aria-pressed="false"><svg class="ico"><use href="#i-clock" /></svg>写作冲刺计时器</button>
+              <div class="popmenu-sep" role="separator"></div>
+              <button class="popmenu-item editor-more-item" id="sprintBtn" type="button" role="menuitemcheckbox" aria-checked="false" title="写作冲刺计时器（Ctrl+Alt+S）"><svg class="ico"><use href="#i-clock" /></svg>写作冲刺计时器</button>
               <button class="popmenu-item editor-more-item" id="healthBtn" type="button" role="menuitem" title="全书体检：本地统计，不花 token"><svg class="ico"><use href="#i-pulse" /></svg>全书体检</button>
             </div>
             <div class="editor-wrap">
@@ -921,9 +922,9 @@
                   </summary>
                   <div class="dock-fold-body">
                     <div class="segmented dock-subtabs" id="assistSubtabs" role="tablist" aria-label="辅助工具">
-                      <button type="button" data-subtab="context" id="subtabContext" class="on" role="tab" aria-selected="true" aria-controls="subpaneContext">上下文</button>
-                      <button type="button" data-subtab="scenes" id="subtabScenes" role="tab" aria-selected="false" aria-controls="subpaneScenes">场景卡片</button>
-                      <button type="button" data-subtab="chat" id="subtabChat" role="tab" aria-selected="false" aria-controls="subpaneChat">AI 对话</button>
+                      <button type="button" data-subtab="context" id="subtabContext" class="on" role="tab" aria-selected="true" aria-controls="subpaneContext" tabindex="0">上下文</button>
+                      <button type="button" data-subtab="scenes" id="subtabScenes" role="tab" aria-selected="false" aria-controls="subpaneScenes" tabindex="-1">场景卡片</button>
+                      <button type="button" data-subtab="chat" id="subtabChat" role="tab" aria-selected="false" aria-controls="subpaneChat" tabindex="-1">AI 对话</button>
                     </div>
 
                     <div class="assist-subpane on" id="subpaneContext" data-subpane="context" role="tabpanel" aria-labelledby="subtabContext">
@@ -963,7 +964,7 @@
                           <button class="chip" data-chat-suggest="帮我写下一章的初稿">生成下一章</button>
                         </div>
                         <div class="chat-input-row">
-                          <textarea id="chatInput" class="input chat-input" rows="2" maxlength="500" placeholder="说说你想干什么…"></textarea>
+                          <textarea id="chatInput" class="input chat-input" rows="2" maxlength="500" placeholder="说说你想干什么…" aria-label="和 AI 说话"></textarea>
                           <button class="btn btn-primary" id="chatSend" aria-label="发送"><svg class="ico"><use href="#i-spark" /></svg></button>
                         </div>
                       </div>
@@ -989,7 +990,7 @@
                 </div>
                 <div class="card">
                   <label class="field-label">检查范围</label>
-                  <select id="checkScope" class="select">
+                  <select id="checkScope" class="select" aria-label="检查范围">
                     <option value="current">当前章</option>
                     <option value="last3">最近 3 章</option>
                     <option value="last5">最近 5 章</option>
@@ -1028,27 +1029,27 @@
       <section class="view" id="view-bible">
         <div class="page-head page-head-tabs bible-head">
           <div class="bible-tabbar">
-            <div class="segmented" id="bibleGroups" role="tablist" aria-label="设定库分组">
-              <button data-bible-group="setting" class="on">设定</button>
-              <button data-bible-group="structure">结构</button>
-              <button data-bible-group="create">创作</button>
+            <div class="segmented" id="bibleGroups" role="group" aria-label="设定库分组">
+              <button data-bible-group="setting" class="on" aria-pressed="true">设定</button>
+              <button data-bible-group="structure" aria-pressed="false">结构</button>
+              <button data-bible-group="create" aria-pressed="false">创作</button>
             </div>
-            <div class="segmented lg" id="bibleTabs" role="tablist" aria-label="设定库页签">
-              <button data-bible="outline" class="on">大纲</button>
-              <button data-bible="characters">人物</button>
-              <button data-bible="world">世界观</button>
-              <button data-bible="timeline">事件时间线</button>
-              <button data-bible="timelineViz">时间轴视图</button>
-              <button data-bible="beats">结构/节拍</button>
-              <button data-bible="arcs">人物弧光</button>
-              <button data-bible="payoff">爽点</button>
-              <button data-bible="relations">关系图谱</button>
-              <button data-bible="threads">线索</button>
-              <button data-bible="inspirations">灵感</button>
-              <button data-bible="glossary">术语</button>
-              <button data-bible="genlog">生成记录</button>
-              <button data-bible="reveal">揭示计划</button>
-              <button data-bible="style">文风与规则</button>
+            <div class="segmented lg" id="bibleTabs" role="group" aria-label="设定库页签">
+              <button data-bible="outline" class="on" aria-pressed="true">大纲</button>
+              <button data-bible="characters" aria-pressed="false">人物</button>
+              <button data-bible="world" aria-pressed="false">世界观</button>
+              <button data-bible="timeline" aria-pressed="false">事件时间线</button>
+              <button data-bible="timelineViz" aria-pressed="false">时间轴视图</button>
+              <button data-bible="beats" aria-pressed="false">结构/节拍</button>
+              <button data-bible="arcs" aria-pressed="false">人物弧光</button>
+              <button data-bible="payoff" aria-pressed="false">爽点</button>
+              <button data-bible="relations" aria-pressed="false">关系图谱</button>
+              <button data-bible="threads" aria-pressed="false">线索</button>
+              <button data-bible="inspirations" aria-pressed="false">灵感</button>
+              <button data-bible="glossary" aria-pressed="false">术语</button>
+              <button data-bible="genlog" aria-pressed="false">生成记录</button>
+              <button data-bible="reveal" aria-pressed="false">揭示计划</button>
+              <button data-bible="style" aria-pressed="false">文风与规则</button>
             </div>
           </div>
           <div class="page-actions" style="justify-content: flex-end;">
@@ -1205,11 +1206,11 @@
             <p class="desc">自定义各任务的 AI 提示词模板。留空即使用内置模板；模板里可用 <code>${变量名}</code> 引用当前上下文（如 <code>${novel.title}</code>、<code>${chapter.title}</code>、<code>${target}</code>）。保存后立即生效。</p>
             <label class="field-label">任务<select class="select" id="promptTaskSelect" aria-label="提示词模板任务"></select></label>
             <div class="field-label">
-              <label>系统提示词 (System)</label>
+              <label for="promptSystem">系统提示词 (System)</label>
               <textarea id="promptSystem" class="textarea" rows="6" placeholder="留空则使用内置系统提示词。定义 AI 的角色与行为准则……"></textarea>
             </div>
             <div class="field-label">
-              <label>用户提示词模板 (User)</label>
+              <label for="promptUser">用户提示词模板 (User)</label>
               <textarea id="promptUser" class="textarea" rows="8" placeholder="留空则使用内置提示词。可用变量见下方说明。"></textarea>
             </div>
             <div class="field-label">

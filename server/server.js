@@ -18,7 +18,7 @@ import { buildPrintHtml } from './print.js';
 import { buildDocx } from './docx.js';
 import { extractDocxText } from './docx-import.js';
 import { outlineRows, characterRows, hasExtras, submissionFacts, submissionNote } from './manuscript.js';
-import { coverSvg, readCoverImage, saveCoverImage, deleteCoverImage, coverOptions } from './cover.js';
+import { coverSvg, readCoverImage, saveCoverImage, deleteCoverImage, coverOptions, coverKind } from './cover.js';
 import { buildContext, collectScopeText, packSummaryLines } from './context.js';
 import { addWords, setGoal, statsSummary, statsDay } from './stats.js';
 
@@ -64,22 +64,27 @@ function readBody(req, limit = 40 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    let tooBig = false;
     req.on('data', (c) => {
       size += c.length;
-      if (size > limit) {
-        reject(new Error('请求体过大'));
-        req.destroy();
-        return;
-      }
+      if (size > limit) { tooBig = true; return; } // 继续排空，让 413 还能送到客户端
       chunks.push(c);
     });
     req.on('end', () => {
+      if (tooBig) {
+        const err = new Error('请求体过大');
+        err.status = 413;
+        reject(err);
+        return;
+      }
       const raw = Buffer.concat(chunks).toString('utf8');
       if (!raw) return resolve({});
       try {
         resolve(JSON.parse(raw));
       } catch {
-        reject(new Error('JSON 解析失败'));
+        const err = new Error('JSON 解析失败');
+        err.status = 400;
+        reject(err);
       }
     });
     req.on('error', reject);
@@ -503,6 +508,24 @@ function cleanOutline(raw) {
   return out;
 }
 
+/* PUT 整书保存时的章节校验：拒绝 null / 非对象，重建缺失或过长的 id */
+function sanitizeChapters(value, fallback) {
+  if (value === undefined) return fallback;
+  if (!Array.isArray(value)) return fallback;
+  const out = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const ch = { ...item };
+    let id = typeof ch.id === 'string' ? ch.id.trim() : '';
+    if (!id || id.length > 64) id = newId('c');
+    ch.id = id;
+    ch.title = String(ch.title || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+    ch.content = typeof ch.content === 'string' ? ch.content : String(ch.content ?? '');
+    out.push(ch);
+  }
+  return out;
+}
+
 async function handleApi(req, res, url) {
   const { pathname } = url;
   const method = req.method.toUpperCase();
@@ -532,7 +555,9 @@ async function handleApi(req, res, url) {
             let apiKey = p.apiKey;
             if (apiKey === undefined || apiKey === null || apiKey === '') apiKey = prev?.apiKey || '';
             if (apiKey === '__CLEAR__') apiKey = '';
-            return { ...prev, ...p, id: p.id || newId('p'), apiKey };
+            // GET 专有字段（apiKeyMasked / apiKeySet）不能落盘
+            const { apiKeyMasked, apiKeySet, ...clean } = p;
+            return { ...prev, ...clean, id: clean.id || newId('p'), apiKey };
           })
         : (cfg.providers || []);
       const next = {
@@ -651,6 +676,7 @@ async function handleApi(req, res, url) {
   }
 
   if (seg[1] === 'trash' && seg[2] && seg[3] === 'restore' && seg.length === 4 && method === 'POST') {
+    req.resume(); // 这个接口不用请求体
     const result = restoreNovel(seg[2]);
     if (result.error) return sendJson(res, result.status || 400, { error: result.error });
     return sendJson(res, 200, { ok: true, novel: result.novel });
@@ -707,15 +733,32 @@ async function handleApi(req, res, url) {
       for (const key of ['characters', 'world', 'timeline']) {
         if (Array.isArray(incomingBible[key])) bible[key] = replaceBibleArray(incomingBible[key]);
       }
+      // 封面信息也要过白名单：PUT 不能把 cover.ext 改成 `..\..\config.json`
+      let cover = n.cover;
+      if (body.cover === null) {
+        cover = null;
+      } else if (body.cover !== undefined) {
+        const kind = coverKind(body.cover?.ext, body.cover?.mime);
+        cover = kind
+          ? {
+              ext: kind.ext,
+              mime: kind.media,
+              size: Math.max(0, Number(body.cover.size) || 0),
+              ts: Number(body.cover.ts) || Date.now(),
+            }
+          : n.cover;
+      }
+      const chapters = sanitizeChapters(body.chapters, n.chapters);
       const merged = {
         ...n,
         ...body,
         id: n.id,
         createdAt: n.createdAt,
+        cover,
         meta,
         bible,
         outline: { ...n.outline, ...(body.outline || {}) },
-        chapters: body.chapters || n.chapters,
+        chapters,
       };
       return sendJson(res, 200, { novel: saveNovel(merged) });
     }
@@ -762,7 +805,8 @@ async function handleApi(req, res, url) {
       createSnapshot(n, { kind: 'before-restore', label: '恢复前', force: true });
       snap.id = n.id;
       snap.updatedAt = Date.now();
-      saveNovel(snap);
+      // 恢复本身不是“手滑删大段”：别再额外留一份 before-shrink
+      saveNovel(snap, { skipShrink: true });
       return sendJson(res, 200, { novel: snap });
     }
 
@@ -786,7 +830,7 @@ async function handleApi(req, res, url) {
       createSnapshot(n, { kind: 'before-restore', label: `恢复本章前：${title}`, force: true });
       // 直接改内存里的章节再 saveNovel，不走 writeChapter：恢复旧文不该算进今日码字量
       n.chapters[i].content = snapCh.content || '';
-      saveNovel(n);
+      saveNovel(n, { skipShrink: true });
       return sendJson(res, 200, { chapter: n.chapters[i] });
     }
 
@@ -1279,6 +1323,8 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  // 兜底 404 也不能把请求体留在连接里：对端带 body 时会表现成“200 + 空响应”或连接重置
+  if (method !== 'GET' && method !== 'HEAD') req.resume();
   return sendJson(res, 404, { error: '接口不存在' });
 }
 
@@ -1715,16 +1761,21 @@ function readBinary(req, limit = 8 * 1024 * 1024, label = '图片') {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    let tooBig = false;
     req.on('data', (c) => {
       size += c.length;
-      if (size > limit) {
-        reject(new Error(`${label}太大了（上限 ${Math.round(limit / 1024 / 1024)} MB）`));
-        req.destroy();
-        return;
-      }
+      if (size > limit) { tooBig = true; return; } // 继续排空，错误响应才送得出去
       chunks.push(c);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('end', () => {
+      if (tooBig) {
+        const err = new Error(`${label}太大了（上限 ${Math.round(limit / 1024 / 1024)} MB）`);
+        err.status = 413;
+        reject(err);
+        return;
+      }
+      resolve(Buffer.concat(chunks));
+    });
     req.on('error', reject);
   });
 }
@@ -1734,7 +1785,12 @@ function readBinary(req, limit = 8 * 1024 * 1024, label = '图片') {
 /* ------------------------------------------------------------------ */
 
 function serveStatic(req, res, url) {
-  let rel = decodeURIComponent(url.pathname);
+  let rel;
+  try {
+    rel = decodeURIComponent(url.pathname);
+  } catch {
+    return sendText(res, 400, 'Bad Request');
+  }
   if (rel === '/' || rel === '') rel = '/index.html';
   const file = path.join(WEB_DIR, path.normalize(rel).replace(/^([/\\])+/, ''));
   if (!file.startsWith(WEB_DIR)) return sendText(res, 403, 'Forbidden');
@@ -1771,14 +1827,21 @@ function originAllowed(req) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${HOST}:${PORT}`);
+  let url;
+  try {
+    url = new URL(req.url, `http://${HOST}:${PORT}`);
+  } catch {
+    // 非法 request-target（如 `GET http://[::1`）不能让整个进程崩掉
+    return sendJson(res, 400, { error: '请求地址不合法' });
+  }
   try {
     if (!originAllowed(req)) return sendJson(res, 403, { error: '只接受本机来源的请求' });
     if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
     return serveStatic(req, res, url);
   } catch (err) {
     console.error('[error]', err);
-    if (!res.headersSent) return sendJson(res, 500, { error: err.message || '服务器内部错误' });
+    const status = Number(err?.status) || 500;
+    if (!res.headersSent) return sendJson(res, status, { error: err.message || '服务器内部错误' });
     try { res.end(); } catch {}
   }
 });
@@ -1796,6 +1859,8 @@ function listen(port, attempt = 0) {
     }
   });
   server.listen(port, HOST, () => {
+    // 让桌面主进程知道服务端实际绑定的端口（端口被占会自动往后顺延）
+    process.env.SHU_BOUND_PORT = String(port);
     ensureDirs();
     const addr = `http://${HOST}:${port}`;
     console.log('');

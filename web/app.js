@@ -160,40 +160,60 @@ function mdLite(text) {
   return out.join('');
 }
 
+let modalGeneration = 0;
+let modalPrevFocus = null;
+
 function showModal(html, onMount, opts = {}) {
   const mask = $('#modalMask');
   const box = $('#modal');
   box.classList.toggle('modal-wide', !!opts.wide);
   box.innerHTML = html;
+  // 弹出前记住触发元素，关闭时还焦点给它
+  if (mask.hidden) modalPrevFocus = document.activeElement;
   // 弹窗是同一个容器复用的，不重置的话新弹窗会沿用上一个的滚动位置
   box.scrollTop = 0;
+  modalGeneration += 1;
+  box._gen = modalGeneration;
   // 动态内容的每一弹窗都要把 dialog 语义带上，让屏幕阅读器也能知道是弹窗
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-modal', 'true');
   const h3 = box.querySelector('h3');
   if (h3) {
     h3.id = 'modalTitle';
-    box.setAttribute('role', 'dialog');
-    box.setAttribute('aria-modal', 'true');
     box.setAttribute('aria-labelledby', 'modalTitle');
+    box.removeAttribute('aria-label');
   } else {
-    box.removeAttribute('role');
-    box.removeAttribute('aria-modal');
     box.removeAttribute('aria-labelledby');
+    box.setAttribute('aria-label', '对话框');
   }
   // 关掉弹窗时能回调一次（模型对比要用它停掉还在跑的流）
   box._onClose = opts.onClose || null;
   mask.hidden = false;
   onMount?.(box);
+  // 焦点进到弹窗里：屏幕阅读器和键盘用户都不用再从头找开头
+  const first = box.querySelector('input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])');
+  try { first?.focus({ preventScroll: true }); } catch {}
   return box;
 }
 function closeModal() {
   const box = $('#modal');
   const fn = box._onClose;
   box._onClose = null;
+  box._gen = 0;
   // 统一回收「打开章节目标」时挂上的展开状态
   $('#chWords')?.setAttribute('aria-expanded', 'false');
   try { fn?.(); } catch (err) { console.warn('[modal] onClose 出错', err); }
   $('#modalMask').hidden = true;
   box.innerHTML = '';
+  const prev = modalPrevFocus;
+  modalPrevFocus = null;
+  if (prev?.isConnected && typeof prev.focus === 'function') {
+    try { prev.focus({ preventScroll: true }); } catch {}
+  }
+}
+/** 异步流程完成后只关「自己那一扇」：弹窗已被 Esc 关掉并重开时别误关新弹窗 */
+function closeIfCurrent(box, gen) {
+  if (box?._gen === gen && !$('#modalMask').hidden) closeModal();
 }
 $('#modalMask').addEventListener('mousedown', (e) => {
   if (e.target.id === 'modalMask' && !S.batchController) closeModal();
@@ -565,7 +585,7 @@ $('#brandHome').addEventListener('click', () => setView('shelf'));
 
 const UI_THEMES = ['dark', 'light', 'soft'];
 const GLASS_LEVELS = ['clear', 'mid', 'mist'];
-function normalizeUiTheme(v) { return UI_THEMES.includes(v) ? v : 'dark'; }
+function normalizeUiTheme(v) { return UI_THEMES.includes(v) ? v : 'soft'; }
 function normalizeGlassLevel(v) { return GLASS_LEVELS.includes(v) ? v : 'mid'; }
 
 function renderAppearance() {
@@ -580,6 +600,7 @@ function renderAppearance() {
     const on = b.dataset.glassLevel === level;
     b.classList.toggle('on', on);
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.disabled = theme !== 'soft';
   });
   const row = $('#glassLevelRow');
   if (row) row.style.opacity = theme === 'soft' ? '' : '.55';
@@ -658,7 +679,7 @@ function coverOf(title) {
 function renderShelfSpotlight(progressById) {
   const spot = $('#shelfSpotlight');
   if (!spot) return;
-  const novels = (S.novels || []).filter((n) => (n.chapterCount || 0) + (n.words || 0) > 0 || true);
+  const novels = (S.novels || []).slice();
   if (!novels.length) { spot.hidden = true; return; }
   const sorted = [...novels].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   const best = sorted[0];
@@ -1000,7 +1021,7 @@ function openTrash() {
       btn.disabled = true;
       try {
         await api.send(`/api/trash/${encodeURIComponent(item.trashId)}/restore`, undefined, 'POST');
-        await loadNovels();
+        await loadNovels().catch(() => {});
         renderShelf();
         await load();
         toast(`已恢复《${item.title}》`, 'ok');
@@ -1232,8 +1253,11 @@ function openNewNovelModal() {
       const linkBtn = box.querySelector('#nvImportLink');
       const okBtn = box.querySelector('#nvOk');
       if (linkBtn.disabled) return;
+      const titleInput = box.querySelector('#nvTitle');
+      if (!titleInput.value.trim()) { toast('先填个书名吧', 'err'); titleInput.focus(); return; }
       linkBtn.disabled = true;
       okBtn.disabled = true;
+      const gen = box._gen;
       const { title, genre, author, tags, logline, platform } = novelDraftFrom(box);
       let novel;
       try {
@@ -1245,13 +1269,14 @@ function openNewNovelModal() {
       }
       const warnings = [];
       try { await saveNovelDraftMeta(novel, logline, platform); } catch (err) { warnings.push(`简介没保存：${err.message}`); }
-      closeModal();
+      closeIfCurrent(box, gen);
       await loadNovels().catch(() => {});
       try {
         await openNovel(novel.id);
       } catch (err) {
         return toast(`《${novel.title}》已建好，但没能打开：${err.message}`, 'err');
       }
+      if (box._gen !== gen) return; // 用户已经走到别的弹窗，别再塞导入页签进来
       openImportModal();
       if (warnings.length) toast(`作品已建好；${warnings.join('；')}`, 'err');
       else toast('先导入稿子，导入后可以在标题上改名', 'ok');
@@ -1259,9 +1284,12 @@ function openNewNovelModal() {
     box.querySelector('#nvOk').onclick = async () => {
       const okBtn = box.querySelector('#nvOk');
       if (okBtn.disabled) return;   // 连点两下只建一本书
+      const titleInput = box.querySelector('#nvTitle');
+      if (!titleInput.value.trim()) { toast('先填个书名吧', 'err'); titleInput.focus(); return; }
       const original = okBtn.textContent;
       okBtn.disabled = true;
       okBtn.textContent = '创建中…';
+      const gen = box._gen;
       // 先把要填的内容读出来：后面弹窗可能被 Esc 关掉，节点就没了
       const { title, genre, author, tags, logline, platform } = novelDraftFrom(box);
       let novel;
@@ -1288,13 +1316,14 @@ function openNewNovelModal() {
       } catch (err) {
         warnings.push(`第一章没建成：${err.message}`);
       }
-      closeModal();
+      closeIfCurrent(box, gen);
       await loadNovels().catch(() => {});
       try {
         await openNovel(novel.id, chapter ? { chapterId: chapter.id } : {});
       } catch (err) {
         return toast(`《${novel.title}》已建好，但没能打开：${err.message}`, 'err');
       }
+      if (box._gen !== gen) return; // 用户已经走到别的弹窗，别把键盘拔走
       if (chapter) {
         $('#chContent').focus();
         toast(
@@ -1362,10 +1391,16 @@ async function createSampleNovel() {
   if (btn) { btn.disabled = true; btn.textContent = '正在准备示例…'; }
   try {
     const { novel } = await api.send('/api/novels/sample');
-    await loadNovels();
-    renderShelf();
+    try {
+      await loadNovels();
+      renderShelf();
+    } catch { /* 示例已经建好了，只是书架没刷新 */ }
     toast(`已创建示例作品《${novel.title}》：随便逛，改坏了也不影响你自己的书`, 'ok');
-    await openNovel(novel.id);
+    try {
+      await openNovel(novel.id);
+    } catch (err) {
+      toast(`已创建《${novel.title}》，但没能打开：${errMsg(err)}`, 'err');
+    }
   } catch (err) {
     toast(`示例作品创建失败：${errMsg(err)}`, 'err');
   } finally {
@@ -1428,7 +1463,7 @@ function refreshGenModelHint() {
   const el = $('#genModel');
   if (!el) return;
   if (aiModelReady()) {
-    el.placeholder = S.config?.model || '默认';
+    el.placeholder = configuredModel('chapter') || '默认';
     el.title = '留空就用当前写作模型；也可以临时填别的模型名';
   } else {
     el.placeholder = '未接入 · 点生成';
@@ -1564,6 +1599,8 @@ function openQuickStartModal() {
 
 /* ---------------- 对话助手 ---------------- */
 const CHAT_KEY = 'shu.chatHistory.v1';
+/** 对话历史按作品隔离，避免把 A 书的上下文带进 B 书 */
+const chatKey = () => `${CHAT_KEY}.${S.novel?.id || 'global'}`;
 let chatHistory = [];
 let chatStreaming = false;
 
@@ -1578,6 +1615,7 @@ function renderChatLog() {
   chatHistory.forEach((msg, i) => {
     const div = document.createElement('div');
     div.className = `chat-bubble ${msg.role}`;
+    div.dataset.chatIndex = String(i);
     div.textContent = msg.content;
     log.appendChild(div);
     if (msg.role === 'assistant' && msg.content.trim()) {
@@ -1639,7 +1677,7 @@ async function chatSend(text, focusInput = true) {
   // 插入一个 pending 气泡
   const pendingIdx = chatHistory.length;
   chatAppendMessage('assistant', '…');
-  const bubble = document.querySelector(`#chatLog .chat-bubble:last-of-type`);
+  const bubble = document.querySelector(`#chatLog .chat-bubble[data-chat-index="${pendingIdx}"]`);
   if (bubble) bubble.classList.add('pending');
   let acc = '';
   const providerName = S.config?.providers?.[0]?.name || '模型';
@@ -1655,7 +1693,7 @@ async function chatSend(text, focusInput = true) {
     }, {
       onDelta: (delta) => {
         acc += delta;
-        const live = document.querySelector(`#chatLog .chat-bubble:last-of-type`);
+        const live = document.querySelector(`#chatLog .chat-bubble[data-chat-index="${pendingIdx}"]`);
         if (live) { live.textContent = acc; live.classList.remove('pending'); }
       },
     });
@@ -1679,15 +1717,22 @@ async function chatSend(text, focusInput = true) {
   }
 }
 
+function loadChatHistory() {
+  const saved = localStorage.getItem(chatKey());
+  try {
+    chatHistory = saved ? JSON.parse(saved).slice(-20) : [];
+  } catch {
+    chatHistory = [];
+  }
+  renderChatLog();
+}
+
 function chatInit() {
   const input = document.querySelector('#chatInput');
   const sendBtn = document.querySelector('#chatSend');
   const log = document.querySelector('#chatLog');
   if (!input || !sendBtn || !log) return;
-  const saved = localStorage.getItem(CHAT_KEY);
-  if (saved) {
-    try { chatHistory = JSON.parse(saved).slice(-20); renderChatLog(); } catch { chatHistory = []; }
-  }
+  loadChatHistory();
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing && !e.shiftKey) { e.preventDefault(); chatSend(input.value); }
   });
@@ -1727,7 +1772,7 @@ function chatInit() {
   window.addEventListener('beforeunload', () => {
     try {
       const clean = chatHistory.filter((m) => !(m.role === 'assistant' && String(m.content).startsWith('生成失败：'))).slice(-20);
-      localStorage.setItem(CHAT_KEY, JSON.stringify(clean));
+      localStorage.setItem(chatKey(), JSON.stringify(clean));
     } catch {}
   });
 }
@@ -2890,28 +2935,40 @@ $('#inspirationBtn').addEventListener('click', openInspirationModal);
 $('#emptyQuickStartBtn').addEventListener('click', openQuickStartModal);
 
 
+let openNovelSeq = 0;
+
 async function openNovel(id, opts = {}) {
   // 换作品前先把当前作品的改动落盘 —— 一旦换过去，旧作品的内存内容就被替换了，
   // 没落盘的部分谁也救不回来。落不下去时明确问一句，别默默丢。
-  if (S.novel && S.novel.id !== id) {
-    // 设定库 / 大纲的防抖保存也要先落盘：它记的是旧作品的对象，不能等切完再发
-    const partsOk = await saveNovelPart.flush();
-    if (!partsOk) {
-      const go = confirm(`《${S.novel.title}》的设定或大纲还有改动没能保存。\n继续打开别的作品会丢掉这些改动。仍要继续吗？`);
-      if (!go) return;
-    }
-    if (S.unsaved.size) {
-      const ok = await flushSave();
-      if (!ok) {
-        const go = confirm(`《${S.novel.title}》还有 ${S.unsaved.size} 章没能保存（${S.saveErr || '未知原因'}）。\n继续打开别的作品会丢掉这些改动。仍要继续吗？`);
-        if (!go) return;
-        S.unsaved.clear();
-        S.dirty = false;
-        refreshSavePill();
-      }
+  const same = !!S.novel && S.novel.id === id;
+  // 设定库 / 大纲的防抖保存也要先落盘：它记的是旧作品的对象，不能等切完再发
+  const partsOk = await saveNovelPart.flush();
+  if (!partsOk) {
+    if (same) { toast('设定或大纲没能保存，先处理一下吧', 'err'); return false; }
+    const go = confirm(`《${S.novel.title}》的设定或大纲还有改动没能保存。\n继续打开别的作品会丢掉这些改动。仍要继续吗？`);
+    if (!go) return false;
+  }
+  if (S.unsaved.size) {
+    const ok = await flushSave();
+    if (!ok) {
+      if (same) { toast('正文还没能保存，先别换过去', 'err'); return false; }
+      const go = confirm(`《${S.novel.title}》还有 ${S.unsaved.size} 章没能保存（${S.saveErr || '未知原因'}）。\n继续打开别的作品会丢掉这些改动。仍要继续吗？`);
+      if (!go) return false;
+      S.unsaved.clear();
+      S.dirty = false;
+      refreshSavePill();
     }
   }
-  const { novel } = await api.get(`/api/novels/${id}`);
+  if (same) { setView('studio'); renderStudio(); return true; }
+  const seq = ++openNovelSeq;
+  let novel;
+  try {
+    ({ novel } = await api.get(`/api/novels/${id}`));
+  } catch (err) {
+    if (seq === openNovelSeq) toast(`没能打开：${errMsg(err)}`, 'err');
+    return false;
+  }
+  if (seq !== openNovelSeq) return false; // 过期的打开请求，结果丢弃
   S.novel = novel;
   const want = opts.chapterId && novel.chapters.some((c) => c.id === opts.chapterId) ? opts.chapterId : null;
   S.chapterId = want || novel.chapters[0]?.id || null;
@@ -2922,8 +2979,10 @@ async function openNovel(id, opts = {}) {
   S.chapterCursor = '';
   S.threadFilter = 'all';      // 线索页也回到全部
   S.bibleSearch = { outline: '', characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '', timelineViz: '' }; // 搜索词属于上一本书，别带过去
+  loadChatHistory();
   setView('studio');
   renderStudio();
+  return true;
 }
 
 /* ============================================================
@@ -4444,6 +4503,22 @@ document.addEventListener('mousedown', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && editorMoreMenu && !editorMoreMenu.hidden) closeEditorMore();
 });
+/** 菜单键盘导航：↑↓ 移动焦点，Home/End 到首尾（视角下拉框也算一个停靠位） */
+editorMoreMenu?.addEventListener('keydown', (e) => {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+  if (e.target.tagName === 'SELECT' && e.key === 'ArrowDown') return; // 下拉框自身的展开行为
+  e.preventDefault();
+  const items = $$('#editorMoreMenu select, #editorMoreMenu [role="menuitem"], #editorMoreMenu [role="menuitemcheckbox"]', editorMoreMenu).filter((el) => !el.disabled);
+  if (!items.length) return;
+  const idx = items.indexOf(document.activeElement);
+  let next = 0;
+  if (e.key === 'Home') next = 0;
+  else if (e.key === 'End') next = items.length - 1;
+  else if (idx === -1) next = 0;
+  else if (e.key === 'ArrowDown') next = (idx + 1) % items.length;
+  else next = (idx - 1 + items.length) % items.length;
+  items[next].focus();
+});
 window.addEventListener('resize', closeEditorMore);
 window.addEventListener('blur', closeEditorMore);
 
@@ -4950,7 +5025,7 @@ function openChapterBoard() {
         selected.clear();
         closeModal();
         renderStudio();
-        loadNovels();
+        loadNovels().catch(() => {});
       });
 
       // 拖放目标列（非虚拟滚动时用 listEl，虚拟滚动时用 col）
@@ -5208,7 +5283,7 @@ function makeChapterItem(c, i, { filtered = false, group = null } = {}) {
         refreshSavePill();
         if (S.chapterId === c.id) S.chapterId = novel.chapters[Math.min(i, novel.chapters.length - 1)]?.id || null;
         renderStudio();
-        loadNovels();
+        loadNovels().catch(() => {});
       })();
     }
   });
@@ -5835,7 +5910,7 @@ async function saveChapterNow(id = S.chapterId) {
   if (isCurrent) S.savingId = null;
   refreshSavePill();
   renderTopbarActions();
-  loadNovels();
+  loadNovels().catch(() => {});
   loadStats();          // 节流 5 秒：今日码字量跟着正文涨
   return true;
 }
@@ -7105,21 +7180,12 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
 
 /** 继续阅读：打开作品并进入阅读模式，自动恢复上次位置 */
 async function continueReading(novelId) {
-  if (S.novel?.id === novelId) {
-    openReader(S.chapterId);
-    return;
-  }
-  try {
-    const { novel } = await api.get(`/api/novels/${novelId}`);
-    S.novel = novel;
-    S.chapterId = novel.chapters[0]?.id || null;
-    setView('studio');
-    renderStudio();
-    // 等待渲染完成后打开阅读器
-    setTimeout(() => openReader(null, { restore: true }), 0);
-  } catch (err) {
-    toast(`打开失败：${err.message}`, 'err');
-  }
+  // 先走一遍 openNovel：未保存内容会被冲刷 / 确认，不会丢
+  const opened = await openNovel(novelId);
+  if (!opened) return;
+  setView('studio');
+  renderStudio();
+  setTimeout(() => openReader(null, { restore: true }), 0);
 }
 
 $('#previewBtn').addEventListener('click', () => openReader(S.chapterId, { restore: true }));
@@ -7761,7 +7827,7 @@ function askBatchNext(message, primary) {
       <div class="modal-foot"><button class="btn btn-text" id="batchStop">停在这里</button><button class="btn btn-primary" id="batchNext">${esc(primary)}</button></div>`, (box) => {
       box.querySelector('#batchStop').onclick = () => { closeModal(); resolve('stop'); };
       box.querySelector('#batchNext').onclick = () => { closeModal(); resolve('next'); };
-    });
+    }, { onClose: () => resolve('stop') });
   });
 }
 
@@ -7777,7 +7843,7 @@ async function batchGenerateChapters() {
       <div class="modal-foot"><button class="btn btn-text" id="batchCancel">关闭</button><button class="btn btn-primary" id="batchStart">开始生成</button></div>`, (box) => {
       box.querySelector('#batchCancel').onclick = () => { closeModal(); resolve(0); };
       box.querySelector('#batchStart').onclick = () => { closeModal(); resolve(Math.max(1, Math.min(10, Number(box.querySelector('#batchCount')?.value) || 1))); };
-    });
+    }, { onClose: () => resolve(0) });
   });
   if (!count) return;
   const lastNo = S.novel.chapters[idx + count - 1]?.no || S.novel.chapters[S.novel.chapters.length - 1]?.no;
@@ -8901,6 +8967,7 @@ function setAssistSubtab(name, { focusChat = false } = {}) {
     const on = btn.dataset.subtab === target;
     btn.classList.toggle('on', on);
     btn.setAttribute('aria-selected', String(on));
+    btn.tabIndex = on ? 0 : -1;
   });
   $$('.assist-subpane').forEach((pane) => {
     const on = pane.dataset.subpane === target;
@@ -8919,6 +8986,19 @@ function openAssistTool(name) {
 $$('#assistSubtabs button[data-subtab]').forEach((btn) => {
   btn.addEventListener('click', () => setAssistSubtab(btn.dataset.subtab, { focusChat: btn.dataset.subtab === 'chat' }));
 });
+$$('#assistSubtabs button[data-subtab]').forEach((b, _, buttons) => b.addEventListener('keydown', (e) => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+  e.preventDefault();
+  const active = document.activeElement?.dataset?.subtab || buttons.find((x) => x.classList.contains('on'))?.dataset.subtab;
+  const cur = buttons.findIndex((x) => x.dataset.subtab === active);
+  let idx = cur < 0 ? 0 : cur;
+  if (e.key === 'ArrowRight') idx = (idx + 1) % buttons.length;
+  else if (e.key === 'ArrowLeft') idx = (idx - 1 + buttons.length) % buttons.length;
+  else if (e.key === 'Home') idx = 0;
+  else if (e.key === 'End') idx = buttons.length - 1;
+  buttons[idx].focus();
+  setAssistSubtab(buttons[idx].dataset.subtab, { focusChat: buttons[idx].dataset.subtab === 'chat' });
+}));
 function showAssistTab(name) {
   const target = ASSIST_TAB_ALIASES[name] || name;
   $$('#assistTabs button').forEach((x) => {
@@ -9473,9 +9553,13 @@ function renderCorkboard() {
     return;
   }
   const scenes = getScenes(ch);
-  const totalTarget = scenes.reduce((s, sc) => s + (sc.targetWords || 0), 0);
+  const sceneWords = (sc) => {
+    const n = Number(sc?.targetWords);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  const totalTarget = scenes.reduce((s, sc) => s + sceneWords(sc), 0);
   const totalActual = scenes.reduce((s, sc) => s + countWords(sc.summary || ''), 0);
-  $('#scenesInfo').innerHTML = `第 ${ch.no} 章《${ch.title}》 · ${scenes.length} 个场景 · 目标 ${totalTarget || '—'} 字 · 梗概 ${totalActual} 字`;
+  $('#scenesInfo').textContent = `第 ${ch.no} 章《${ch.title}》 · ${scenes.length} 个场景 · 目标 ${totalTarget || '—'} 字 · 梗概 ${totalActual} 字`;
   if (!scenes.length) {
     board.innerHTML = '<div class="cork-empty">还没有场景卡片。点「从章纲生成场景」或「新增场景」开始。</div>';
     return;
@@ -9497,7 +9581,7 @@ function renderCorkboard() {
       <div class="scene-field"><span class="scene-label">人物</span><span class="scene-value">${esc(sc.characters || '')}</span>${!sc.characters ? '<span class="scene-warn-tag">缺</span>' : ''}</div>
       <div class="scene-field"><span class="scene-label">梗概</span><span class="scene-value">${esc(sc.summary || '')}</span>${!sc.summary ? '<span class="scene-warn-tag">缺</span>' : ''}</div>
       <div class="scene-field"><span class="scene-label">钩子</span><span class="scene-value">${esc(sc.hook || '')}</span></div>
-      <div class="scene-field"><span class="scene-label">目标字数</span><span class="scene-value">${sc.targetWords || ''}</span>${sc.targetWords ? ` · ${Math.round((countWords(sc.summary || '') / sc.targetWords) * 100)}%` : ''}</div>
+      <div class="scene-field"><span class="scene-label">目标字数</span><span class="scene-value">${Number(sc.targetWords) || ''}</span>${Number(sc.targetWords) ? ` · ${Math.round((countWords(sc.summary || '') / Number(sc.targetWords)) * 100)}%` : ''}</div>
     </div>
   `).join('');
 
@@ -9593,7 +9677,7 @@ function openSceneEditor(ch, index) {
     <label class="field-label">出场人物<input class="input" id="scCharacters" value="${esc(sc.characters || '')}" placeholder="例：林昭、沈鹤" /></label>
     <label class="field-label">梗概<textarea class="textarea" id="scSummary" rows="3" placeholder="这一场要发生什么">${esc(sc.summary || '')}</textarea></label>
     <label class="field-label">场末钩子<textarea class="textarea" id="scHook" rows="2" placeholder="留给下一场的悬念">${esc(sc.hook || '')}</textarea></label>
-    <label class="field-label">目标字数<input class="input" id="scTargetWords" type="number" value="${sc.targetWords || ''}" min="0" step="100" placeholder="留空不设目标" /></label>
+    <label class="field-label">目标字数<input class="input" id="scTargetWords" type="number" value="${Number(sc.targetWords) || ''}" min="0" step="100" placeholder="留空不设目标" /></label>
     <div class="modal-foot">
       <button class="btn btn-text" id="scCancel">取消</button>
       <button class="btn btn-primary" id="scSave">保存</button>
@@ -9791,8 +9875,18 @@ $('#scenesImportBtn').addEventListener('click', () => {
       // 合并：避免重复（按 pov+location+summary 去重）
       const existingKeys = new Set((ch.scenes || []).map(s => `${s.pov}|${s.location}|${s.summary}`));
       let added = 0;
-      for (const sc of data.scenes) {
-        const key = `${sc.pov || ''}|${sc.location || ''}|${sc.summary || ''}`;
+      for (const raw of data.scenes) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+        const sc = {
+          pov: String(raw.pov || '').slice(0, 200),
+          location: String(raw.location || '').slice(0, 300),
+          time: String(raw.time || '').slice(0, 200),
+          characters: String(raw.characters || '').slice(0, 500),
+          summary: String(raw.summary || '').slice(0, 4000),
+          hook: String(raw.hook || '').slice(0, 1000),
+          targetWords: Math.max(0, Math.min(1000000, Math.floor(Number(raw.targetWords) || 0))),
+        };
+        const key = `${sc.pov}|${sc.location}|${sc.summary}`;
         if (!existingKeys.has(key)) {
           ch.scenes.push(sc);
           existingKeys.add(key);
@@ -9862,11 +9956,12 @@ function syncBibleGroup(tab = bibleTab) {
   $$('#bibleGroups button').forEach((x) => {
     const on = x.dataset.bibleGroup === bibleGroup;
     x.classList.toggle('on', on);
-    x.setAttribute('aria-selected', String(on));
+    x.setAttribute('aria-pressed', String(on));
   });
   const allowed = new Set(BIBLE_GROUPS[bibleGroup] || []);
   $$('#bibleTabs button').forEach((x) => {
     x.hidden = !allowed.has(x.dataset.bible);
+    x.setAttribute('aria-pressed', String(x.dataset.bible === tab));
   });
 }
 $$('#bibleGroups button').forEach((b) => b.addEventListener('click', () => {
@@ -9882,7 +9977,11 @@ syncBibleGroup();
 
 $$('#bibleTabs button').forEach((b) => b.addEventListener('click', () => {
   bibleTab = b.dataset.bible;
-  $$('#bibleTabs button').forEach((x) => x.classList.toggle('on', x === b));
+  $$('#bibleTabs button').forEach((x) => {
+    const on = x === b;
+    x.classList.toggle('on', on);
+    x.setAttribute('aria-pressed', String(on));
+  });
   setView('bible');
   renderBible();                  // 先把本地内存画出来（含还没落盘的输入）——体感优先
   if (S.novel) {
@@ -10478,11 +10577,20 @@ async function putNovelPart(novelId, part, msg) {
   try {
     const { novel } = await api.put(`/api/novels/${novelId}`, part);
     if (S.novel?.id === novelId) {
-      S.novel = novel;
+      // 服务器返回的是磁盘版；把内存里还没落盘的章节换回来，别把用户刚打的字盖掉
+      const prev = S.novel;
+      const next = { ...novel };
+      const prevById = new Map((prev?.chapters || []).map((c) => [c.id, c]));
+      if (Array.isArray(next.chapters)) {
+        next.chapters = next.chapters.map((c) => (S.unsaved.has(c.id) && prevById.has(c.id) ? prevById.get(c.id) : c));
+      } else {
+        next.chapters = prev?.chapters;
+      }
+      S.novel = next;
       refreshSavePill();
     }
     if (msg) toast(msg, 'ok');
-    loadNovels();
+    loadNovels().catch(() => {});
     return true;
   } catch (err) {
     if (S.novel?.id === novelId) setSave('dirty', '保存失败');
@@ -11860,7 +11968,7 @@ function renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache) {
       <span style="flex:1"></span>
       <button class="lock-btn${c.locked ? ' on' : ''}" title="${c.locked ? '取消锁定' : '锁定后 AI 生成不可改变此人设定'}" aria-label="${c.locked ? '取消锁定' : '锁定'}">${ico('lock')}</button>
       <button class="vis-btn${(c.visibility || '') === 'shadowed' ? ' on' : ''}" title="${(c.visibility || '') === 'shadowed' ? '改为已揭示' : '尚未揭示（伏笔中）'}" aria-label="${(c.visibility || '') === 'shadowed' ? '改为已揭示' : '尚未揭示（伏笔中）'}">${ico((c.visibility || '') === 'shadowed' ? 'eye-off' : 'eye')}</button>
-      <input class="input reveal-at" data-reveal-at type="number" min="1" step="1" placeholder="第几章揭示" title="预计第几章揭示（留空 = 不定计划）" aria-label="预计揭示章节号" value="${c.revealAt || ''}" ${c.locked ? 'disabled' : ''} ${(c.visibility || '') === 'shadowed' ? '' : 'hidden'} />
+      <input class="input reveal-at" data-reveal-at type="number" min="1" step="1" placeholder="第几章揭示" title="预计第几章揭示（留空 = 不定计划）" aria-label="预计揭示章节号" value="${Number(c.revealAt) || ''}" ${c.locked ? 'disabled' : ''} ${(c.visibility || '') === 'shadowed' ? '' : 'hidden'} />
       <button class="del" title="删除" ${c.locked ? 'disabled' : ''}>${ico('trash')}</button>
     </div>
     <div class="entry-locked-note" ${c.locked ? '' : 'hidden'}>已锁定，AI 生成不会改动此设定</div>
@@ -12075,7 +12183,7 @@ function renderWorldEntry(w, i, n, mentionIndex, mentionCache, stateCache) {
       <span style="flex:1"></span>
       <button class="lock-btn${w.locked ? ' on' : ''}" title="${w.locked ? '取消锁定' : '锁定后 AI 生成不可改变此条目'}" aria-label="${w.locked ? '取消锁定' : '锁定'}">${ico('lock')}</button>
       <button class="vis-btn${(w.visibility || '') === 'shadowed' ? ' on' : ''}" title="${(w.visibility || '') === 'shadowed' ? '改为已揭示' : '尚未揭示（伏笔中）'}" aria-label="${(w.visibility || '') === 'shadowed' ? '改为已揭示' : '尚未揭示（伏笔中）'}">${ico((w.visibility || '') === 'shadowed' ? 'eye-off' : 'eye')}</button>
-      <input class="input reveal-at" data-reveal-at type="number" min="1" step="1" placeholder="第几章揭示" title="预计第几章揭示（留空 = 不定计划）" aria-label="预计揭示章节号" value="${w.revealAt || ''}" ${w.locked ? 'disabled' : ''} ${(w.visibility || '') === 'shadowed' ? '' : 'hidden'} />
+      <input class="input reveal-at" data-reveal-at type="number" min="1" step="1" placeholder="第几章揭示" title="预计第几章揭示（留空 = 不定计划）" aria-label="预计揭示章节号" value="${Number(w.revealAt) || ''}" ${w.locked ? 'disabled' : ''} ${(w.visibility || '') === 'shadowed' ? '' : 'hidden'} />
       <button class="del" title="删除" ${w.locked ? 'disabled' : ''}>${ico('trash')}</button>
     </div>
     <div class="entry-locked-note" ${w.locked ? '' : 'hidden'}>已锁定，AI 生成不会改动此设定</div>
@@ -13934,7 +14042,7 @@ function renderSettings() {
       const msg = div.querySelector('[data-msg]');
       msg.className = 'status-err';
       msg.textContent = '正在连接…';
-      await saveConfig();
+      if (!await saveConfig()) { msg.className = 'status-err'; msg.textContent = '设置没能保存，先解决它再连'; return; }
       try {
         const r = await api.send('/api/config/models', {
           providerId: p.id,
@@ -13947,7 +14055,8 @@ function renderSettings() {
           if (r.models.length) {
             p.models = r.models;
             div.querySelector('[data-pk="models"]').value = r.models.join(', ');
-            await saveConfig();
+            const saved = await saveConfig();
+            if (!saved) msg.textContent += '（模型列表没保存）';
           }
           renderModelSelect();
         } else {
@@ -14048,7 +14157,7 @@ function renderPromptTemplateUI() {
   varsEl.textContent = varHintText(slot?.vars);
 }
 
-function savePromptTemplate() {
+async function savePromptTemplate() {
   const taskKey = $('#promptTaskSelect').value;
   const system = $('#promptSystem').value.trim();
   const user = $('#promptUser').value.trim();
@@ -14060,16 +14169,16 @@ function savePromptTemplate() {
     if (!S.config.promptTemplates) S.config.promptTemplates = {};
     S.config.promptTemplates[taskKey] = { system, user };
   }
-  saveConfig();
+  if (!(await saveConfig())) return;
   $('#promptMsg').textContent = '已保存';
   setTimeout(() => { $('#promptMsg').textContent = ''; }, 2000);
   toast(`已保存 ${taskKey} 模板`, 'ok');
 }
 
-function resetPromptTemplate() {
+async function resetPromptTemplate() {
   const taskKey = $('#promptTaskSelect').value;
   if (S.config.promptTemplates) delete S.config.promptTemplates[taskKey];
-  saveConfig();
+  if (!(await saveConfig())) return;
   renderPromptTemplateUI();
   $('#promptMsg').textContent = '已恢复默认';
   setTimeout(() => { $('#promptMsg').textContent = ''; }, 2000);
@@ -14244,7 +14353,7 @@ async function applyTemplatePackage(templates, { merge = true, overwrite = false
     }
   }
   S.config.promptTemplates = cur;
-  await saveConfig();
+  if (!await saveConfig()) throw new Error('设置没能保存');
   renderPromptTemplateUI();
   return { added, updated, skipped };
 }
@@ -14400,8 +14509,10 @@ function configForSave(cfg) {
 
 async function saveConfig() {
   const cfg = S.config;
+  if (!cfg) return false;
   cfg.temperature = Number($('#cfgTemp').value);
-  cfg.maxTokens = Number($('#cfgMaxTokens').value) || 4096;
+  const tokens = Number($('#cfgMaxTokens').value);
+  cfg.maxTokens = Number.isFinite(tokens) && tokens > 0 ? Math.min(200000, Math.floor(tokens)) : 8192;
   cfg.model = $('#cfgModel').value || cfg.model;
   cfg.roleModels = {
     write: $('#roleWrite').value.trim(),
@@ -14410,17 +14521,25 @@ async function saveConfig() {
   };
   // 保存提示词模板
   cfg.promptTemplates = cfg.promptTemplates || {};
-  const budget = Number($('#cfgBudget').value) || 26000;
+  const budgetRaw = Number($('#cfgBudget').value);
+  const budget = Number.isFinite(budgetRaw) && budgetRaw > 0 ? Math.min(200000, Math.floor(budgetRaw)) : 26000;
   if (S.novel && S.novel.meta.contextBudget !== budget) {
     S.novel.meta.contextBudget = budget;
     api.put(`/api/novels/${S.novel.id}`, { meta: S.novel.meta }).catch(() => {});
   }
-  await api.send('/api/config', configForSave(cfg));
-  S.config = await api.get('/api/config');
-  refreshGenModelHint();
+  try {
+    await api.send('/api/config', configForSave(cfg));
+    S.config = await api.get('/api/config');
+    refreshGenModelHint();
+    return true;
+  } catch (err) {
+    toast(`设置没能保存：${errMsg(err)}`, 'err');
+    return false;
+  }
 }
 $('#saveCfgBtn').addEventListener('click', async () => {
-  await saveConfig();
+  const ok = await saveConfig();
+  if (!ok) return;
   $('#cfgMsg').textContent = '已保存';
   setTimeout(() => { $('#cfgMsg').textContent = ''; }, 2000);
   toast('设置已保存', 'ok');
@@ -16348,7 +16467,7 @@ function sprintToggle(force) {
   const show = typeof force === 'boolean' ? force : panel.hidden;
   panel.hidden = !show;
   document.body.classList.toggle('sprint-open', show);
-  $('#sprintBtn')?.setAttribute('aria-pressed', String(show));
+  $('#sprintBtn')?.setAttribute('aria-checked', String(show));
   if (show) sprintRender();
 }
 function sprintInit() {

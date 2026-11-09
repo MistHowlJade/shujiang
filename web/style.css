@@ -152,6 +152,7 @@ h1, h2, h3 { letter-spacing: -.021em; }
   box-shadow: 0 0 0 3px var(--accent-bg), 0 0 0 1.5px var(--accent);
 }
 main:focus { outline: none; }
+main:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-line); border-radius: var(--r-md); }
 
 /* ==========================================================================
    骨架
@@ -522,6 +523,7 @@ body[data-theme="light"] .segmented button.on { box-shadow: var(--sh-1); }
 .details summary::before { content: "›"; font-size: 16px; line-height: 1; transition: transform 200ms var(--ease); }
 .details[open] summary::before { transform: rotate(90deg); }
 .details summary:hover { color: var(--text-1); }
+.details summary:focus-visible { outline: none; border-radius: var(--r-sm); box-shadow: 0 0 0 3px var(--accent-bg), 0 0 0 1.5px var(--accent); color: var(--text-1); }
 .details .field-grid { margin-top: 12px; }
 
 .section-head {
@@ -1449,7 +1451,7 @@ body[data-theme="light"] .dock-main .assist-pane > .card {
 }
 .assist-main { display: contents; }
 .assist-pane, .assist-pane.on { display: contents; animation: none; }
-.dock-main .assist-pane:not([data-pane="write"]) { display: none !important; }
+.dock-main .assist-pane:not(.on) { display: none !important; }
 
 
 .output {

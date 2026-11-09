@@ -364,6 +364,12 @@ const RASTER = {
 
 const MAX_COVER_BYTES = 8 * 1024 * 1024;
 
+/** 只认内置白名单里的封面格式；防 coverPath 被 `ext` 里的路径穿越利用 */
+export function coverKind(ext, mime) {
+  const needle = String(ext || '').toLowerCase();
+  return Object.values(RASTER).find((k) => k.ext === needle && (!mime || k.media === String(mime).toLowerCase())) || null;
+}
+
 function validId(id) {
   return /^n_[a-z0-9]{6,}$/.test(String(id || ''));
 }
@@ -398,14 +404,15 @@ export function readCoverImage(novel) {
   const meta = novel?.cover;
   if (!meta || !meta.ext) return null;
   if (!validId(novel.id)) return null;
-  const file = coverPath(novel.id, meta.ext);
+  const kind = coverKind(meta.ext, meta.mime);
+  if (!kind) return null;
+  const file = coverPath(novel.id, kind.ext);
   try {
     if (!fs.existsSync(file)) return null;
-    const kind = Object.values(RASTER).find((k) => k.ext === meta.ext);
     return {
       data: fs.readFileSync(file),
-      ext: meta.ext,
-      mime: meta.mime || kind?.media || 'application/octet-stream',
+      ext: kind.ext,
+      mime: kind.media,
     };
   } catch {
     return null;
@@ -415,7 +422,8 @@ export function readCoverImage(novel) {
 /** 删掉自定义封面（之后导出又回到自动生成） */
 export function deleteCoverImage(id, meta) {
   if (!validId(id)) return;
-  const exts = meta?.ext ? [meta.ext] : Object.values(RASTER).map((k) => k.ext);
+  const kind = coverKind(meta?.ext, meta?.mime);
+  const exts = kind ? [kind.ext] : Object.values(RASTER).map((k) => k.ext);
   for (const ext of exts) fs.rmSync(coverPath(id, ext), { force: true });
 }
 

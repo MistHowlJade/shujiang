@@ -25,7 +25,6 @@ asar: false
 # 缓存放在项目 .cache/ 里，不碰 C:\Users\…\AppData 下面的任何地方。
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
-  cache: D:/项目/shu/.cache/electron-cache
 
 # 只发布便携版：NSIS 安装包在个别机器上有「无法关闭书匠」死循环，
 # 发布流程里不再打也不再附 Setup。需要安装版自行按下文绿色版使用。

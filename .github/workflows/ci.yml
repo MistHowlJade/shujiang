@@ -18,12 +18,16 @@ jobs:
       - name: 单元测试（lib，635 项）
         run: npm test
 
+      - name: 模块引用自检
+        run: npm run check-refs
+
       # 假模型 + 隔离服务 + 回归跑在同一个 step 里——子进程只活得过本 step，拆开就都没了
       # 数据写到临时目录，绝不碰任何真实 data/
-      - name: 回归自检（288 项）
+      - name: 回归自检（295 项）
         shell: pwsh
         run: |
           $env:SHU_DATA_DIR = Join-Path $env:RUNNER_TEMP 'shujiang-ci'
+          $env:SHU_PORT = '8848'
           $mock = Start-Process node -ArgumentList 'dev/mock-openai.js' -NoNewWindow -PassThru
           $svr  = Start-Process node -ArgumentList 'server/server.js' -NoNewWindow -PassThru
           $deadline = (Get-Date).AddSeconds(90)

@@ -46,17 +46,28 @@ if (!gotLock) {
 }
 
 async function start() {
-  // 数据目录：默认跟本体走（zip 解压目录 / 便携版 exe 旁边的 data/）；老用户不迁移
-  const dataDir = resolveDataDir({ isPackaged: app.isPackaged, execPath: process.execPath, userDataPath: app.getPath('userData'), sourceRoot: ROOT });
-  process.env.SHU_DATA_DIR = dataDir;
-  const port = await getFreePort();
-  process.env.SHU_PORT = String(port);
+  try {
+    // 数据目录：默认跟本体走（zip 解压目录 / 便携版 exe 旁边的 data/）；老用户不迁移
+    const dataDir = resolveDataDir({ isPackaged: app.isPackaged, execPath: process.execPath, userDataPath: app.getPath('userData'), sourceRoot: ROOT });
+    process.env.SHU_DATA_DIR = dataDir;
+    const port = await getFreePort();
+    process.env.SHU_PORT = String(port);
+    process.env.SHU_BOUND_PORT = '';
 
-  // 服务端从这一行起监听（import 即启动），WEB_DIR 指向随应用带走的 web/
-  await import(pathToFileURL(path.join(ROOT, 'server', 'server.js')).href);
+    // 服务端从这一行起监听（import 即启动），WEB_DIR 指向随应用带走的 web/
+    await import(pathToFileURL(path.join(ROOT, 'server', 'server.js')).href);
 
-  const url = `http://127.0.0.1:${port}`;
-  const isLocal = (target) => typeof target === 'string' && (target.startsWith(`${url}/`) || target === url || target.startsWith(`http://localhost:${port}`));
+    // 端口被占时服务端会自动顺延；等它真正就绪，别用探测时的端口开窗口
+    let boundPort = 0;
+    for (let i = 0; i < 100; i += 1) {
+      const v = Number(process.env.SHU_BOUND_PORT);
+      if (Number.isInteger(v) && v > 0) { boundPort = v; break; }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if (!boundPort) throw new Error('本地服务没有就绪：端口被占用或启动失败');
+
+    const url = `http://127.0.0.1:${boundPort}`;
+    const isLocal = (target) => typeof target === 'string' && (target.startsWith(`${url}/`) || target === url || target.startsWith(`http://localhost:${boundPort}`));
 
   const win = new BrowserWindow({
     width: 1440,
@@ -67,7 +78,7 @@ async function start() {
     // 稳定性优先：窗口背板不透明（v1.0.17/18 亚克力透明材质在部分机型上糊白/合成失败）
     backgroundColor: '#15110d',
     autoHideMenuBar: true,
-    icon: path.join(__dirname, 'icon.png'),
+    icon: path.join(ROOT, 'build', 'icon.png'),
     show: false,
     webPreferences: {
       contextIsolation: true,
@@ -92,7 +103,11 @@ async function start() {
     };
   });
 
-  await win.loadURL(url);
+    await win.loadURL(url);
+  } catch (err) {
+    // 交给外层的 whenReady().catch 统一报错并退出
+    throw err;
+  }
 }
 
 app.on('window-all-closed', () => {
