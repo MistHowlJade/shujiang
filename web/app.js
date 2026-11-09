@@ -1269,6 +1269,7 @@ function openNewNovelModal() {
       }
       const warnings = [];
       try { await saveNovelDraftMeta(novel, logline, platform); } catch (err) { warnings.push(`简介没保存：${err.message}`); }
+      const stillMine = box._gen === gen;
       closeIfCurrent(box, gen);
       await loadNovels().catch(() => {});
       try {
@@ -1276,7 +1277,7 @@ function openNewNovelModal() {
       } catch (err) {
         return toast(`《${novel.title}》已建好，但没能打开：${err.message}`, 'err');
       }
-      if (box._gen !== gen) return; // 用户已经走到别的弹窗，别再塞导入页签进来
+      if (!stillMine || box._gen !== 0) return; // 用户已经打开了别的弹窗，别再塞导入页签进来
       openImportModal();
       if (warnings.length) toast(`作品已建好；${warnings.join('；')}`, 'err');
       else toast('先导入稿子，导入后可以在标题上改名', 'ok');
@@ -1316,6 +1317,7 @@ function openNewNovelModal() {
       } catch (err) {
         warnings.push(`第一章没建成：${err.message}`);
       }
+      const stillMine = box._gen === gen;
       closeIfCurrent(box, gen);
       await loadNovels().catch(() => {});
       try {
@@ -1323,7 +1325,7 @@ function openNewNovelModal() {
       } catch (err) {
         return toast(`《${novel.title}》已建好，但没能打开：${err.message}`, 'err');
       }
-      if (box._gen !== gen) return; // 用户已经走到别的弹窗，别把键盘拔走
+      if (!stillMine || box._gen !== 0) return; // 用户已经走到别的弹窗，别把焦点从新弹窗拔走
       if (chapter) {
         $('#chContent').focus();
         toast(
@@ -1358,6 +1360,7 @@ function openImportNew() {
       okBtn.disabled = true;
       const original = okBtn.textContent;
       okBtn.textContent = '创建中…';
+      const gen = box._gen;
       let novel;
       try {
         ({ novel } = await api.send('/api/novels', { title: titleEl.value.trim() || '导入的作品' }));
@@ -1366,13 +1369,15 @@ function openImportNew() {
         okBtn.textContent = original;
         return toast(err.message, 'err');
       }
-      closeModal();
+      const stillMine = box._gen === gen;
+      closeIfCurrent(box, gen);
       await loadNovels().catch(() => {});
       try {
         await openNovel(novel.id);
       } catch (err) {
         return toast(`《${novel.title}》已建好，但没能打开：${err.message}`, 'err');
       }
+      if (!stillMine || box._gen !== 0) return; // 用户已经走到别的弹窗
       openImportModal();
       toast('先导入稿子，导入后可以在标题上改名', 'ok');
     };
@@ -1635,15 +1640,17 @@ function chatAppendMessage(role, content) {
 
 function chatRegenerate() {
   if (chatStreaming) return;
-  const lastUser = [...chatHistory].reverse().findIndex((m) => m.role === 'user');
-  if (lastUser === -1) return;
-  const userIdx = chatHistory.length - 1 - lastUser;
-  // 删除最后一个 assistant 回复
-  while (chatHistory.length && chatHistory[chatHistory.length - 1].role === 'assistant') {
-    chatHistory.pop();
+  let userIdx = -1;
+  for (let i = chatHistory.length - 1; i >= 0; i -= 1) {
+    if (chatHistory[i]?.role === 'user') { userIdx = i; break; }
   }
+  if (userIdx < 0) return;
+  const content = chatHistory[userIdx].content;
+  // 把旧的 user 消息及其后的所有 assistant 回复都清掉，再让模型重新回答同一句
+  chatHistory = chatHistory.slice(0, userIdx);
+  saveChatHistory();
   renderChatLog();
-  chatSend(chatHistory[userIdx].content, false);
+  chatSend(content, false);
 }
 
 function chatApplyToContent(fullText, mode) {
@@ -1669,6 +1676,7 @@ async function chatSend(text, focusInput = true) {
   if (!S.novel) return toast('先打开一部作品', 'err');
   const req = text.trim();
   if (!req || chatStreaming) return;
+  const novelId = S.novel.id;
   chatStreaming = true;
   const input = document.querySelector('#chatInput');
   if (input) input.value = '';
@@ -1684,7 +1692,7 @@ async function chatSend(text, focusInput = true) {
   try {
     await streamAI({
       task: 'chat',
-      novelId: S.novel?.id,
+      novelId,
       chapterId: S.chapterId,
       payload: {
         req,
@@ -1692,11 +1700,16 @@ async function chatSend(text, focusInput = true) {
       },
     }, {
       onDelta: (delta) => {
+        if (S.novel?.id !== novelId) return;
         acc += delta;
         const live = document.querySelector(`#chatLog .chat-bubble[data-chat-index="${pendingIdx}"]`);
         if (live) { live.textContent = acc; live.classList.remove('pending'); }
       },
     });
+    if (S.novel?.id !== novelId) {
+      // 用户已切到别的作品：旧书这条回复就地丢弃，别污染新书的对话历史
+      return;
+    }
     if (!acc.trim()) {
       chatHistory[pendingIdx].content = '（模型没给出内容，换个说法试试）';
       chatHistory[pendingIdx].role = 'assistant';
@@ -1706,24 +1719,40 @@ async function chatSend(text, focusInput = true) {
     }
     renderChatLog();
   } catch (err) {
-    chatHistory[pendingIdx].content = `生成失败：${err?.message || String(err)}`;
-    chatHistory[pendingIdx].role = 'assistant';
-    renderChatLog();
+    if (S.novel?.id === novelId) {
+      chatHistory[pendingIdx].content = `${acc.trim() ? acc.trim() + '\n\n' : ''}生成失败：${err?.message || String(err)}`;
+      chatHistory[pendingIdx].role = 'assistant';
+      renderChatLog();
+    }
   } finally {
     chatStreaming = false;
-    if (focusInput && document.querySelector('#chatInput')) {
+    if (focusInput && S.novel?.id === novelId && document.querySelector('#chatInput')) {
       document.querySelector('#chatInput').focus();
     }
   }
 }
 
+function saveChatHistory() {
+  try {
+    const clean = (Array.isArray(chatHistory) ? chatHistory : [])
+      .filter((m) => !(m?.role === 'assistant' && String(m.content || '').startsWith('生成失败：')))
+      .slice(-20);
+    localStorage.setItem(chatKey(), JSON.stringify(clean));
+  } catch {}
+}
+
 function loadChatHistory() {
   const saved = localStorage.getItem(chatKey());
+  let arr = [];
   try {
-    chatHistory = saved ? JSON.parse(saved).slice(-20) : [];
+    const parsed = saved ? JSON.parse(saved) : [];
+    if (Array.isArray(parsed)) {
+      arr = parsed.filter((m) => m && typeof m === 'object' && typeof m.content === 'string').slice(-20);
+    }
   } catch {
-    chatHistory = [];
+    arr = [];
   }
+  chatHistory = arr;
   renderChatLog();
 }
 
@@ -1770,10 +1799,7 @@ function chatInit() {
   }));
   // 对话历史持久化到 localStorage（排除生成失败的气泡）
   window.addEventListener('beforeunload', () => {
-    try {
-      const clean = chatHistory.filter((m) => !(m.role === 'assistant' && String(m.content).startsWith('生成失败：'))).slice(-20);
-      localStorage.setItem(chatKey(), JSON.stringify(clean));
-    } catch {}
+    saveChatHistory();
   });
 }
 
@@ -2938,6 +2964,8 @@ $('#emptyQuickStartBtn').addEventListener('click', openQuickStartModal);
 let openNovelSeq = 0;
 
 async function openNovel(id, opts = {}) {
+  // 切走前先把当前作品的 AI 对话历史存下来
+  saveChatHistory();
   // 换作品前先把当前作品的改动落盘 —— 一旦换过去，旧作品的内存内容就被替换了，
   // 没落盘的部分谁也救不回来。落不下去时明确问一句，别默默丢。
   const same = !!S.novel && S.novel.id === id;
@@ -5014,7 +5042,7 @@ function openChapterBoard() {
         for (const id of ids) {
           try {
             const { novel } = await api.del(`/api/novels/${S.novel.id}/chapters/${id}`);
-            S.novel = novel;
+            S.novel = mergeNovelFromServer(novel, S.novel);
             S.unsaved.delete(id);
           } catch (err) {
             toast(`删除失败：${err?.message || String(err)}`, 'err');
@@ -5271,13 +5299,15 @@ function makeChapterItem(c, i, { filtered = false, group = null } = {}) {
         const hadVol = typeof c.volumeId === 'string' ? c.volumeId : '';
         const nextCh = S.novel.chapters[i + 1];
         const { novel } = await api.del(`/api/novels/${S.novel.id}/chapters/${c.id}`);
-        S.novel = novel;
+        const merged = mergeNovelFromServer(novel, S.novel);
+        S.novel = merged;
         S.unsaved.delete(c.id);
         pendingCounted.delete(c.id);
         countedWords.delete(c.id);
-        if (hadVol && nextCh && typeof nextCh.volumeId !== 'string' && novel.chapters.some((x) => x.id === nextCh.id)) {
-          nextCh.volumeId = hadVol;
-          saveChapterVolumes([{ id: nextCh.id, volumeId: hadVol }]);
+        const nextFresh = nextCh ? merged.chapters.find((x) => x.id === nextCh.id) : null;
+        if (hadVol && nextFresh && typeof nextFresh.volumeId !== 'string' && merged.chapters.some((x) => x.id === nextFresh.id)) {
+          nextFresh.volumeId = hadVol;
+          saveChapterVolumes([{ id: nextFresh.id, volumeId: hadVol }]);
         }
         S.dirty = S.unsaved.size > 0;
         refreshSavePill();
@@ -9585,11 +9615,15 @@ function renderCorkboard() {
     </div>
   `).join('');
 
-  // 插入线
-  const insertLine = document.createElement('div');
-  insertLine.className = 'cork-insert-line';
-  insertLine.hidden = true;
-  board.appendChild(insertLine);
+  // 插入线（持久化到 board 上，拖拽监听只注册一次，避免每次重画都叠加）
+  if (!board._insertLine) {
+    const line = document.createElement('div');
+    line.className = 'cork-insert-line';
+    line.hidden = true;
+    board._insertLine = line;
+  }
+  board._insertLine.hidden = true;
+  board.appendChild(board._insertLine);
 
   // 双击编辑
   $$('.scene-card', board).forEach((card) => {
@@ -9609,60 +9643,70 @@ function renderCorkboard() {
     };
   });
 
-  // 拖拽排序 - 使用插入线
-  let dragSrc = null;
-  let insertBefore = null;
-  board.addEventListener('dragstart', (e) => {
-    const card = e.target.closest('.scene-card');
-    if (!card) return;
-    dragSrc = card;
-    card.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-  });
-  board.addEventListener('dragend', () => {
-    if (dragSrc) dragSrc.classList.remove('dragging');
-    insertLine.hidden = true;
-    dragSrc = null;
-  });
-  board.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    const card = e.target.closest('.scene-card');
-    if (card && card !== dragSrc) {
-      const rect = card.getBoundingClientRect();
-      const midY = rect.top + rect.height / 2;
-      insertLine.hidden = false;
-      if (e.clientY < midY) {
-        insertLine.style.top = `${rect.top - board.getBoundingClientRect().top}px`;
-        insertBefore = card;
-      } else {
-        insertLine.style.top = `${rect.bottom - board.getBoundingClientRect().top}px`;
+  // 拖拽排序 - 使用插入线；board 级监听只注册一次，节点变了也不会叠加
+  if (!board._corkBound) {
+    board._corkBound = true;
+    let dragSrc = null;
+    let insertBefore = null;
+    const getInsertLine = () => board._insertLine;
+    board.addEventListener('dragstart', (e) => {
+      const card = e.target.closest('.scene-card');
+      if (!card) return;
+      dragSrc = card;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    board.addEventListener('dragend', () => {
+      const line = getInsertLine();
+      if (dragSrc) dragSrc.classList.remove('dragging');
+      if (line) line.hidden = true;
+      dragSrc = null;
+    });
+    board.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const line = getInsertLine();
+      const card = e.target.closest('.scene-card');
+      if (card && card !== dragSrc && line) {
+        const rect = card.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        line.hidden = false;
+        if (e.clientY < midY) {
+          line.style.top = `${rect.top - board.getBoundingClientRect().top}px`;
+          insertBefore = card;
+        } else {
+          line.style.top = `${rect.bottom - board.getBoundingClientRect().top}px`;
+          insertBefore = null;
+        }
+      } else if (line) {
+        line.hidden = true;
         insertBefore = null;
       }
-    } else {
-      insertLine.hidden = true;
+    });
+    board.addEventListener('dragleave', (e) => {
+      const line = getInsertLine();
+      if (!board.contains(e.relatedTarget) && line) {
+        line.hidden = true;
+        insertBefore = null;
+      }
+    });
+    board.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const line = getInsertLine();
+      if (line) line.hidden = true;
+      const currentCh = currentChapter();
+      if (!currentCh) return;
+      const target = e.target.closest('.scene-card');
+      if (dragSrc && (target || insertBefore !== null) && dragSrc !== target) {
+        const from = Number(dragSrc.dataset.index);
+        let to;
+        if (insertBefore !== null) to = Number(insertBefore.dataset.index);
+        else if (target) to = Number(target.dataset.index) + 1;
+        else to = 0;
+        moveScene(currentCh, from, to);
+      }
       insertBefore = null;
-    }
-  });
-  board.addEventListener('dragleave', (e) => {
-    if (!board.contains(e.relatedTarget)) {
-      insertLine.hidden = true;
-      insertBefore = null;
-    }
-  });
-  board.addEventListener('drop', (e) => {
-    e.preventDefault();
-    insertLine.hidden = true;
-    const target = e.target.closest('.scene-card');
-    if (dragSrc && (target || insertBefore !== null) && dragSrc !== target) {
-      const from = Number(dragSrc.dataset.index);
-      let to;
-      if (insertBefore !== null) to = Number(insertBefore.dataset.index);
-      else if (target) to = Number(target.dataset.index) + 1;
-      else to = 0;
-      moveScene(ch, from, to);
-    }
-    insertBefore = null;
-  });
+    });
+  }
 }
 
 function openSceneEditor(ch, index) {
@@ -9985,12 +10029,14 @@ $$('#bibleTabs button').forEach((b) => b.addEventListener('click', () => {
   setView('bible');
   renderBible();                  // 先把本地内存画出来（含还没落盘的输入）——体感优先
   if (S.novel) {
+    const novelId = S.novel.id;
     // 先冲刷未落盘的设定/大纲编辑，再拉最新版覆盖——否则旧的 pending 会晚到覆盖刚拉下来的
     // 磁盘状态，而 UI 已经切走了，用户看不见这次回跳。
     saveNovelPart.flush()
-      .then(() => api.get(`/api/novels/${S.novel.id}`))
-      .then(({ novel }) => {
-        S.novel = novel;
+      .then((ok) => (ok ? api.get(`/api/novels/${novelId}`) : null))
+      .then((res) => {
+        if (!res || S.novel?.id !== novelId) return;
+        S.novel = mergeNovelFromServer(res.novel, S.novel);
         setView('bible');
         renderBible();
       })
@@ -10461,7 +10507,7 @@ async function applyFragmentData(pkg, opts = {}) {
     if (response.ok) {
       // 重新加载小说数据
       const { novel } = await api.get(`/api/novels/${n.id}`);
-      S.novel = novel;
+      S.novel = mergeNovelFromServer(novel, S.novel);
       renderBible();
       renderStudio();
       const label = FRAGMENT_TYPES.find(t => t.key === pkg.type).label;
@@ -10572,21 +10618,24 @@ let novelSaveTimer = 0;
 let pendingNovelSave = null;
 let novelSaveInFlight = null;
 
+/** 服务端返回的是磁盘版：把内存里还没落盘的章节换回来，别把用户刚打的字覆盖掉 */
+function mergeNovelFromServer(next, prev = S.novel) {
+  const merged = { ...(next || {}) };
+  const prevById = new Map((prev?.chapters || []).map((c) => [c.id, c]));
+  if (Array.isArray(merged.chapters)) {
+    merged.chapters = merged.chapters.map((ch) => (S.unsaved.has(ch.id) && prevById.has(ch.id) ? prevById.get(ch.id) : ch));
+  } else {
+    merged.chapters = prev?.chapters;
+  }
+  return merged;
+}
+
 async function putNovelPart(novelId, part, msg) {
   setSave('saving');
   try {
     const { novel } = await api.put(`/api/novels/${novelId}`, part);
     if (S.novel?.id === novelId) {
-      // 服务器返回的是磁盘版；把内存里还没落盘的章节换回来，别把用户刚打的字盖掉
-      const prev = S.novel;
-      const next = { ...novel };
-      const prevById = new Map((prev?.chapters || []).map((c) => [c.id, c]));
-      if (Array.isArray(next.chapters)) {
-        next.chapters = next.chapters.map((c) => (S.unsaved.has(c.id) && prevById.has(c.id) ? prevById.get(c.id) : c));
-      } else {
-        next.chapters = prev?.chapters;
-      }
-      S.novel = next;
+      S.novel = mergeNovelFromServer(novel, S.novel);
       refreshSavePill();
     }
     if (msg) toast(msg, 'ok');
@@ -10606,7 +10655,11 @@ function saveNovelPartNow() {
   pendingNovelSave = null;
   if (!pending) return novelSaveInFlight || Promise.resolve(true);
   // 串行落盘：先等上一次 PUT 回来，避免旧请求晚到把新状态盖掉
-  const start = () => putNovelPart(pending.id, pending.part, pending.msg);
+  const start = () => putNovelPart(pending.id, pending.part, pending.msg).then((ok) => {
+    // 失败就放回队列，别把未落盘的改动静默丢掉
+    if (!ok && !pendingNovelSave) pendingNovelSave = pending;
+    return ok;
+  });
   const run = novelSaveInFlight ? novelSaveInFlight.then(start, start) : start();
   novelSaveInFlight = run;
   run.finally(() => { if (novelSaveInFlight === run) novelSaveInFlight = null; });

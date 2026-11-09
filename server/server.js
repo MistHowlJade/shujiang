@@ -526,6 +526,69 @@ function sanitizeChapters(value, fallback) {
   return out;
 }
 
+/** 设定库数组按「整份快照」保存：传了哪个数组就替换哪个，没传的数组保持原样 */
+function replaceBibleArray(arr) {
+  const map = new Map();
+  for (const item of Array.isArray(arr) ? arr : []) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const id = item.id || newId('b');
+    map.set(id, { ...item, id });
+  }
+  return [...map.values()];
+}
+
+/** PUT / POST 整本作品保存共用的合并逻辑（POST 用于 sendBeacon / keepalive） */
+function mergeNovelUpdate(n, body) {
+  const meta = { ...n.meta, ...(body.meta || {}) };
+  meta.targetWords = cleanTargetWords(meta.targetWords);
+  if (!['classic', 'minimal', 'band'].includes(meta.coverStyle)) meta.coverStyle = n.meta.coverStyle || '';
+  meta.coverPalette = cleanPalette(meta.coverPalette);
+
+  // 先保留旧设定库（只改 meta / 大纲时不会误清），再按本次带来的板块替换。
+  const incomingBible = body.bible && typeof body.bible === 'object' && !Array.isArray(body.bible)
+    ? body.bible
+    : {};
+  const bible = { ...(n.bible || {}), ...incomingBible };
+  for (const key of ['characters', 'world', 'timeline']) {
+    if (incomingBible[key] === undefined) continue;
+    // 非数组一律保留旧值，别把设定库写成半个对象
+    bible[key] = Array.isArray(incomingBible[key]) ? replaceBibleArray(incomingBible[key]) : (n.bible?.[key] || []);
+  }
+
+  // 封面信息也要过白名单：PUT 不能把 cover.ext 改成 `..\..\config.json`
+  let cover = n.cover;
+  if (body.cover === null) {
+    try { deleteCoverImage(n.id, n.cover); } catch { /* 清完没关系 */ }
+    cover = null;
+  } else if (body.cover !== undefined) {
+    const kind = coverKind(body.cover?.ext, body.cover?.mime);
+    cover = kind
+      ? {
+          ext: kind.ext,
+          mime: kind.media,
+          size: Math.max(0, Number(body.cover.size) || 0),
+          ts: Number(body.cover.ts) || Date.now(),
+        }
+      : n.cover;
+  }
+
+  const outline = body.outline && typeof body.outline === 'object' && !Array.isArray(body.outline)
+    ? { ...(n.outline || { volumes: [], notes: '' }), ...body.outline }
+    : (n.outline || { volumes: [], notes: '' });
+  const chapters = sanitizeChapters(body.chapters, n.chapters);
+  return {
+    ...n,
+    ...body,
+    id: n.id,
+    createdAt: n.createdAt,
+    cover,
+    meta,
+    bible,
+    outline,
+    chapters,
+  };
+}
+
 async function handleApi(req, res, url) {
   const { pathname } = url;
   const method = req.method.toUpperCase();
@@ -700,67 +763,14 @@ async function handleApi(req, res, url) {
       if (!moved) return sendJson(res, 404, { error: '作品不存在' });
       return sendJson(res, 200, { ok: true, trash: moved });
     }
-    /** 设定库数组按「整份快照」保存：前端每次保存都带完整数组，
-     *  传了哪个数组就替换哪个，没传的数组保持原样。
-     *  之前按 ID 合并会保留旧条目，导致删除人物 / 世界观 / 时间线永远不生效。 */
-    function replaceBibleArray(arr) {
-      const map = new Map();
-      for (const item of Array.isArray(arr) ? arr : []) {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
-        const id = item.id || newId('b');
-        map.set(id, { ...item, id });
-      }
-      return [...map.values()];
-    }
-
-/* ------------------------------------------------------------------ */
-/* 导入旧稿 / 导出备份                                                    */
-/* ------------------------------------------------------------------ */
-    if (method === 'PUT' && seg.length === 3) {
+    /* ------------------------------------------------------------------ */
+    /* 导入旧稿 / 导出备份                                                    */
+    /* ------------------------------------------------------------------ */
+    if ((method === 'PUT' || method === 'POST') && seg.length === 3) {
       const body = await readBody(req);
       const n = getNovel(id);
       if (!n) return sendJson(res, 404, { error: '作品不存在' });
-      const meta = { ...n.meta, ...(body.meta || {}) };
-      meta.targetWords = cleanTargetWords(meta.targetWords);
-      if (!['classic', 'minimal', 'band'].includes(meta.coverStyle)) meta.coverStyle = n.meta.coverStyle || '';
-      meta.coverPalette = cleanPalette(meta.coverPalette);
-      // 先保留旧设定库（只改 meta / 大纲时不会误清），再按本次带来的板块替换。
-      // 三个主数组之外的旧字段（如早期导入的 skills / items）也原样留着。
-      const incomingBible = body.bible && typeof body.bible === 'object' && !Array.isArray(body.bible)
-        ? body.bible
-        : {};
-      const bible = { ...(n.bible || {}), ...incomingBible };
-      for (const key of ['characters', 'world', 'timeline']) {
-        if (Array.isArray(incomingBible[key])) bible[key] = replaceBibleArray(incomingBible[key]);
-      }
-      // 封面信息也要过白名单：PUT 不能把 cover.ext 改成 `..\..\config.json`
-      let cover = n.cover;
-      if (body.cover === null) {
-        cover = null;
-      } else if (body.cover !== undefined) {
-        const kind = coverKind(body.cover?.ext, body.cover?.mime);
-        cover = kind
-          ? {
-              ext: kind.ext,
-              mime: kind.media,
-              size: Math.max(0, Number(body.cover.size) || 0),
-              ts: Number(body.cover.ts) || Date.now(),
-            }
-          : n.cover;
-      }
-      const chapters = sanitizeChapters(body.chapters, n.chapters);
-      const merged = {
-        ...n,
-        ...body,
-        id: n.id,
-        createdAt: n.createdAt,
-        cover,
-        meta,
-        bible,
-        outline: { ...n.outline, ...(body.outline || {}) },
-        chapters,
-      };
-      return sendJson(res, 200, { novel: saveNovel(merged) });
+      return sendJson(res, 200, { novel: saveNovel(mergeNovelUpdate(n, body)) });
     }
 
     // 版本历史：列表 / 立即备份 / 恢复

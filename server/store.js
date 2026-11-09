@@ -299,6 +299,14 @@ export function newId(prefix) {
   return `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
 }
 
+/** 脏数据里 chapters 可能有 null / 非对象：读写都要安全跳过 */
+const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+function chapterWords(c) {
+  if (!isPlainObject(c)) return 0;
+  return c.words || countWords(c.content || '');
+}
+const chapterCount = (n) => (n.chapters || []).filter(isPlainObject).length;
+
 export function blankNovel({ title = '未命名作品', genre = '', author = '' } = {}) {
   const now = Date.now();
   return {
@@ -346,14 +354,14 @@ export function listNovels() {
     if (!f.endsWith('.json')) continue;
     const n = readJson(path.join(NOVELS_DIR, f), null);
     if (!n || !n.id) continue;
-    const words = (n.chapters || []).reduce((s, c) => s + (c.words || countWords(c.content || '')), 0);
+    const words = (n.chapters || []).reduce((s, c) => s + chapterWords(c), 0);
     out.push({
       id: n.id,
       title: n.title,
       author: n.author || '',
       genre: n.genre || '',
       tags: n.tags || [],
-      chapterCount: (n.chapters || []).length,
+      chapterCount: chapterCount(n),
       words,
       updatedAt: n.updatedAt || n.createdAt || 0,
       createdAt: n.createdAt || 0,
@@ -377,12 +385,14 @@ export function getNovel(id) {
   n.outline ||= { volumes: [], notes: '' };
   n.outline.volumes ||= [];
   // 分卷要有稳定 id：章节用 chapter.volumeId 指向它。老数据没有 id，读进来时补上。
-  n.outline.volumes.forEach((v) => {
+  for (const v of n.outline.volumes || []) {
+    if (!isPlainObject(v)) continue;
     v.id ||= newId('v');
-    v.chapters ||= [];
-    v.chapters.forEach((c) => { c.id ||= newId('o'); });
-  });
-  n.chapters ||= [];
+    v.chapters = (v.chapters || []).filter(isPlainObject);
+    for (const o of v.chapters) o.id ||= newId('o');
+  }
+  // 脏数据里可能混进 null：挡在最外面，免得整个书架 500
+  n.chapters = (n.chapters || []).filter(isPlainObject);
   // 老作品没有 stage 字段：读出来统一按草稿处理，下一次保存就会写回磁盘
   // 章节序号也从数组顺序补一遍，避免旧文件里缺 no 时界面显示「第 undefined 章」
   n.chapters.forEach((c, i) => {
@@ -397,13 +407,13 @@ export function getNovel(id) {
   if (!['classic', 'minimal', 'band'].includes(n.meta.coverStyle)) n.meta.coverStyle = '';
   n.meta.coverPalette = cleanPalette(n.meta.coverPalette);
   // 记下磁盘上的字数，saveNovel 用它判断这次落盘是不是「骤降」
-  lastWrittenWords.set(n.id, (n.chapters || []).reduce((s, c) => s + (c.words || countWords(c.content || '')), 0));
+  lastWrittenWords.set(n.id, (n.chapters || []).reduce((s, c) => s + chapterWords(c), 0));
   return n;
 }
 
 export function saveNovel(novel, { skipShrink = false } = {}) {
   novel.updatedAt = Date.now();
-  novel.chapters = (novel.chapters || []).map((c, i) => ({
+  novel.chapters = (novel.chapters || []).filter(isPlainObject).map((c, i) => ({
     ...c,
     stage: CHAPTER_STAGES.has(c.stage) ? c.stage : 'draft',
     targetWords: cleanTargetWords(c.targetWords),
@@ -467,7 +477,7 @@ export function createSampleNovel() {
     return next;
   };
 
-  n.chapters = (n.chapters || []).map((c, i) => {
+  n.chapters = (n.chapters || []).filter(isPlainObject).map((c, i) => {
     const id = newId('c');
     if (c.id) chapterIds.set(c.id, id);
     return {
@@ -486,7 +496,7 @@ export function createSampleNovel() {
     v.id = newId('v');
     if (oldVolumeId) volumeIds.set(oldVolumeId, v.id);
     // 章纲里即使没有 chapterId（还没写的那几章）也要保留，只重映射能对上的
-    v.chapters = (v.chapters || []).map((o) => {
+    v.chapters = (v.chapters || []).filter(isPlainObject).map((o) => {
       const id = newId('o');
       if (o.id) outlineIds.set(o.id, id);
       return { ...o, id, chapterId: chapterIds.get(o.chapterId) || '' };
@@ -597,8 +607,8 @@ export function listTrash() {
       title: n.title || '未命名作品',
       author: n.author || '',
       genre: n.genre || '',
-      chapterCount: (n.chapters || []).length,
-      words: (n.chapters || []).reduce((s, c) => s + (c.words || countWords(c.content || '')), 0),
+      chapterCount: chapterCount(n),
+      words: (n.chapters || []).reduce((s, c) => s + chapterWords(c), 0),
       deletedAt,
     });
   }
@@ -694,8 +704,8 @@ export function createSnapshot(novel, { kind = 'auto', label = '', force = false
   const data = readJson(file, null);
   if (!data || !data.id) return null;
   const size = fs.statSync(file).size;
-  const chapters = (data.chapters || []).length;
-  const words = (data.chapters || []).reduce((s, c) => s + (c.words || countWords(c.content || '')), 0);
+  const chapters = chapterCount(data);
+  const words = (data.chapters || []).reduce((s, c) => s + chapterWords(c), 0);
 
   // 同一份内容短期内不重复备份：反复「写一段又删掉」时不会把历史刷爆
   if (last && last.size === size && last.words === words && last.chapters === chapters

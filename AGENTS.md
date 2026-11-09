@@ -24,9 +24,9 @@
 | 运行时 Node | 18+，但当前用 `tools/node/node.exe` (22.0.0) |
 | 平台 | Windows 为主（`win-unpacked`、`ShuJiang-Portable-1.0.25.exe`、`win-x64.zip`）|
 | 测试 | `npm run regress`（295 项检查）、`npm test` (`lib-test.mjs` 635 项) |
-| 代码量 | ~3 万行（server+web+electron+build ≈ 3 万，含 dev/ 约 0.4 万）|
+| 代码量 | ~3.5 万行（server+web+electron+build ≈ 3.3 万，含 dev/ 约 0.4 万）|
 | 前端 | 原生 JS + 自研设计系统，无 React/Vue/Svelte |
-| HTML/CSS | 717 行 HTML、3744 行 CSS |
+| HTML/CSS | ~1300 行 HTML、~4000 行 CSS |
 | Lighthouse | Accessibility / Best Practices / SEO = 100 / 100 / 100 |
 | 许可证 | MIT（`LICENSE`）|
 | 发布渠道 | GitHub Releases（未签名便携版；签名已放弃——太贵）|
@@ -54,7 +54,7 @@ build/        icon.png / icon.ico（重画图标源）
 
 ### 前端结构
 
-- `web/app.js`：主逻辑（~13184 行，**不拆**——重构它没什么好处、代价高、还容易伤到现有行为）
+- `web/app.js`：主逻辑（~16600 行，**不拆**——重构它没什么好处、代价高、还容易伤到现有行为）
 - `web/index.html`：应用骨架 + 内联 SVG 图标
 - `web/style.css`：设计系统
 - `web/lib/consistency.js`：本地一致性检查引擎（设定冲突/时间线/人物行为/口吻差异）
@@ -147,7 +147,7 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
 | 模型 API 返回 429 配额 | 翻译成人话：额度用完／切个免费插件／Dashboard 付款 |
 | 模型没给助手内容（或只给了思考）| 提示用户到设置调大 `max_new_tokens` 或换模型；不让空输出直接当空气 |
 | SSE 中断且没收尾标记 | 拿到 HTTP 状态码看是 401/404/429/500/证书/DNS；分别给出"Key 不对 / 地址错 / 额度用完 / 切个免费插件 / 服务端崩了" |
-| 模块自检挂了 | 先看哪条 `import` 缺了或撞了名；最大的 `web/lib/data.js` (964 行) 最容易有这种事 |
+| 模块自检挂了 | 先看哪条 `import` 缺了或撞了名；最大的 `web/lib/data.js` (~1100 行) 最容易有这种事 |
 | 字体糊/太细 | 默认字体栈已经切到黑体（`PingFang SC` / `Microsoft YaHei UI` / `SimSun` 兜底）。不要改回 16 宋体——用户测试说字体不方便 |
 | NSIS 安装报「无法关闭书匠」 | 用户机器上不是 App 在跑，是 NSIS 自己的 process detection 判错了。`安装书匠.cmd`（dist 下）通过把 TEMP 重定向到 `.cache/nsis-temp` 绕过了它。现在根本不发 NSIS 安装器了——便携版 + 绿色 zip 是唯一发布形态 |
 | 本机新打包的 exe（含便携版）启动报 `NSIS Error / Error writing temporary file` 或 CreateProcess「文件已被用户占用」，但 GitHub 下载同一文件正常 | 这台机器对新生成的未签名 exe 有额外拦截（HIPS/沙箱），与 Temp、AV 无关（AV 全关、Temp 实测可写 150 MB）。**冒烟/验证必须从 GitHub Releases 下载版做**，本机 dist 产物只用于比对 hash，别指望它能起 |
@@ -164,9 +164,9 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
 
 ## 关于便携版
 
-唯一形态就是 **ShuJiang-Portable-1.0.7.exe**（单进程嵌在 Electron 里）+ **win-x64.zip**（免安装）。`dist/` 不进 git；`tools/node/` 也不进 git（源码模式自带便携 Node）。`.gitignore` 已经处理。
+唯一形态就是 **ShuJiang-Portable-1.0.25.exe**（单进程嵌在 Electron 里）+ **win-x64.zip**（免安装）。`dist/` 不进 git；`tools/node/` 也不进 git（源码模式自带便携 Node）。`.gitignore` 已经处理。
 
-构建命令：`npm run dist`。产出 `dist/ShuJiang-Portable-1.0.7.exe` + zip，约 110 MB 与 150 MB 大小，发布时上传到 GitHub Releases 并同步 tag。
+构建命令：`npm run dist`。产出 `dist/ShuJiang-Portable-1.0.25.exe` + zip，约 110 MB 与 150 MB 大小，发布时上传到 GitHub Releases 并同步 tag。
 
 ## 维护者
 

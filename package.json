@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "书匠 · AI 长篇小说创作台（本地运行，零依赖）",
+  "license": "MIT",
   "author": "书匠 · AI 长篇小说创作台",
   "main": "electron/main.mjs",
   "scripts": {
