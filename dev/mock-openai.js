@@ -589,6 +589,7 @@ server.listen(PORT, HOST, () => {
   console.log('    mock-quota      HTTP 200 + JSON 错误体（如额度用尽）');
   console.log('    mock-stall      响应头正常，但一直不吐数据（测空闲超时）');
   console.log('    mock-dead       连响应头都不发（测连接超时）');
+  console.log('    mock-length     很短的正文并以长度结束（测提示用户调大 max_tokens）');
   console.log(`  速度： 每 ${DELAY}ms 吐 ${CHUNK} 字（调 MOCK_DELAY / MOCK_CHUNK 可改）`);
   console.log('');
 });

@@ -1,6 +1,7 @@
 // 书匠 · 桌面主进程（Electron）
 // 单进程方案：直接在主进程里跑原有的零依赖本地服务端，再用窗口打开它。
-// 不往安装目录写文件：数据放在用户的 AppData 目录下（可用 SHU_DATA_DIR 覆盖）。
+// 不往安装目录写文件：数据默认跟本体走（可用 SHU_DATA_DIR 覆盖）。
+
 
 import { app, BrowserWindow } from 'electron';
 import net from 'node:net';

@@ -69,7 +69,7 @@ build/        icon.png / icon.ico（重画图标源）
 # 开发
 npm start                        # 浏览器版，http://127.0.0.1:8848
 npm run desktop                  # Electron 桌面版
-npm run dist                     # 便携版打包（只出 EXE + 绿色 zip）
+npm run dist                     # 便携版打包（只出 EXE；绿色 zip 走发布流程里的 Compress-Archive）
 npm run mock                     # 假模型（默认 8890，覆盖 OpenAI 接口）
 npm run regress                  # 回归
 npm test                         # lib-test（lib 层单元测试）
@@ -103,9 +103,9 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
 - `antiAi()`：**「口语粗粝」反AI味指令**——短句、动作折射情绪、话说半句也行、不总结、不升华、情绪靠身体折射。加载到章节正文/续写/段落操作/自定义处理/章节生成提示词中。如果用户以后问AI味问题，先看这里。
 - `head(novel, pack)`：把作品设定、出场人物、世界观、大纲捏合进 prompt 头（≈800 字量级）
 - `TEMPLATE_SLOTS`：20 个可定制任务的 key 列表（chapter / outline / worldview / …）
-- 变量插值：`${novel.title}`、`${chapter.title}`、`${text}`、`${req}`、`${head}`；缺了一项会抛错并给你所有可用变量提示
+- 变量插值：`${novel.title}`、`${chapter.title}`、`${text}`、`${req}`、`${head}`；拼错的变量渲染成空串，不报错；靠「预览效果」人眼核对
 
-**AI 输出插入 vs 模板预览**：`/api/ai/stream` 流式推送，`/api/ai/preview` 一次性预览（不调模型不花钱）。所有模型请求是后端代理的，前端不直接碰模型 API。
+**AI 输出插入 vs 模板预览**：`/api/ai/stream` 流式推送；预览走 `/api/context`（customTemplates + templateKey），不调模型不花钱。所有模型请求是后端代理的，前端不直接碰模型 API。
 
 ## 测试与质量保证
 
@@ -120,7 +120,7 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
 ## 发布流程（从 v1.0.2 到 v1.0.25 实测）
 
 1. 本地 `npm run regress` + `npm test` 必须全绿
-2. `npm run dist`（生成 `dist\ShuJiang-Portable-1.0.25.exe` 和 `win-x64.zip`）
+2. `npm run dist`（只生成 `dist\ShuJiang-Portable-1.0.25.exe`），随后用 `Compress-Archive -Path 'dist\win-unpacked\*' -DestinationPath 'dist\ShuJiang-1.0.25-win-x64.zip'` 手工打绿色版 zip
 
    这台机器直接跑 npm 会挂——AppData\Local 写不进、TLS 证书链也不通（v1.0.2 实测踩过两次 EPERM 和 unable to verify the first certificate）。用这个包一层环境变量（不改全局 PATH/系统环境）：
 
@@ -166,7 +166,7 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
 
 唯一形态就是 **ShuJiang-Portable-1.0.25.exe**（单进程嵌在 Electron 里）+ **win-x64.zip**（免安装）。`dist/` 不进 git；`tools/node/` 也不进 git（源码模式自带便携 Node）。`.gitignore` 已经处理。
 
-构建命令：`npm run dist`。产出 `dist/ShuJiang-Portable-1.0.25.exe` + zip，约 110 MB 与 150 MB 大小，发布时上传到 GitHub Releases 并同步 tag。
+构建命令：`npm run dist`，再手工 Compress-Archive 打绿色 zip。产出 `dist/ShuJiang-Portable-1.0.25.exe` + `dist/ShuJiang-1.0.25-win-x64.zip`，约 110 MB 与 150 MB 大小，发布时上传到 GitHub Releases 并同步 tag。
 
 ## 维护者
 
