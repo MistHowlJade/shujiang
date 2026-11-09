@@ -1198,21 +1198,29 @@ async function saveNovelDraftMeta(novel, logline, platform) {
 function openNewNovelModal() {
   showModal(`
     <h3>新建作品</h3>
-    <label class="field-label">书名</label><input id="nvTitle" class="input" placeholder="例如：剑来山海" />
-    <div class="field-row">
-      <label class="field-label">类型<input id="nvGenre" class="input" placeholder="玄幻 / 都市 / 悬疑…" /></label>
-      <label class="field-label">作者名<input id="nvAuthor" class="input" /></label>
-    </div>
-    <label class="field-label">标签<span class="field-hint">空格或逗号分隔 · 最多 ${NOVEL_TAG_LIMIT} 个</span>
-      <input id="nvTags" class="input" placeholder="无限流 群像 复仇" autocomplete="off" />
-    </label>
-    <label class="field-label">一句话故事<span class="field-hint">可后补</span></label>
-    <input id="nvLogline" class="input" placeholder="一个少年背着一把不能出鞘的剑，去杀他师傅。" />
-    <label class="field-label" for="nvPlatform">目标平台</label>
-    <select id="nvPlatform" class="select" aria-label="目标平台">
-      <option value="">不限</option><option>番茄小说</option><option>起点中文网</option>
-      <option>七猫</option><option>晋江</option><option>出版向</option>
-    </select>
+    <label class="field-label">书名<span class="field-hint">必填 · 之后也能改</span></label>
+    <input id="nvTitle" class="input" placeholder="例如：剑来山海" />
+    <details class="details">
+      <summary>更多信息（可后补）</summary>
+      <div class="field-row">
+        <label class="field-label">类型<input id="nvGenre" class="input" placeholder="玄幻 / 都市 / 悬疑…" /></label>
+        <label class="field-label">作者名<input id="nvAuthor" class="input" /></label>
+      </div>
+      <div class="field-row">
+        <label class="field-label">标签<span class="field-hint">最多 ${NOVEL_TAG_LIMIT} 个</span>
+          <input id="nvTags" class="input" placeholder="无限流 群像 复仇" autocomplete="off" />
+        </label>
+        <label class="field-label" for="nvPlatform">目标平台
+          <select id="nvPlatform" class="select" aria-label="目标平台">
+            <option value="">不限</option><option>番茄小说</option><option>起点中文网</option>
+            <option>七猫</option><option>晋江</option><option>出版向</option>
+          </select>
+        </label>
+      </div>
+      <label class="field-label">一句话故事<span class="field-hint">可后补</span>
+        <input id="nvLogline" class="input" placeholder="一个少年背着一把不能出鞘的剑，去杀他师傅。" />
+      </label>
+    </details>
     <div class="nv-import">手上有旧稿？<button type="button" class="link-btn" id="nvImportLink">直接导入</button>，不用在这里填完。</div>
     <div class="modal-foot">
       <button class="btn btn-text" id="nvCancel">取消</button>
@@ -1346,6 +1354,26 @@ function openImportNew() {
 }
 $('#emptyImportBtn').addEventListener('click', openImportNew);
 
+/** 示例作品：从内置数据复制一部新书到本机，不联网、不花 API 费用 */
+async function createSampleNovel() {
+  const btn = $('#emptySampleBtn');
+  if (btn?.disabled) return;
+  const original = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.textContent = '正在准备示例…'; }
+  try {
+    const { novel } = await api.send('/api/novels/sample');
+    await loadNovels();
+    renderShelf();
+    toast(`已创建示例作品《${novel.title}》：随便逛，改坏了也不影响你自己的书`, 'ok');
+    await openNovel(novel.id);
+  } catch (err) {
+    toast(`示例作品创建失败：${errMsg(err)}`, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = original; }
+  }
+}
+$('#emptySampleBtn')?.addEventListener('click', createSampleNovel);
+
 /* ============================================================
  * 4.5 一键开书：一句话 → 书名 / 人物 / 大纲 / 第一章
  * ============================================================
@@ -1393,6 +1421,19 @@ function aiModelReady(task = 'chapter', explicitModel = '') {
   const cfg = S.config || {};
   if (!(cfg.providers || []).some(providerHasKey)) return false;
   return !!String(explicitModel || configuredModel(task) || '').trim();
+}
+
+/** 右栏「模型」输入框：接好模型时提示当前模型，没接时直接说清楚下一步 */
+function refreshGenModelHint() {
+  const el = $('#genModel');
+  if (!el) return;
+  if (aiModelReady()) {
+    el.placeholder = S.config?.model || '默认';
+    el.title = '留空就用当前写作模型；也可以临时填别的模型名';
+  } else {
+    el.placeholder = '未接入 · 点生成';
+    el.title = '还没接入模型：点「生成本章」会一步步带你接模型，接好后自动继续';
+  }
 }
 
 /**
@@ -1877,7 +1918,7 @@ async function openModelSetup(opts = {}) {
       <p class="modal-sub">${esc(introText)}</p>
       <div class="qs-setup-steps">
         <div class="qs-setup-step"><b>1</b><div><strong>选一家服务商</strong><em>国内常用 DeepSeek；已经有别家的 Key 也可以直接用。</em></div></div>
-        <div class="qs-setup-step"><b>2</b><div><strong>粘贴 API Key</strong><em>在服务商后台创建一个 Key，复制过来。这里不需要注册账号。</em></div></div>
+        <div class="qs-setup-step"><b>2</b><div><strong>粘贴 API Key</strong><em>书匠本身不用注册；Key 要到你选的服务商后台注册后创建，部分服务商送免费额度。</em></div></div>
         <div class="qs-setup-step"><b>3</b><div><strong>选一个模型</strong><em>连上后会自动列出可用模型，点一个就能继续。</em></div></div>
       </div>
       <label class="field-label">从常用服务商开始<span class="field-hint">已有 Key 的话，下一步粘贴即可</span></label>
@@ -1885,10 +1926,11 @@ async function openModelSetup(opts = {}) {
         ${quick.map((p) => `<button type="button" class="qs-preset" data-preset="${PRESETS.indexOf(p)}"><b>${esc(p.name)}</b><span>${esc((p.models || [])[0] || '自定义模型')}</span></button>`).join('')}
         <button type="button" class="qs-preset" data-preset="custom"><b>其他服务商 / 中转站</b><span>自己填 Base URL 和模型名</span></button>
       </div>
+      <div class="tip qs-tip">${ico('bulb')}<span>书匠不收钱。AI 调用按你选的服务商规则计费，充值和额度都在服务商那边；多数服务商有新用户免费额度，够试很久。</span></div>
       <div class="tip qs-tip">${ico('shield')}<span>密钥只写入本机的 <code>data/config.json</code>，不会上传到别处，也不会随作品导出。</span></div>
       <div class="modal-foot">
-        <button class="btn btn-text" id="qsSetupCancel">取消</button>
-        <button class="btn btn-text" id="qsSetupSettings">打开设置</button>
+        <button class="btn btn-text" id="qsSetupCancel">稍后再说</button>
+        <button class="btn btn-text" id="qsSetupSettings">去设置页自己接</button>
       </div>`;
     box.querySelector('#qsSetupCancel').onclick = close;
     box.querySelector('#qsSetupSettings').onclick = goSettings;
@@ -2160,6 +2202,7 @@ async function openModelSetup(opts = {}) {
         c.roleModels = { ...(c.roleModels || {}), write: model };
         await api.send('/api/config', configForSave(c));
         S.config = await api.get('/api/config');
+        refreshGenModelHint();
         if (closed) return;
         finished = true;
         closeModal();
@@ -5707,7 +5750,7 @@ function renderStudio({ list = true } = {}) {
   renderWordChip();
   histSync();
   $('#genWords').value = n.meta.targetWordsPerChapter || 3000;
-  $('#genModel').placeholder = S.config?.model || '默认';
+  refreshGenModelHint();
   $('#genRhythm').value = ch?.rhythm || '';
   updateFoot();
   renderChapterOutlineCard();
@@ -7728,7 +7771,7 @@ async function batchGenerateChapters() {
   const idx = S.novel.chapters.findIndex((c) => c.id === ch.id);
   if (idx < 0) return toast('先选一章当前章', 'err');
   const count = await new Promise((resolve) => {
-    showModal(`<h3>批量生成（有监督）</h3>
+    showModal(`<h3>批量生成（逐章确认）</h3>
       <p class="modal-sub">从当前章（第 ${ch.no} 章）开始，连续生成多章草稿。每章跑完一遍你就看输出区；满意点「追加到正文」落到那章，不满意就点「下一章」进下一章。<br>全程不覆盖已有正文——落到本章的是草稿建议，你定。</p>
       <div class="field-row"><label class="field-label">连续几章<input id="batchCount" type="number" min="1" max="10" value="3" class="input" style="width:80px" /></label></div>
       <div class="modal-foot"><button class="btn btn-text" id="batchCancel">关闭</button><button class="btn btn-primary" id="batchStart">开始生成</button></div>`, (box) => {
@@ -8710,8 +8753,10 @@ function openBatchMemory() {
 function setQuickRow(open) {
   const row = $('#quickRow');
   const btn = $('#quickToggle');
+  const hint = $('#quickHint');
   if (!row || !btn) return;
   row.hidden = !open;
+  if (hint) hint.hidden = !open;
   btn.setAttribute('aria-expanded', String(open));
 }
 $('#quickToggle')?.addEventListener('click', () => {
@@ -14358,6 +14403,7 @@ async function saveConfig() {
   }
   await api.send('/api/config', configForSave(cfg));
   S.config = await api.get('/api/config');
+  refreshGenModelHint();
 }
 $('#saveCfgBtn').addEventListener('click', async () => {
   await saveConfig();

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { exec } from 'node:child_process';
 import {
   ROOT, DATA_DIR, ensureDirs, loadConfig, saveConfig, maskKey,
-  listNovels, createNovel, getNovel, saveNovel, deleteNovel, trashNovel, listTrash, restoreNovel, purgeTrash, purgeAllTrash, newId, countWords,
+  listNovels, createNovel, createSampleNovel, getNovel, saveNovel, deleteNovel, trashNovel, listTrash, restoreNovel, purgeTrash, purgeAllTrash, newId, countWords,
   listSnapshots, createSnapshot, readSnapshot, chapterVolumeIds, volumeLabel,
   findOutlineEntry, CHAPTER_STAGES, cleanTargetWords, cleanPalette,
   applyFragmentData,
@@ -618,6 +618,16 @@ async function handleApi(req, res, url) {
       const body = await readBody(req);
       const n = createNovel(body);
       return sendJson(res, 200, { novel: n });
+    }
+  }
+
+  /* --- 内置示例作品：复制成一部新书，不联网 --- */
+  if (seg[1] === 'novels' && seg[2] === 'sample' && seg.length === 3 && method === 'POST') {
+    req.resume(); // 这个接口不用请求体；排空，避免连接在响应后被重置
+    try {
+      return sendJson(res, 200, { novel: createSampleNovel() });
+    } catch (err) {
+      return sendJson(res, 500, { error: err.message || '示例作品创建失败' });
     }
   }
 

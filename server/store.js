@@ -12,6 +12,8 @@ export const DATA_DIR = process.env.SHU_DATA_DIR ? path.resolve(process.env.SHU_
 export const NOVELS_DIR = path.join(DATA_DIR, 'novels');
 export const TRASH_DIR = path.join(DATA_DIR, 'trash');
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+// 内置示例作品：从 dev/seed-demo.mjs 的《雪岭问剑》导出，只读，复制成新书时才写用户目录
+const SAMPLE_FILE = path.join(__dirname, 'samples', 'xueling.json');
 
 // 章节的写作状态：草稿 → 修改中 → 定稿（和 AI 用的 chapter.status 无关）
 export const CHAPTER_STAGES = new Set(['draft', 'revising', 'done']);
@@ -426,6 +428,75 @@ export function saveNovel(novel) {
 export function createNovel(payload) {
   const n = blankNovel(payload || {});
   if (payload && Array.isArray(payload.tags)) n.tags = payload.tags;
+  ensureDirs();
+  saveNovel(n);
+  return n;
+}
+
+/**
+ * 把内置示例作品复制成一部新书：所有 id 重新生成、时间改成刚刚，
+ * 避免同一个章节 / 章纲 id 在多本书里重复。示例文件本身永远不改。
+ */
+export function createSampleNovel() {
+  const sample = readJson(SAMPLE_FILE, null);
+  if (!sample || !sample.title) {
+    throw new Error('示例作品数据缺失：找不到 server/samples/xueling.json');
+  }
+  const n = structuredClone(sample);
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+  const chapterCount = Math.max(1, (n.chapters || []).length);
+
+  n.id = newId('n');
+  n.createdAt = now;
+  n.updatedAt = now;
+
+  const chapterIds = new Map();
+  const volumeIds = new Map();
+  const outlineIds = new Map();
+
+  n.chapters = (n.chapters || []).map((c, i) => {
+    const id = newId('c');
+    if (c.id) chapterIds.set(c.id, id);
+    return {
+      ...c,
+      id,
+      no: i + 1,
+      createdAt: now - (chapterCount - i) * DAY,
+      updatedAt: now - Math.max(0, chapterCount - i - 1) * DAY,
+      words: countWords(c.content || ''),
+    };
+  });
+
+  const volumes = Array.isArray(n.outline?.volumes) ? n.outline.volumes : [];
+  for (const v of volumes) {
+    const oldVolumeId = v.id;
+    v.id = newId('v');
+    if (oldVolumeId) volumeIds.set(oldVolumeId, v.id);
+    v.chapters = (v.chapters || [])
+      .map((o) => {
+        const id = newId('o');
+        if (o.id) outlineIds.set(o.id, id);
+        return { ...o, id, chapterId: chapterIds.get(o.chapterId) || '' };
+      })
+      .filter((o) => o.chapterId);
+  }
+
+  n.chapters = n.chapters.map((c) => {
+    const next = { ...c };
+    if (next.outlineId) next.outlineId = outlineIds.get(next.outlineId) || '';
+    if (next.volumeId) next.volumeId = volumeIds.get(next.volumeId) || '';
+    return next;
+  });
+
+  n.meta = { ...blankNovel().meta, ...(n.meta || {}) };
+  n.bible ||= { characters: [], world: [], timeline: [] };
+  n.bible.characters = (n.bible.characters || []).map((x) => ({ ...x, id: newId('ch') }));
+  n.bible.world = (n.bible.world || []).map((x) => ({ ...x, id: newId('w') }));
+  n.bible.timeline = (n.bible.timeline || []).map((x) => ({ ...x, id: newId('t') }));
+  n.outline ||= { volumes: [], notes: '' };
+  n.outline.volumes = volumes;
+
   ensureDirs();
   saveNovel(n);
   return n;

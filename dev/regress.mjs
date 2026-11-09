@@ -328,6 +328,20 @@ async function main() {
   const cid = ch.chapter?.id;
   check('建章节成功', !!cid);
 
+  // ---------------------------------------------------------------
+  group('示例作品');
+  const sampleRes = await post(`${BASE}/api/novels/sample`);
+  const sampleNovel = sampleRes.novel;
+  check('示例作品创建成功', !!sampleNovel?.id && sampleNovel.id !== id);
+  check('示例作品标题正确', sampleNovel?.title === '雪岭问剑', sampleNovel?.title);
+  check('示例作品章节完整', (sampleNovel?.chapters || []).length === 14, `${(sampleNovel?.chapters || []).length} 章`);
+  check('示例作品有正文', (sampleNovel?.chapters || []).every((c) => (c.content || '').trim().length > 20));
+  const sampleOutlineIds = new Set((sampleNovel?.outline?.volumes || []).flatMap((v) => (v.chapters || []).map((o) => o.id)));
+  check('示例章节都挂上了章纲', (sampleNovel?.chapters || []).every((c) => c.outlineId && sampleOutlineIds.has(c.outlineId)));
+  check('示例章纲都指向真实章节', (sampleNovel?.outline?.volumes || []).every((v) => (v.chapters || []).every((o) => (sampleNovel.chapters || []).some((c) => c.id === o.chapterId))));
+  const sampleRead = await get(`${BASE}/api/novels/${sampleNovel?.id}`);
+  check('示例作品能按 id 取回', sampleRead?.novel?.chapters?.length === 14);
+
   // Markdown 往返测试：导出 -> 解析 -> 验证关键字段（在章节被修改前进行）
   const md = await req('GET', `${BASE}/api/novels/${id}/export?format=md`);
   check('Markdown 导出 200', md.status === 200 && md.buf.length > 50);
