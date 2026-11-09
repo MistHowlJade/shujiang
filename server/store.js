@@ -38,8 +38,9 @@ const CONFIG_DEFAULT = {
   maxTokens: 8192,
   // 分角色模型（留空则用上面的默认模型）
   roleModels: { write: '', summary: '', review: '' },
-  // 主题：dark（默认）/ light / soft（柔光玻璃，实验）；glassLevel 只对 soft 生效
-  ui: { theme: 'dark', glassLevel: 'mid' },
+  // 主题：soft（默认，柔光玻璃）/ dark / light；glassLevel 只对 soft 生效
+  // themeChosen：用户手动点过主题后置 true，防止升级时把用户主动选的深色改掉
+  ui: { theme: 'soft', glassLevel: 'mid', themeChosen: false },
 };
 
 export function ensureDirs() {
@@ -266,7 +267,12 @@ export function writeJson(file, data) {
 
 export function loadConfig() {
   const cfg = readJson(CONFIG_FILE, CONFIG_DEFAULT);
-  return { ...structuredClone(CONFIG_DEFAULT), ...cfg };
+  const next = { ...structuredClone(CONFIG_DEFAULT), ...cfg };
+  next.ui = { ...structuredClone(CONFIG_DEFAULT.ui), ...(cfg.ui || {}) };
+  // v1.0.22：默认主题由 dark 改为 soft。老配置只要从没手动点过主题（没有 themeChosen 标记），
+  // 就跟随新默认；手动选过深色 / 浅色的，选一次就会留下标记，之后不再被覆盖。
+  if (next.ui.themeChosen !== true && next.ui.theme === 'dark') next.ui.theme = 'soft';
+  return next;
 }
 
 export function saveConfig(cfg) {

@@ -596,8 +596,8 @@ function setUiTheme(next, persist = true) {
   document.body.dataset.theme = theme;
   renderThemeIcon();
   renderAppearance();
-  if (S.config) S.config.ui = { ...(S.config.ui || {}), theme };
-  if (persist) api.send('/api/config', { ui: { theme } }).catch(() => {});
+  if (S.config) S.config.ui = { ...(S.config.ui || {}), theme, themeChosen: true };
+  if (persist) api.send('/api/config', { ui: { theme, themeChosen: true } }).catch(() => {});
 }
 
 function setGlassLevel(next, persist = true) {
@@ -16351,7 +16351,7 @@ async function boot() {
   try {
     S.config = await api.get('/api/config');
     const ui = S.config.ui || {};
-    document.body.dataset.theme = normalizeUiTheme(ui.theme || 'dark');
+    document.body.dataset.theme = normalizeUiTheme(ui.theme || 'soft');
     document.body.dataset.glass = normalizeGlassLevel(ui.glassLevel);
     renderAppearance();
   } catch (err) {
