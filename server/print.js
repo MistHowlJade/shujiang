@@ -6,7 +6,7 @@
 //
 // 分页交给浏览器的打印引擎（CSS 的 break-before）。屏幕上看到的是连续的 A4 长卷，
 // 真正分页以打印结果为准；不引第三方分页库，也不在服务端生成 PDF。
-import { chapterVolumeIds, countWords, volumeLabel } from './store.js';
+import { chapterVolumeIds, countWords, volumeLabel, chapterTitleText } from './store.js';
 import { submissionFacts, submissionNote } from './manuscript.js';
 
 const esc = (s) => String(s ?? '')
@@ -21,7 +21,7 @@ const num = (v) => Number(v || 0).toLocaleString('zh-CN');
 
 /** 章节标题：没有标题就只写章号，别留一个尾巴 */
 function chapterLabel(c) {
-  const title = str(c?.title);
+  const title = chapterTitleText(c?.title);
   return `第${c?.no}章${title ? ` ${title}` : ''}`;
 }
 

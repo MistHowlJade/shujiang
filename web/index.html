@@ -795,6 +795,8 @@
               <div class="popmenu-sep" role="separator"></div>
               <button class="popmenu-item editor-more-item" id="sprintBtn" type="button" role="menuitemcheckbox" aria-checked="false" title="写作冲刺计时器（Ctrl+Alt+S）"><svg class="ico"><use href="#i-clock" /></svg>写作冲刺计时器</button>
               <button class="popmenu-item editor-more-item" id="healthBtn" type="button" role="menuitem" title="全书体检：本地统计，不花 token"><svg class="ico"><use href="#i-pulse" /></svg>全书体检</button>
+              <div class="popmenu-sep" role="separator"></div>
+              <button class="popmenu-item editor-more-item" id="editorExportBtn" type="button" role="menuitem" title="导出 / 备份（TXT / Markdown / Word / EPUB / JSON）"><svg class="ico"><use href="#i-download" /></svg>导出 / 备份…</button>
             </div>
             <div class="editor-wrap">
               <textarea id="chContent" class="editor" spellcheck="false" aria-label="正文" placeholder="在这里写正文，或者用右侧助手生成……&#10;&#10;选中任意段落后会弹出快捷菜单：润色 / 扩写 / 精简 / 改写。"></textarea>
@@ -878,20 +880,35 @@
                     <button class="btn btn-danger-ghost" id="stopBtn" hidden title="停止本次生成，已生成的内容会保留"><svg class="ico"><use href="#i-stop" /></svg>停止</button>
                   </div>
                   <button type="button" class="btn btn-sm btn-text quick-toggle" id="quickToggle" aria-expanded="false" aria-controls="quickRow"><svg class="ico"><use href="#i-more" /></svg>更多 AI 操作</button>
-                  <div class="btn-row wrap" id="quickRow" hidden>
-                    <button class="btn btn-sm btn-text" id="batchHintBtn" title="从当前章开始，连续生成多章草稿；每章你确认后继续，不会覆盖已有正文"><svg class="ico"><use href="#i-spark" /></svg>批量生成（逐章确认）</button>
-                    <button class="btn btn-sm btn-text" id="cmpBtn" title="同一段上下文跑两个模型，并排看，选一个采用"><svg class="ico"><use href="#i-columns" /></svg>对比模型</button>
-                    <button class="btn btn-sm btn-text" data-quick="memory" title="把本章的人物 / 伏笔 / 状态存下来，生成后续章节时会自动带上"><svg class="ico"><use href="#i-refresh" /></svg>存章节记忆</button>
-                    <button class="btn btn-sm btn-text" data-quick="batchMemory" title="把还没存记忆的章节批量补上；会逐章调用模型">批量补记忆</button>
-                    <button class="btn btn-sm btn-text" data-quick="propagate" title="分析这段文字里命中的设定痕迹，在其他章节哪里出现过——改动这里会牵动哪些章">影响范围</button>
-                    <button class="btn btn-sm btn-text" data-quick="payoff" title="AI 给本章打一个 0-5 的爽点分">爽点档</button>
-                    <button class="btn btn-sm btn-text" data-quick="poison" title="AI 找出弃书点">毒点检查</button>
-                    <button class="btn btn-sm btn-text" data-quick="hook" title="评估断章位置">断章评估</button>
-                    <button class="btn btn-sm btn-text" data-quick="sensitivity" title="圈出可能踩线的位置">敏感内容提醒</button>
-                    <button class="btn btn-sm btn-text" data-quick="focus" title="本章 POV / 章纲缺口 / 未决线索">聚焦</button>
-                    <button class="btn btn-sm btn-text" data-quick="scene" title="拆成场景序列评估推进">结构检查</button>
-                    <button class="btn btn-sm btn-text" data-quick="summarize" title="给本章写一句概要">生成概要</button>
-                    <button class="btn btn-sm btn-text" data-quick="titles">起名</button>
+                  <div class="quick-groups" id="quickRow" hidden>
+                    <div class="quick-group">
+                      <span class="quick-group-label">写作</span>
+                      <div class="btn-row wrap">
+                        <button class="btn btn-sm btn-text" data-quick="summarize" title="给本章写一句概要">生成概要</button>
+                        <button class="btn btn-sm btn-text" data-quick="titles">起名</button>
+                        <button class="btn btn-sm btn-text" data-quick="scene" title="拆成场景序列评估推进">结构检查</button>
+                        <button class="btn btn-sm btn-text" data-quick="memory" title="把本章的人物 / 伏笔 / 状态存下来，生成后续章节时会自动带上"><svg class="ico"><use href="#i-refresh" /></svg>存章节记忆</button>
+                      </div>
+                    </div>
+                    <div class="quick-group">
+                      <span class="quick-group-label">检查</span>
+                      <div class="btn-row wrap">
+                        <button class="btn btn-sm btn-text" data-quick="payoff" title="AI 给本章打一个 0-5 的爽点分">爽点档</button>
+                        <button class="btn btn-sm btn-text" data-quick="poison" title="AI 找出弃书点">毒点检查</button>
+                        <button class="btn btn-sm btn-text" data-quick="hook" title="评估断章位置">断章评估</button>
+                        <button class="btn btn-sm btn-text" data-quick="sensitivity" title="圈出可能踩线的位置">敏感内容提醒</button>
+                        <button class="btn btn-sm btn-text" data-quick="propagate" title="分析这段文字里命中的设定痕迹，在其他章节哪里出现过——改动这里会牵动哪些章">影响范围</button>
+                        <button class="btn btn-sm btn-text" data-quick="focus" title="本章 POV / 章纲缺口 / 未决线索">聚焦</button>
+                      </div>
+                    </div>
+                    <div class="quick-group">
+                      <span class="quick-group-label">批量</span>
+                      <div class="btn-row wrap">
+                        <button class="btn btn-sm btn-text" id="batchHintBtn" title="从当前章开始，连续生成多章草稿；每章你确认后继续，不会覆盖已有正文"><svg class="ico"><use href="#i-spark" /></svg>批量生成（逐章确认）</button>
+                        <button class="btn btn-sm btn-text" data-quick="batchMemory" title="把还没存记忆的章节批量补上；会逐章调用模型">批量补记忆</button>
+                        <button class="btn btn-sm btn-text" id="cmpBtn" title="同一段上下文跑两个模型，并排看，选一个采用"><svg class="ico"><use href="#i-columns" /></svg>对比模型</button>
+                      </div>
+                    </div>
                   </div>
                   <p class="assist-hint" id="quickHint" hidden>按 <kbd>Esc</kbd> 收起「更多 AI 操作」；<kbd>Ctrl</kbd><kbd>K</kbd> 搜「生成」「续写」「体检」——所有 AI 功能都在命令面板里，不占屏幕。</p>
                 </div>
@@ -1179,7 +1196,7 @@
 
           <div class="card">
             <div class="card-head"><h2>拆书 · 提取文风</h2></div>
-            <p class="desc">粘贴一段你喜欢的文字，让模型提炼出可直接用于写作的文风规则，再一键写进当前作品的文风档案。</p>
+            <p class="desc">粘贴一段你喜欢的文字，让模型提炼出可直接用于写作的文风规则，再一键写进当前打开作品的文风档案。文风档案是作品级的：没打开作品时先回书架选一本。</p>
             <textarea id="styleSample" class="textarea" rows="6" aria-label="文风样本文本" placeholder="粘贴样本文本（几千字效果最好）……"></textarea>
             <div class="btn-row">
               <button class="btn" id="analyzeStyleBtn"><svg class="ico"><use href="#i-spark" /></svg>提取文风</button>

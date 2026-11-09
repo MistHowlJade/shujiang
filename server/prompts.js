@@ -367,6 +367,26 @@ export const TASKS = {
     },
   },
 
+  /* ---------- 题材判断（一键开书：类型留空时用） ---------- */
+  genre: {
+    expect: 'json',
+    temperature: 0.3,
+    maxTokens: 200,
+    build({ payload }) {
+      const idea = String(payload?.idea || payload?.instruction || '').trim().slice(0, 500);
+      return {
+        messages: [
+          sys('你是中文小说平台的分类编辑，读一句话故事就能判断它该放哪个分类。'),
+          user(
+            `一句话故事：「${idea}」\n\n` +
+              `从这些常见分类里选一个最贴切的：玄幻、奇幻、仙侠、都市、现实、悬疑、推理、科幻、历史、军事、游戏、体育、言情、校园、无限流、轻小说。\n` +
+              `只输出 JSON：{"genre":"分类"}，不要解释、不要 markdown 代码块。`,
+          ),
+        ],
+      };
+    },
+  },
+
   /* ---------- 灵感 ---------- */
   inspiration: {
     expect: 'text',

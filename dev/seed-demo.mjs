@@ -160,12 +160,12 @@ const vol2Id = newId('v');
 const volumes = [
   {
     id: vol1Id,
-    title: '第一卷 · 雪岭',
+    name: '第一卷 · 雪岭',
     chapters: [1, 2, 3, 4, 5, 6, 7].map((n) => ({ id: newId('o'), title: chapters.find((c) => c.no === n).title, chapterId: chapters.find((c) => c.no === n).id })),
   },
   {
     id: vol2Id,
-    title: '第二卷 · 云海',
+    name: '第二卷 · 云海',
     chapters: [8, 9, 10, 11, 12, 13, 14].map((n) => ({ id: newId('o'), title: chapters.find((c) => c.no === n).title, chapterId: chapters.find((c) => c.no === n).id })),
   },
 ];

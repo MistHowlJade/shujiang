@@ -249,6 +249,15 @@ async function checkManuscript(novelId) {
 
   t = await parse(['第一卷 少年游', '第一章', '第1卷的结局让人意外', '第2章', '乙'].join(NL));
   check('正文里的「第N卷」不误切', t.chapters.length === 2 && t.volumes.length === 1, `章=${t.chapters.length} 卷=${t.volumes.length}`);
+
+  // 带空格的章标题几乎不会是行文：标题以「她 / 他 / 这」这类虚词开头也要切
+  t = await parse(['第1章 落霜', '正文甲', '第2章 她又笑了', '正文乙', '第3章 风起', '正文丙'].join(NL));
+  check('带空格的标题以虚词开头也切章', t.chapters.length === 3 && t.chapters[1]?.title === '她又笑了',
+    JSON.stringify(t.chapters.map((c) => c.title)));
+
+  // 纯编号章节回导：标题不重复（第1章 第一章）
+  t = await parse(['第一章', '正文甲', '第二章', '正文乙'].join(NL));
+  check('纯编号章节能导入', t.chapters.length === 2, JSON.stringify(t.chapters.map((c) => c.title)));
 }
 
 /** Word 导入：导出一份带书名页 / 创作说明的 docx，解析后再按章节导入 */
@@ -339,6 +348,10 @@ async function main() {
   const sampleOutlineIds = new Set((sampleNovel?.outline?.volumes || []).flatMap((v) => (v.chapters || []).map((o) => o.id)));
   check('示例章节都挂上了章纲', (sampleNovel?.chapters || []).every((c) => c.outlineId && sampleOutlineIds.has(c.outlineId)));
   check('示例章纲都指向真实章节', (sampleNovel?.outline?.volumes || []).every((v) => (v.chapters || []).every((o) => (sampleNovel.chapters || []).some((c) => c.id === o.chapterId))));
+  check('示例作品分卷名完整', (sampleNovel?.outline?.volumes || []).every((v) => String(v.name || '').trim()),
+    JSON.stringify((sampleNovel?.outline?.volumes || []).map((v) => v.name)));
+  check('示例作品卷名带中文卷序', (sampleNovel?.outline?.volumes || []).some((v) => /^第[一二三]卷/.test(String(v.name || ''))),
+    JSON.stringify((sampleNovel?.outline?.volumes || []).map((v) => v.name)));
   const sampleRead = await get(`${BASE}/api/novels/${sampleNovel?.id}`);
   check('示例作品能按 id 取回', sampleRead?.novel?.chapters?.length === 14);
 
@@ -350,8 +363,93 @@ async function main() {
   check('Markdown 导入：标题还原', imported.title === '回归测试' || imported.title.includes('回归'));
   check('Markdown 导入：作者还原', imported.author === '测试');
   check('Markdown 导入：章节数一致', imported.chapters.length === 1);
-  check('Markdown 导入：首章标题还原', imported.chapters[0].title === '第一章');
+  check('Markdown 导入：首章标题还原', imported.chapters[0].title === '第1章', imported.chapters[0].title);
   check('Markdown 导入：正文内容还原', imported.chapters[0].content.includes('正文'));
+
+  // 导出 → 回导往返：前置页 / 附录不能被当成正文，纯编号标题不重复
+  {
+    const rt = await post(`${BASE}/api/novels`, { title: '往返测试', author: '测试' });
+    const rid = rt.novel?.id;
+    await post(`${BASE}/api/novels/${rid}/chapters`, { title: '第一章', content: '第一段正文。' });
+    await post(`${BASE}/api/novels/${rid}/chapters`, { title: '落霜', content: '第二段正文。' });
+    await put(`${BASE}/api/novels/${rid}`, {
+      outline: {
+        volumes: [{ id: 'v_rt', name: '第一卷 · 风起', desc: '', chapters: [{ id: 'o_rt', title: '落霜', summary: '', scene: '', characters: '', hook: '' }] }],
+        notes: '',
+      },
+    });
+
+    const rtTxt = (await req('GET', `${BASE}/api/novels/${rid}/export?format=txt`)).buf.toString('utf8');
+    check('TXT 不重复章号标题', !rtTxt.includes('第1章 第一章'), rtTxt.slice(0, 160));
+    const rtEpub = unzip((await req('GET', `${BASE}/api/novels/${rid}/export?format=epub`)).buf);
+    check('EPUB 不重复章号标题', !rtEpub['OEBPS/chapter-001.xhtml'].toString('utf8').includes('第1章 第一章'));
+    const rtDocx = unzip((await req('GET', `${BASE}/api/novels/${rid}/export?format=docx`)).buf);
+    check('Word 不重复章号标题', !rtDocx['word/document.xml'].toString('utf8').includes('第1章 第一章'));
+    const rtPrint = (await req('GET', `${BASE}/api/novels/${rid}/export?format=print`)).buf.toString('utf8');
+    check('打印稿不重复章号标题', !rtPrint.includes('第1章 第一章'));
+    const rtMdPlain = (await req('GET', `${BASE}/api/novels/${rid}/export?format=md`)).buf.toString('utf8');
+    check('Markdown 不重复章号标题', !rtMdPlain.includes('第1章 第一章'));
+    check('Markdown 前置页有机器标记', rtMdPlain.includes('<!-- shujiang:frontmatter -->'));
+    const rtMd = (await req('GET', `${BASE}/api/novels/${rid}/export?format=md&extras=outline,characters`)).buf.toString('utf8');
+    check('大纲附录有机器标记', rtMd.includes('<!-- shujiang:outline -->'));
+    check('大纲卷名不重复卷序', rtMd.includes('### 第一卷 · 风起') && !rtMd.includes('第1卷 第一卷'), rtMd.slice(rtMd.indexOf('全书大纲'), rtMd.indexOf('全书大纲') + 80));
+
+    const mk = async (title) => {
+      const made = await post(`${BASE}/api/novels`, { title });
+      return made.novel?.id;
+    };
+    const rid2 = await mk('回导测试');
+    const imp = await post(`${BASE}/api/novels/${rid2}/import`, { text: rtMd });
+    check('带附录的 Markdown 回导成功', imp.imported === 2, `imported=${imp.imported}`);
+    const n2 = (await get(`${BASE}/api/novels/${rid2}`)).novel;
+    check('回导后章数与原文一致', (n2?.chapters || []).length === 2, `${(n2?.chapters || []).length} 章`);
+    check('回导不生成「前言」', !(n2?.chapters || []).some((c) => c.title === '前言'));
+    check('附录不粘进末章正文', !(n2?.chapters || []).some((c) => (c.content || '').includes('全书大纲')));
+    const rtTxt2 = (await req('GET', `${BASE}/api/novels/${rid2}/export?format=txt`)).buf.toString('utf8');
+    check('回导后纯编号标题只写编号', rtTxt2.includes('第1章\n') && !rtTxt2.includes('第1章 第一章'));
+
+    // 旧版导出（没有标记）也要认得出来：前置页不当前言，附录不并进末章
+    const legacy = rtMd
+      .replace(/<!--\s*\/?shujiang:(?:frontmatter|outline|characters)\s*-->/g, '');
+    const rid3 = await mk('旧备份回导');
+    await post(`${BASE}/api/novels/${rid3}/import`, { text: legacy });
+    const n3 = (await get(`${BASE}/api/novels/${rid3}`)).novel;
+    check('旧版 Markdown 回导不生成前言', !(n3?.chapters || []).some((c) => c.title === '前言'),
+      JSON.stringify((n3?.chapters || []).map((c) => c.title)));
+    check('旧版 Markdown 回导不吞附录', !(n3?.chapters || []).some((c) => (c.content || '').includes('全书大纲')));
+
+    // 没有作者 / 类型时，旧版导出的前置页只剩一行「# 书名」，也不能变成前言
+    const bare = await post(`${BASE}/api/novels`, { title: '无作者旧稿' });
+    await post(`${BASE}/api/novels/${bare.novel?.id}/chapters`, { title: '第一场雪', content: '正文。' });
+    const bareMd = (await req('GET', `${BASE}/api/novels/${bare.novel?.id}/export?format=md`)).buf.toString('utf8')
+      .replace(/<!--\s*\/?shujiang:(?:frontmatter|outline|characters)\s*-->/g, '');
+    const rid4 = await mk('无作者回导');
+    await post(`${BASE}/api/novels/${rid4}/import`, { text: bareMd });
+    const n4 = (await get(`${BASE}/api/novels/${rid4}`)).novel;
+    check('旧版只有书名的前置页不算前言', !(n4?.chapters || []).some((c) => c.title === '前言'),
+      JSON.stringify((n4?.chapters || []).map((c) => c.title)));
+  }
+
+  // 删掉中间章后新建：默认标题按已有最大章号 +1，不能撞名
+  {
+    const made = await post(`${BASE}/api/novels`, { title: '新章标题测试' });
+    const nid = made.novel?.id;
+    for (const t of ['第 1 章', '第 2 章', '第 3 章']) await post(`${BASE}/api/novels/${nid}/chapters`, { title: t, content: 'x' });
+    const list = (await get(`${BASE}/api/novels/${nid}`)).novel.chapters;
+    await req('DELETE', `${BASE}/api/novels/${nid}/chapters/${list[1].id}`);
+    const added = await post(`${BASE}/api/novels/${nid}/chapters`, { content: '' });
+    check('删掉中间章后新建标题不撞名', added.chapter?.title === '第 4 章', added.chapter?.title);
+  }
+
+  // EPUB：XML 非法控制字符要剔掉，否则阅读器解析失败
+  {
+    const made = await post(`${BASE}/api/novels`, { title: '控制字符测试' });
+    const nid = made.novel?.id;
+    await post(`${BASE}/api/novels/${nid}/chapters`, { title: '泥字符', content: 'ABC\u0001DEF\u0007GHI' });
+    const files = unzip((await req('GET', `${BASE}/api/novels/${nid}/export?format=epub`)).buf);
+    const xhtml = files['OEBPS/chapter-001.xhtml'].toString('utf8');
+    check('EPUB 剔除了 XML 非法控制字符', xhtml.includes('ABCDEFGHI') && !/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(xhtml));
+  }
 
   const ctx = await post(`${BASE}/api/context`, {
     task: 'chapter', novelId: id, chapterId: cid,
@@ -726,6 +824,10 @@ async function main() {
     check('封面文件落到数据目录的 covers', fs.existsSync(path.join(DATA_DIR, 'covers', `${id}.png`)));
     const rec = (await get(`${BASE}/api/novels/${id}`)).novel;
     check('作品记录里记下了封面', rec.cover?.ext === 'png' && rec.cover?.size === png.length, JSON.stringify(rec.cover));
+    // JSON 备份要能换机恢复：封面图单独存在 covers/ 里，得 base64 内嵌进备份
+    const bakJson = JSON.parse((await req('GET', `${BASE}/api/novels/${id}/export?format=json`)).buf.toString('utf8'));
+    check('JSON 备份内嵌了封面图', !!bakJson.cover?.data && Buffer.from(bakJson.cover.data, 'base64').equals(png),
+      bakJson.cover ? `ext=${bakJson.cover.ext} data=${String(bakJson.cover.data || '').length}` : '没有 cover');
     const back = await req('GET', `${BASE}/api/novels/${id}/cover`);
     check('取回的封面就是传上去那张', back.buf.equals(png), `${back.buf.length} vs ${png.length}`);
     const epub2 = await req('GET', `${BASE}/api/novels/${id}/export?format=epub`);

@@ -749,6 +749,14 @@ export function readSnapshot(id, ts) {
 
 /* ---------------- 分卷归属 ---------------- */
 
+/** 章标题本身就是一个纯编号（第一章 / 第 1 章 / 第三回）时，导出只写编号，免得变成「第1章 第一章」 */
+const PURE_CHAPTER_TITLE_RE = /^第\s*[0-9０-９零〇一二三四五六七八九十百千两]+\s*[章节回]$/;
+
+export function chapterTitleText(title) {
+  const t = String(title ?? '').trim();
+  return PURE_CHAPTER_TITLE_RE.test(t) ? '' : t;
+}
+
 /** 导出时显示的卷名：卷名本身已经带「第 N 卷」就不再重复加前缀 */
 export function volumeLabel(volume, no) {
   const name = String(volume?.name || '').trim();

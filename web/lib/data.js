@@ -2,6 +2,41 @@
 // 从作品数据里算出来的只读结果：人物出场索引、线索汇总、修订计数。
 // 不碰 DOM、不依赖全局状态，所以可以单独抽出来复用与测试。
 
+const CN_DIGIT = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+
+/** 「十二」「一百零三」「12」都认，认不出返回 0 */
+function chapterNumberOf(text) {
+  const s = String(text || '').trim();
+  if (!s) return 0;
+  if (/^[0-9０-９]+$/.test(s)) return Number(s.normalize('NFKC'));
+  let total = 0;
+  let cur = 0;
+  for (const ch of s) {
+    if (ch in CN_DIGIT) cur = CN_DIGIT[ch];
+    else if (ch === '十') { total += (cur || 1) * 10; cur = 0; }
+    else if (ch === '百') { total += (cur || 1) * 100; cur = 0; }
+    else if (ch === '千') { total += (cur || 1) * 1000; cur = 0; }
+  }
+  return total + cur;
+}
+
+/**
+ * 新建章节的默认标题：按已有「第 N 章」的最大编号 + 1，删掉中间章也不会撞名。
+ * 一章都认不出编号时退回「章数 + 1」。
+ */
+export function nextChapterTitle(chapters = []) {
+  let max = 0;
+  let counted = 0;
+  for (const c of chapters || []) {
+    counted += 1;
+    const m = String(c?.title || '').match(/^第\s*([0-9０-９零〇一二三四五六七八九十百千两]+)\s*[章节回]/);
+    if (!m) continue;
+    const n = chapterNumberOf(m[1]);
+    if (n > max) max = n;
+  }
+  return `第 ${Math.max(max, counted) + 1} 章`;
+}
+
 export function collectThreads(n) {
   const map = new Map();
   for (const [index, ch] of (n.chapters || []).entries()) {

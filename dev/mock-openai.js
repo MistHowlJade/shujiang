@@ -338,6 +338,7 @@ function decide(text) {
   if (has('"stateChanges"') || has('记忆档案')) return 'memory';
   if (has('自相矛盾') || has('"level"')) return 'consistency';
   if (has('"appearance"')) return 'characters';
+  if (has('"genre"')) return 'genre';
   if (has('"category"')) return 'worldview';
   if (has('分卷大纲')) return 'outline';
   if (has('审稿意见')) return 'review';
@@ -374,6 +375,8 @@ function buildReply(text, model = '') {
       return { kind, content: JSON.stringify(ISSUES) };
     case 'characters':
       return { kind, content: JSON.stringify(CHARACTERS) };
+    case 'genre':
+      return { kind, content: JSON.stringify({ genre: '仙侠' }) };
     case 'worldview':
       return { kind, content: JSON.stringify(WORLDVIEW) };
     case 'outline':

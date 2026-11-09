@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, readerChapterRead, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, readerChapterRead, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph, nextChapterTitle } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -282,6 +282,14 @@ function openHelpModal() {
       <li><svg class="ico"><use href="#i-copy" /></svg><div><b>AI 结果不会自动写进正文</b><span>生成后满意再点「追加到正文」或「插入光标处」。没采用不会污染原稿，可以随时丢弃。</span></div></li>
       <li><svg class="ico"><use href="#i-shield" /></svg><div><b>担心 AI 写得不像？</b><span>任何 AI 生成结果，不会替你定稿。设定库和大纲随时可以改，成稿之前书匠不会替你按下「完成」。</span></div></li>
     </ol>
+    <p class="help-sub">写完之后</p>
+    <ol class="help-list">
+      <li><svg class="ico"><use href="#i-clock" /></svg><div><b>版本历史</b><span>每 10 分钟自动备份。改坏了打开「版本历史」，点「对比」看差异，可以只恢复本章正文。</span></div></li>
+      <li><svg class="ico"><use href="#i-check" /></svg><div><b>文字校对 / 交稿检查</b><span>「文字校对」查错字和标点；「交稿检查」看作者、简介、联系方式、未定稿章节还缺什么。都在 <kbd>Ctrl K</kbd> 里。</span></div></li>
+      <li><svg class="ico"><use href="#i-pulse" /></svg><div><b>全书体检</b><span>本地统计，不花 token：字数曲线、重复表达、对话比例、拖沓段落，一次看完。</span></div></li>
+      <li><svg class="ico"><use href="#i-eye" /></svg><div><b>阅读模式</b><span>像读者一样通读成稿：翻章、调字号、看进度；读到要改的地方点「去写这一章」直接回正文。</span></div></li>
+      <li><svg class="ico"><use href="#i-download" /></svg><div><b>导出</b><span>顶栏书名右侧的「导出」或 <kbd>Ctrl Shift E</kbd>：TXT / Markdown / Word / EPUB / 打印稿 / JSON 备份。</span></div></li>
+    </ol>
     <p class="help-note">作品、设定、密钥只保存在本机 <code>data/</code> 目录，不会上传云端。Topbar 右上角的主题按钮随时可以换明暗。</p>
     <div class="modal-foot"><button class="btn btn-primary" id="helpOk">知道了</button></div>`, (box) => {
     box.querySelector('#helpClose').onclick = closeModal;
@@ -333,6 +341,13 @@ const api = {
     return j;
   },
 };
+
+/**
+ * Markdown / 纯文本导出专用：只统一换行，不做 HTML 转义。
+ * esc() 会把 & < > " ' 变成实体，那是给 innerHTML 用的；写进 .md 文件就变成
+ * 「&quot;」「&#39;」，作者拿到的是不可读的稿子。
+ */
+const mdText = (v) => String(v ?? '').replace(/\r\n?/g, '\n');
 
 /** 流式生成：逐块回调，返回完整文本 */
 async function streamAI(body, { onDelta, onReasoning, onMeta, onNotice, signal } = {}) {
@@ -787,7 +802,10 @@ function renderShelf() {
         <span class="bk-reading-label">${ico('book-open')}继续阅读</span>
         <span class="bk-reading-meta">第 ${prog.chapterNo} 章${readPct === null ? '' : ` · ${readPct}%`}</span>
         ${readPct === null ? '' : `<span class="bk-reading-bar" aria-hidden="true"><i style="width:${readPct}%"></i></span>`}
-      </button>` : ''}
+      </button>` : `<button type="button" class="bk-reading bk-read" title="进入阅读模式（不影响写作页的编辑位置）" aria-label="阅读《${esc(n.title)}》">
+        <span class="bk-reading-label">${ico('book-open')}阅读</span>
+        <span class="bk-reading-meta">从第 1 章开始</span>
+      </button>`}
       <div class="bk-line">
         <span>${n.chapterCount} 章 · ${fmtWords(n.words)} 字${todayOf(n.id) ? ` · <em class="bk-today">今日 ${fmtWords(todayOf(n.id))} 字</em>` : ''}</span>
         <span>${esc(fmtDate(n.updatedAt).slice(5, 10))}</span>
@@ -817,6 +835,12 @@ function renderShelf() {
     });
     if (hasProgress) {
       div.querySelector('.bk-reading').addEventListener('click', (e) => {
+        e.stopPropagation();
+        continueReading(n.id);
+      });
+    } else {
+      // 没读过也能读：书架卡片直接进阅读模式，不用先进写作页找按钮
+      div.querySelector('.bk-read').addEventListener('click', (e) => {
         e.stopPropagation();
         continueReading(n.id);
       });
@@ -1150,6 +1174,18 @@ function backupImportPayload(data) {
   };
 }
 
+/** 备份里内嵌的封面图（base64）写回新作品：否则恢复出来会退回自动封面 */
+async function restoreBackupCover(novelId, cover) {
+  const b64 = String(cover?.data || '').replace(/^data:[^;]+;base64,/, '');
+  if (!b64) return false;
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  const mime = String(cover?.mime || 'image/png');
+  await api.upload(`/api/novels/${novelId}/cover`, new Blob([bytes], { type: mime }));
+  return true;
+}
+
 async function restoreNovelBackup(file) {
   if (!file) return;
   const btn = $('#restoreBackupBtn');
@@ -1173,6 +1209,14 @@ async function restoreNovelBackup(file) {
     created = made.novel;
     const res = await api.put(`/api/novels/${created.id}`, payload);
     restoredId = res.novel?.id || created.id;
+    // 封面图不在作品 JSON 里，备份时单独内嵌了 base64；恢复时写回新 id 的封面文件
+    if (data.cover?.data) {
+      try {
+        await restoreBackupCover(restoredId, data.cover);
+      } catch (err) {
+        toast(`正文已恢复，但封面没恢复成功：${errMsg(err)}`, 'err');
+      }
+    }
     await loadNovels();
     renderShelf();
     toast(`已恢复《${res.novel?.title || payload.title}》为新的作品`, 'ok');
@@ -1341,50 +1385,10 @@ function openNewNovelModal() {
 $('#newNovelBtn').addEventListener('click', openNewNovelModal);
 $('#emptyNewBtn').addEventListener('click', openNewNovelModal);
 
-/* 空书架：没有模型也能先把旧稿搬进来；先建一本空书，再进导入流程 */
+/* 空书架：没有模型也能先把旧稿搬进来。
+   书名并进同一个导入弹窗：选文件后默认取文件名，确认时才建作品，选错文件也不用先删一本空书。 */
 function openImportNew() {
-  showModal(`
-    <h3>导入已有稿子</h3>
-    <p class="modal-sub">给这本书起个名字，然后把 .txt / .md / .docx 拖进来，或直接粘贴。导入后还能在标题上随时改。</p>
-    <label class="field-label">书名</label>
-    <input id="impNewTitle" class="input" placeholder="例如：旧稿《半盏残雪》" autocomplete="off" />
-    <div class="modal-foot">
-      <button class="btn btn-text" id="impNewCancel">取消</button>
-      <button class="btn btn-primary" id="impNewOk">创建并导入</button>
-    </div>`, (box) => {
-    const titleEl = box.querySelector('#impNewTitle');
-    const okBtn = box.querySelector('#impNewOk');
-    titleEl.focus();
-    const create = async () => {
-      if (okBtn.disabled) return;
-      okBtn.disabled = true;
-      const original = okBtn.textContent;
-      okBtn.textContent = '创建中…';
-      const gen = box._gen;
-      let novel;
-      try {
-        ({ novel } = await api.send('/api/novels', { title: titleEl.value.trim() || '导入的作品' }));
-      } catch (err) {
-        okBtn.disabled = false;
-        okBtn.textContent = original;
-        return toast(err.message, 'err');
-      }
-      const stillMine = box._gen === gen;
-      closeIfCurrent(box, gen);
-      await loadNovels().catch(() => {});
-      try {
-        await openNovel(novel.id);
-      } catch (err) {
-        return toast(`《${novel.title}》已建好，但没能打开：${err.message}`, 'err');
-      }
-      if (!stillMine || box._gen !== 0) return; // 用户已经走到别的弹窗
-      openImportModal();
-      toast('先导入稿子，导入后可以在标题上改名', 'ok');
-    };
-    okBtn.onclick = create;
-    titleEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); create(); } });
-    box.querySelector('#impNewCancel').onclick = closeModal;
-  });
+  openImportModal(null, { newBook: true });
 }
 $('#emptyImportBtn').addEventListener('click', openImportNew);
 
@@ -1424,8 +1428,10 @@ $('#emptySampleBtn')?.addEventListener('click', createSampleNovel);
 const QUICK_START_STEPS = [
   { key: 'create', label: '建好作品', hint: '先搭一本书的骨架' },
   { key: 'title', label: '起书名', hint: '从想法里挑一个记得住的名字' },
+  { key: 'genre', label: '判断题材', hint: '类型留空时由模型归类' },
   { key: 'characters', label: '设计人物', hint: '主角、对手和关键配角' },
   { key: 'outline', label: '铺全书大纲', hint: '分卷与章纲，后面写作都靠它' },
+  { key: 'worldview', label: '生成世界观', hint: '地理、势力、规则' },
   { key: 'chapter', label: '建好第一章', hint: '把第一章的章纲挂上' },
   { key: 'prose', label: '写第一章正文', hint: '一份能读、能改的初稿' },
 ];
@@ -1515,6 +1521,7 @@ function openQuickStartModal() {
     <p class="modal-sub">写下一句话想法，AI 会先生成书名和人物，再铺全书大纲，最后把第一章写出来。你随时可以停下来改。</p>
     <label class="field-label">一句话想法<span class="field-hint">必填 · 越具体越好</span></label>
     <input id="qsIdea" class="input" maxlength="200" autocomplete="off" placeholder="例如：一个少年背着一把不能出鞘的剑，去杀他师傅。" />
+    <p class="dim small qs-idea-note" id="qsIdeaNote" hidden></p>
     <div class="qs-ideas" id="qsIdeas">
       <span>没想好？点一个试试</span>
       <button type="button" data-idea="一个少年背着一把不能出鞘的剑，去杀教他剑法的师傅。">剑与师门</button>
@@ -1522,13 +1529,14 @@ function openQuickStartModal() {
       <button type="button" data-idea="每天醒来都会收到一封明天的自己写的信，信里预告了一场谋杀。">明天的信</button>
     </div>
     <p class="qs-error" id="qsError" hidden>先写一句想法，一句话就够。</p>
-    <label class="field-label">类型<span class="field-hint">可留空，让模型判断</span></label>
+    <label class="field-label">类型<span class="field-hint">可留空，开书时让模型从想法里判断</span></label>
     <input id="qsGenre" class="input" maxlength="24" autocomplete="off" placeholder="玄幻 / 都市 / 悬疑…" />
     <label class="field-label">篇幅<span class="field-hint">只写第一章，其余章纲留给之后慢慢写</span></label>
     <div class="qs-scale" id="qsScale" role="group" aria-label="开书篇幅">
       ${QUICK_START_SCALES.map((s, i) => `<button type="button" class="qs-scale-btn${i === 1 ? ' on' : ''}" data-scale="${s.key}" aria-pressed="${i === 1}"><b>${s.title}</b><span>${s.desc}</span></button>`).join('')}
     </div>
-    <div class="tip qs-tip">${ico('spark')}<span>会用「${esc(quickStartModel().providerName)}」的 <code>${esc(quickStartModel().model)}</code> 调用 4 次模型，通常一两分钟，费用由你的服务商结算。</span></div>
+    <label class="find-check qs-world"><input type="checkbox" id="qsWorld" checked /> 同时生成世界观（3–6 条地理 / 势力 / 规则，之后可在设定库改）</label>
+    <div class="tip qs-tip">${ico('spark')}<span>会用「${esc(quickStartModel().providerName)}」的 <code>${esc(quickStartModel().model)}</code> 调用 4–6 次模型，通常一两分钟，费用由你的服务商结算。</span></div>
     <div class="modal-foot">
       <button class="btn btn-text" id="qsCancel">取消</button>
       <button class="btn btn-primary" id="qsStart">${ico('spark')}开始生成</button>
@@ -1572,6 +1580,7 @@ function openQuickStartModal() {
       const run = {
         idea,
         genre: box.querySelector('#qsGenre').value.trim(),
+        world: box.querySelector('#qsWorld')?.checked !== false,
         scale,
         warnings: [],
         title: '',
@@ -1581,6 +1590,7 @@ function openQuickStartModal() {
         characters: 0,
         outline: null,
         outlineChapters: 0,
+        worldview: 0,
         words: 0,
         stopped: false,
         closed: false,
@@ -1811,6 +1821,30 @@ const INSPIRATION_SUGGESTIONS = [
   '悬疑+职场怎么组合，给我几个点子',
 ];
 
+/**
+ * 从一条灵感回复里挑出「能直接开书」的一句话。
+ * 回复经常是「5 个方向」的长清单，硬截前 170 字会变成半句话；
+ * 这里优先取列表里的第一条方向，再退回第一句。
+ */
+function ideaFromInspiration(text) {
+  const raw = String(text || '').replace(/\r\n?/g, '\n').trim();
+  if (!raw) return { idea: '', note: '' };
+  const lines = raw.split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => l.replace(/^(?:[-*•·—]|\d+[.、)）]|[（(]\d+[)）])\s*/, '').trim())
+    .filter((l) => l && !/^#{1,6}\s/.test(l) && !/^>/.test(l) && l.length >= 8);
+  // 跳过寒暄 / 总结句，找第一条真在讲故事方向的
+  const direction = lines.find((l) => !/^(可以|建议|如果|当然|好的|先|这个|以上|希望|以下是|给你|下面)/.test(l))
+    || lines[0];
+  const oneLine = (direction || raw).replace(/\s+/g, ' ').trim();
+  const idea = oneLine.length > 170 ? `${oneLine.slice(0, 169)}…` : oneLine;
+  const note = oneLine.length < raw.length
+    ? '这句是从灵感回复里挑出来的第一段方向，可以改成你更想要的那条。'
+    : '';
+  return { idea, note };
+}
+
 function openInspirationModal() {
   if (!quickStartModel()) return openQuickStartSetup();
 
@@ -1849,11 +1883,15 @@ function openInspirationModal() {
     const scrollDown = () => { logEl.scrollTop = logEl.scrollHeight; };
 
     const useThis = (text) => {
+      const { idea, note } = ideaFromInspiration(text);
       closeModal();
       openQuickStartModal();
       const qs = document.querySelector('#qsIdea');
-      if (qs) { qs.value = String(text || '').slice(0, 170); qs.dispatchEvent(new Event('input')); }
-      document.querySelector('#qsIdea')?.focus();
+      if (qs) { qs.value = idea; qs.dispatchEvent(new Event('input')); }
+      // 别假装这是完整回复：告诉作者这句是挑出来的，还能改
+      const noteEl = document.querySelector('#qsIdeaNote');
+      if (noteEl && note) { noteEl.hidden = false; noteEl.textContent = note; }
+      qs?.focus();
     };
 
     const renderBubble = (role, text) => {
@@ -2329,7 +2367,7 @@ function renderQuickStartRun(box, run) {
       <div class="qs-preview-head"><span id="qsPreviewLabel">生成中</span><span id="qsPreviewCount"></span></div>
       <pre id="qsPreviewText"></pre>
     </div>
-    <div class="qs-note">开书会调用 4 次模型，通常一两分钟。内容会实时保存；中途停止也不会丢掉已经生成的部分。</div>
+    <div class="qs-note">开书会调用 4–6 次模型，通常一两分钟。内容会实时保存；中途停止也不会丢掉已经生成的部分。</div>
     <div class="modal-foot qs-foot">
       <button class="btn btn-text" id="qsClose" disabled>关闭</button>
       <button class="btn btn-danger-ghost" id="qsStop">${ico('stop')}停止</button>
@@ -2408,6 +2446,76 @@ async function quickStartCharactersStep(box, run, novelId, base) {
     if (quickStartIsStop(err, run)) throw err;
     quickStartStep(box, 'characters', 'error', '跳过，可在设定库补');
     return `人物没生成成功：${quickStartErrorText(err)}。之后可以在「设定库 → 人物」补。`;
+  }
+}
+
+async function quickStartGenreStep(box, run, novelId, base) {
+  // 作者自己填了类型就不花这次调用
+  if (run.genre) {
+    quickStartStep(box, 'genre', 'skip', run.genre);
+    return '';
+  }
+  quickStartStep(box, 'genre', 'running');
+  quickStartSub(box, '正在判断题材…');
+  try {
+    const text = await quickStartStream(run, box, 'genre', '判断题材', {
+      ...base,
+      task: 'genre',
+      novelId,
+      payload: { idea: run.idea },
+    });
+    const parsed = parseJsonLoose(text);
+    const genre = String(parsed?.genre || parsed?.[0] || '').trim().slice(0, 24);
+    if (!genre) throw new Error('模型没有给出题材');
+    await api.put(`/api/novels/${novelId}`, { genre });
+    run.genre = genre;
+    quickStartStep(box, 'genre', 'done', genre);
+    return '';
+  } catch (err) {
+    if (quickStartIsStop(err, run)) throw err;
+    quickStartStep(box, 'genre', 'error', '跳过，可在设定库补');
+    return `题材没判断出来：${quickStartErrorText(err)}。之后可以在设定库补。`;
+  }
+}
+
+async function quickStartWorldviewStep(box, run, novelId, base) {
+  if (!run.world) {
+    quickStartStep(box, 'worldview', 'skip', '没勾选，可在设定库补');
+    return '';
+  }
+  quickStartStep(box, 'worldview', 'running');
+  quickStartSub(box, '正在生成世界观…');
+  try {
+    const text = await quickStartStream(run, box, 'worldview', '生成世界观', {
+      ...base,
+      task: 'worldview',
+      novelId,
+      payload: { instruction: `根据这句话故事「${run.idea}」，生成 3–6 条世界观设定，覆盖地理、势力、规则三类。` },
+    });
+    const parsed = parseJsonLoose(text);
+    const rawList = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.world) ? parsed.world : []);
+    const list = rawList
+      .filter((x) => x && typeof x === 'object' && String(x.name || '').trim())
+      .map((x) => ({
+        ...x,
+        id: uid('w'),
+        name: String(x.name).trim(),
+        category: String(x.category || '').trim(),
+        desc: String(x.desc || x.note || '').trim(),
+        keywords: Array.isArray(x.keywords) ? x.keywords : [],
+      }));
+    if (!list.length) throw new Error('模型返回的世界观格式看不懂');
+    // 追加而不是覆盖：作者已经补过的条目不能被开书流程冲掉
+    const { novel: cur } = await api.get(`/api/novels/${novelId}`);
+    const existing = Array.isArray(cur.bible?.world) ? cur.bible.world : [];
+    await api.put(`/api/novels/${novelId}`, { bible: { world: [...existing, ...list] } });
+    run.worldview = list.length;
+    quickStartStep(box, 'worldview', 'done', `${list.length} 条 · ${list.slice(0, 3).map((x) => x.name).join('、')}${list.length > 3 ? '…' : ''}`);
+    return '';
+  } catch (err) {
+    if (quickStartIsStop(err, run)) throw err;
+    quickStartStep(box, 'worldview', 'error', '跳过，可在设定库补');
+    return `世界观没生成成功：${quickStartErrorText(err)}。之后可以在「设定库 → 世界观」补。`;
   }
 }
 
@@ -2520,6 +2628,11 @@ async function runQuickStart(box, run) {
     if (titleWarning) run.warnings.push(titleWarning);
     quickStartAssertRunning(run);
 
+    /* 2.5 题材（类型留空时才让模型判断） */
+    const genreWarning = await quickStartGenreStep(box, run, novel.id, base);
+    if (genreWarning) run.warnings.push(genreWarning);
+    quickStartAssertRunning(run);
+
     /* 3. 人物 */
     const charWarning = await quickStartCharactersStep(box, run, novel.id, base);
     if (charWarning) run.warnings.push(charWarning);
@@ -2528,6 +2641,11 @@ async function runQuickStart(box, run) {
     /* 4. 全书大纲 */
     const outlineWarning = await quickStartOutlineStep(box, run, novel.id, base);
     if (outlineWarning) run.warnings.push(outlineWarning);
+    quickStartAssertRunning(run);
+
+    /* 4.5 世界观（可选，失败不阻断开书） */
+    const worldWarning = await quickStartWorldviewStep(box, run, novel.id, base);
+    if (worldWarning) run.warnings.push(worldWarning);
     quickStartAssertRunning(run);
 
     /* 5. 建第一章 */
@@ -2884,6 +3002,7 @@ function quickStartResult(box, run, kind, message = '') {
   if (title) facts.push(['书名', `《${title}》`]);
   if (run.characters) facts.push(['人物', `${run.characters} 位`]);
   if (run.outline) facts.push(['大纲', `${run.outline.length} 卷 · ${run.outlineChapters} 章`]);
+  if (run.worldview) facts.push(['世界观', `${run.worldview} 条`]);
   if (run.chapterTitle) {
     facts.push(['第一章', `${run.chapterTitle}${run.words ? ` · ${fmtWords(run.words)} 字` : ' · 还没写正文'}`]);
   }
@@ -4106,11 +4225,13 @@ function openSplitChapterModal(index) {
   const content = ch.content || '';
   if (!content.trim()) return toast('本章是空的，没法拆', 'err');
 
-  // 预先把编辑器里的光标位置记下来（如果正在编辑这一章）
+  // 预先把编辑器里的光标位置记下来（如果正在编辑这一章）。
+  // 注意 selectionStart 默认就是 0，不是 -1：0 表示「没点进正文」，不能当成有效拆分位置。
   let cursorPos = -1;
   if (S.chapterId === ch.id) {
     const ta = $('#chContent');
-    if (ta) cursorPos = ta.selectionStart;
+    const pos = ta ? ta.selectionStart : 0;
+    if (pos > 0 && pos < content.length) cursorPos = pos;
   }
 
   // 按段落切分预览
@@ -4132,8 +4253,8 @@ function openSplitChapterModal(index) {
     <p class="modal-sub">把正文从某个位置「剪」成两章。前半段留在本章，后半段自动新建下一章。</p>
     <label class="field-label">拆分位置
       <select class="input" id="splitMode">
-        <option value="cursor"${cursorPos >= 0 ? ' selected' : ''}>光标所在位置${cursorPos >= 0 ? `（第 ${cursorPos} 字符）` : '（当前章无光标，将在中间拆分）'}</option>
-        <option value="middle">正文中间（字符数对半）</option>
+        <option value="cursor"${cursorPos > 0 ? ' selected' : ''}${cursorPos > 0 ? '' : ' disabled'}>光标所在位置${cursorPos > 0 ? `（第 ${cursorPos} 字符）` : '（先点一下正文再用）'}</option>
+        <option value="middle"${cursorPos > 0 ? '' : ' selected'}>正文中间（字符数对半）</option>
         ${paraOptions ? `<option value="paragraph">按段落拆分…</option>` : ''}
       </select>
     </label>
@@ -4145,7 +4266,7 @@ function openSplitChapterModal(index) {
     <label class="field-label">新章标题
       <input class="input" id="newTitle" placeholder="留空自动生成「原标题（下）」" />
     </label>
-    <p class="dim small">拆分后：原章保留前半段，新章承接后半段；分卷归属、阶段均继承原章。记忆不会自动拆分，请事后手动补全；修订清单留在原章，落在后半段的引文可到新章重新添加。</p>
+    <p class="dim small">拆分后：原章保留前半段，新章承接后半段；分卷归属、阶段均继承原章。批注会跟着正文走（落在后半段的批注平移到新章，跨拆分点的按重叠更多的一边保留）。记忆不会自动拆分，请事后手动补全；修订清单留在原章，落在后半段的引文可到新章重新添加。</p>
     <div class="modal-foot">
       <button class="btn btn-text" id="splitCancel">取消</button>
       <button class="btn btn-primary" id="splitOk">拆分</button>
@@ -4165,7 +4286,7 @@ function openSplitChapterModal(index) {
       let splitAt = -1;
 
       if (mode === 'cursor') {
-        splitAt = cursorPos >= 0 ? cursorPos : Math.floor(content.length / 2);
+        splitAt = cursorPos > 0 ? cursorPos : Math.floor(content.length / 2);
       } else if (mode === 'middle') {
         splitAt = Math.floor(content.length / 2);
         // 向最近的段落边界靠拢（避免把一段拦腰斩断）
@@ -4200,6 +4321,27 @@ function openSplitChapterModal(index) {
       // 1) 先只保存当前章的前半段（避免 flushSave 连带保存其它待存章节导致竞态）
       const currentCh = S.novel?.chapters.find((c) => c.id === chapterId);
       if (!currentCh) return toast('原章已不存在', 'err');
+      // 批注跟着正文走：落在后半段的平移到新章；跨拆分点的按重叠更多的一边留下
+      const rawSecond = content.slice(splitAt);
+      const secondShift = splitAt + (rawSecond.length - second.length);
+      const annos = Array.isArray(currentCh.annotations) ? currentCh.annotations : [];
+      const keptAnno = [];
+      const movedAnno = [];
+      for (const a of annos) {
+        const start = Number(a?.start);
+        const end = Number(a?.end);
+        if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+        if (end <= splitAt) {
+          keptAnno.push({ ...a, start: Math.min(start, first.length), end: Math.min(end, first.length) });
+        } else if (start >= splitAt) {
+          movedAnno.push({ ...a, start: Math.max(0, start - secondShift), end: Math.max(0, end - secondShift) });
+        } else if (splitAt - start >= end - splitAt) {
+          keptAnno.push({ ...a, start, end: Math.min(end, first.length) });
+        } else {
+          movedAnno.push({ ...a, start: 0, end: Math.max(0, end - secondShift) });
+        }
+      }
+      currentCh.annotations = keptAnno;
       currentCh.content = first;
       currentCh.targetWords = firstTarget;
       markChapterDirty(currentCh);
@@ -4213,6 +4355,7 @@ function openSplitChapterModal(index) {
         volumeId: chapterVolId,
         stage: chapterStage,
         targetWords: secondTarget,
+        annotations: movedAnno,
         at: insertAt,
       }, 'POST');
       if (!res.chapter) return toast('新章创建失败', 'err');
@@ -4259,7 +4402,7 @@ function openMergeChapterModal(index) {
         <option value="none">直接拼接</option>
       </select>
     </label>
-    <p class="dim small">合并后：当前章保留合并后的内容与标题；下一章被删除。记忆与章纲不会自动合并，请事后手动补全；两边的修订清单会合并到当前章。</p>
+    <p class="dim small">合并后：当前章保留合并后的内容与标题；下一章被删除。记忆与章纲不会自动合并，请事后手动补全；两边的修订清单和批注都会合并到当前章（批注位置按合并后的正文平移）。</p>
     <div class="modal-foot">
       <button class="btn btn-text" id="mergeCancel">取消</button>
       <button class="btn btn-primary" id="mergeOk">合并</button>
@@ -4276,16 +4419,23 @@ function openMergeChapterModal(index) {
       // 1) 备份一下当前章（防止后悔）
       await snapshotNow('合并前备份');
 
-      // 2) 合并内容
+      // 2) 合并内容；偏移量在改动 ch.content 之前算好
       const mergedContent = (ch.content || '') + separator + (nextCh.content || '');
+      const mergeOffset = (ch.content || '').length + separator.length;
 
       // 3) 更新当前章：两边的修订清单都保留，别让被合并章节的待改项跟着蒸发
       const nextRevs = Array.isArray(nextCh.revisions) ? nextCh.revisions : [];
       if (nextRevs.length) {
         // 引文锚点原来相对「下一章」正文，合并后要整体平移到合并稿里的位置
-        const offset = (ch.content || '').length + separator.length;
-        const shifted = nextRevs.map((rev) => (rev && rev.quote ? { ...rev, at: (Number(rev.at) || 0) + offset } : rev));
+        const shifted = nextRevs.map((rev) => (rev && rev.quote ? { ...rev, at: (Number(rev.at) || 0) + mergeOffset } : rev));
         ch.revisions = [...(Array.isArray(ch.revisions) ? ch.revisions : []), ...shifted];
+      }
+      // 下一章的批注也按同样的偏移平移过来，别跟着被删除的章节一起消失
+      const nextAnno = Array.isArray(nextCh.annotations) ? nextCh.annotations : [];
+      if (nextAnno.length) {
+        ch.annotations = [...(Array.isArray(ch.annotations) ? ch.annotations : []),
+          ...nextAnno.map((a) => ({ ...a, start: (Number(a?.start) || 0) + mergeOffset, end: (Number(a?.end) || 0) + mergeOffset }))]
+          .sort((a, b) => a.start - b.start);
       }
       ch.content = mergedContent;
       ch.title = newTitle;
@@ -4521,6 +4671,10 @@ $('#editorMoreBtn')?.addEventListener('click', (e) => {
 });
 editorMoreMenu?.addEventListener('click', (e) => {
   if (e.target.closest('button.popmenu-item')) closeEditorMore();
+});
+$('#editorExportBtn')?.addEventListener('click', () => {
+  closeEditorMore();
+  exportBook();
 });
 document.addEventListener('mousedown', (e) => {
   if (!editorMoreMenu || editorMoreMenu.hidden) return;
@@ -5122,7 +5276,8 @@ function renderTopbarActions() {
   const goalTag = goal
     ? `<span class="top-goal${goal.done ? ' done' : ''}" title="${esc(goalTip)}">目标 ${fmtGoal(goal.target)} 字 · ${goal.pct}%</span>`
     : '';
-  mid.innerHTML = `<button type="button" class="top-export" title="导出这部作品">${ico('book')}《${esc(S.novel.title)}》<span class="dim-text">${S.novel.chapters.length} 章 · ${fmtWords(total)} 字</span>${goalTag}${ico('download')}</button>`;
+  // 导出入口要让人一眼看见：图标 + 「导出」两个字，别只靠悬停提示
+  mid.innerHTML = `<button type="button" class="top-export" title="导出 / 备份这部作品（Ctrl+Shift+E）">${ico('book')}《${esc(S.novel.title)}》<span class="dim-text">${S.novel.chapters.length} 章 · ${fmtWords(total)} 字</span>${goalTag}<span class="top-export-cue">${ico('download')}<span>导出</span></span></button>`;
   mid.onclick = exportBook;
   syncDocumentTitle();
 }
@@ -6461,6 +6616,18 @@ $('#chStage').addEventListener('change', () => {
   markChapterDirty(ch);
   renderStudio();
   toast(`已标为「${STAGE_LABEL[stage]}」`, 'ok');
+  // 第一次定稿时提一句「要不要校对」：只提示一次，之后靠命令面板
+  if (stage === 'done') {
+    try {
+      if (!localStorage.getItem('shu.proofHint.v1')) {
+        localStorage.setItem('shu.proofHint.v1', '1');
+        setTimeout(() => toast('这一章定稿了。要不要顺手跑一次文字校对？', 'ok', {
+          label: '运行校对',
+          onClick: () => { setView('studio'); openProof(); },
+        }), 900);
+      }
+    } catch { /* 存不了偏好就每次都不提示，不影响正文 */ }
+  }
 });
 $('#chPov').addEventListener('change', async () => {
   const ch = currentChapter();
@@ -6661,7 +6828,7 @@ async function addChapter() {
     // 有章纲就按章纲建，没有就回退空白章
     const outline = { scene: linked.chapter.scene, characters: linked.chapter.characters, summary: linked.chapter.summary, hook: linked.chapter.hook };
     payload = {
-      title: linked.chapter.title || `第 ${n.chapters.length + 1} 章`,
+      title: linked.chapter.title || nextChapterTitle(n.chapters),
       summary: linked.chapter.summary || '',
       outline: Object.values(outline).some(Boolean) ? outline : null,
       outlineId: linked.chapter.id,
@@ -6671,7 +6838,7 @@ async function addChapter() {
   } else {
     // 新章节跟着当前章走，落在同一卷里
     payload = {
-      title: `第 ${n.chapters.length + 1} 章`,
+      title: nextChapterTitle(n.chapters),
       at: insertAtArg,
       volumeId: eff && at >= 0 ? (eff[at] || '') : '',
     };
@@ -6752,6 +6919,7 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
         <span class="reader-divider"></span>
         <button type="button" class="btn btn-sm btn-text" id="readerMinus" title="缩小字号">A−</button>
         <button type="button" class="btn btn-sm btn-text" id="readerPlus" title="放大字号">A＋</button>
+        <button type="button" class="btn btn-sm btn-text" id="readerWrite" title="关掉阅读模式，回到这一章继续写">去写这一章</button>
         <button type="button" class="btn btn-sm" id="readerClose">关闭</button>
       </div>
     </header>
@@ -7194,6 +7362,18 @@ function openReader(startId = S.chapterId, { restore = true } = {}) {
   minus.addEventListener('click', () => { size = Math.max(15, size - 1); setSize(); });
   plus.addEventListener('click', () => { size = Math.min(24, size + 1); setSize(); });
   $r('#readerClose').addEventListener('click', close);
+  // 读到一半发现要改：直接回到这一章的正文，别让作者退出再翻章节列表
+  $r('#readerWrite').addEventListener('click', () => {
+    const ch = chapters[idx];
+    if (!ch) return;
+    close();
+    setView('studio');
+    selectChapter(ch.id);
+    setTimeout(() => {
+      const ta = $('#chContent');
+      if (ta) ta.focus({ preventScroll: true });
+    }, 60);
+  });
   document.addEventListener('keydown', onKey);
 
   setSize();
@@ -7852,12 +8032,15 @@ $('#genChapterBtn').addEventListener('click', generateChapter);
 /** 有监督批量生成：连续生成 N 章草稿，每章停一下等作者看完再继续；全程不覆盖已有正文 */
 function askBatchNext(message, primary) {
   return new Promise((resolve) => {
+    // 先记下用户点了什么，再由 onClose 统一 resolve：closeModal 会同步触发 onClose，
+    // 在按钮里先 closeModal 再 resolve 的话，onClose 已经把结果锁成「停在这里」了。
+    let picked = 'stop';
     showModal(`<h3>已生成</h3>
       <p class="modal-sub">${esc(message)}<br>输出区里是这章的初稿——满意就点「追加到正文」落到本章；不满意就直接进下一章。</p>
       <div class="modal-foot"><button class="btn btn-text" id="batchStop">停在这里</button><button class="btn btn-primary" id="batchNext">${esc(primary)}</button></div>`, (box) => {
-      box.querySelector('#batchStop').onclick = () => { closeModal(); resolve('stop'); };
-      box.querySelector('#batchNext').onclick = () => { closeModal(); resolve('next'); };
-    }, { onClose: () => resolve('stop') });
+      box.querySelector('#batchStop').onclick = () => { picked = 'stop'; closeModal(); };
+      box.querySelector('#batchNext').onclick = () => { picked = 'next'; closeModal(); };
+    }, { onClose: () => resolve(picked) });
   });
 }
 
@@ -7866,14 +8049,19 @@ async function batchGenerateChapters() {
   if (!ch) return toast('先建一章', 'err');
   const idx = S.novel.chapters.findIndex((c) => c.id === ch.id);
   if (idx < 0) return toast('先选一章当前章', 'err');
+  let picked = 0;
   const count = await new Promise((resolve) => {
     showModal(`<h3>批量生成（逐章确认）</h3>
       <p class="modal-sub">从当前章（第 ${ch.no} 章）开始，连续生成多章草稿。每章跑完一遍你就看输出区；满意点「追加到正文」落到那章，不满意就点「下一章」进下一章。<br>全程不覆盖已有正文——落到本章的是草稿建议，你定。</p>
       <div class="field-row"><label class="field-label">连续几章<input id="batchCount" type="number" min="1" max="10" value="3" class="input" style="width:80px" /></label></div>
       <div class="modal-foot"><button class="btn btn-text" id="batchCancel">关闭</button><button class="btn btn-primary" id="batchStart">开始生成</button></div>`, (box) => {
-      box.querySelector('#batchCancel').onclick = () => { closeModal(); resolve(0); };
-      box.querySelector('#batchStart').onclick = () => { closeModal(); resolve(Math.max(1, Math.min(10, Number(box.querySelector('#batchCount')?.value) || 1))); };
-    }, { onClose: () => resolve(0) });
+      // 同上：先记选择再关弹窗，别让 onClose 把用户填的章数覆盖成 0
+      box.querySelector('#batchCancel').onclick = () => { picked = 0; closeModal(); };
+      box.querySelector('#batchStart').onclick = () => {
+        picked = Math.max(1, Math.min(10, Number(box.querySelector('#batchCount')?.value) || 1));
+        closeModal();
+      };
+    }, { onClose: () => resolve(picked) });
   });
   if (!count) return;
   const lastNo = S.novel.chapters[idx + count - 1]?.no || S.novel.chapters[S.novel.chapters.length - 1]?.no;
@@ -10075,6 +10263,7 @@ function exportBibleAsJson() {
 }
 
 function exportBibleAsMarkdown() {
+  const esc = mdText;   // Markdown 是纯文本：不用 HTML 转义，否则导出文件里全是 &quot; / &#39;
   const data = collectBibleData();
   if (!data) return toast('先打开一部作品', 'err');
   let md = `# ${esc(data.sourceTitle || '设定库')} - 设定库导出\n\n`;
@@ -10418,6 +10607,7 @@ function exportFragmentAsJson(typeKey) {
 }
 
 function exportFragmentAsMarkdown(typeKey) {
+  const esc = mdText;   // 同上：片段导出也是纯 Markdown 文件
   const pkg = collectFragmentData(typeKey);
   if (!pkg) return toast('先打开一部作品', 'err');
   const type = FRAGMENT_TYPES.find(t => t.key === typeKey);
@@ -10452,6 +10642,7 @@ function exportFragmentAsMarkdown(typeKey) {
 }
 
 function jsonToMarkdown(obj, level = 1) {
+  const esc = mdText;   // 纯文本导出，不做 HTML 转义
   if (!obj || typeof obj !== 'object') return '';
   const prefix = '#'.repeat(level);
   let md = '';
@@ -14019,6 +14210,7 @@ $('#paperReset').addEventListener('click', paperReset);
 
 function renderSettings() {
   renderAppearance();
+  syncStyleApplyButton();   // 换过作品后，「写入当前作品」要跟着出现 / 隐藏
   const cfg = S.config;
   if (!cfg) return;
   const host = $('#providerList');
@@ -14598,22 +14790,36 @@ $('#saveCfgBtn').addEventListener('click', async () => {
   toast('设置已保存', 'ok');
 });
 
+/**
+ * 「写入当前作品」的可见性：文风档案是作品级的，没打开作品时这个按钮没有去处。
+ * 每次进设置页都重算，别让提取结果变成一条死路。
+ */
+function syncStyleApplyButton() {
+  const btn = $('#applyStyleBtn');
+  if (!btn) return;
+  btn.hidden = !S.novel || !S.styleDraft;
+  btn.disabled = !S.novel;
+  btn.title = S.novel ? `写入《${S.novel.title}》的文风档案` : '先在书架打开一部作品，再写入文风档案';
+}
+
 $('#analyzeStyleBtn').addEventListener('click', async () => {
   const text = $('#styleSample').value.trim();
   if (!text) return toast('先粘贴一段样本', 'err');
+  if (!S.novel) return toast('提取文风要写进某部作品的文风档案，先在书架打开一部作品', 'err');
   const out = await runStream({ task: 'style', payload: { text, templateKey: 'analyzeStyle' } });
   if (!out.trim()) return;
   S.styleDraft = `${out}\n\n`;
   $('#styleBox').innerHTML = mdLite(out);
-  $('#applyStyleBtn').hidden = !S.novel;
+  syncStyleApplyButton();
 });
 $('#applyStyleBtn').addEventListener('click', async () => {
   if (!S.styleDraft || !S.novel) return;
-  const cur = S.novel.meta.styleNotes || '';
-  S.novel.meta.styleNotes = (cur ? `${cur}\n\n` : '') + S.styleDraft;
-  await api.put(`/api/novels/${S.novel.id}`, { meta: S.novel.meta });
-  $('#styleBox').innerHTML += '<div class="status-ok">已写入当前作品的文风要求。</div>';
-  toast('已写入文风档案', 'ok');
+  const target = S.novel;
+  const cur = target.meta.styleNotes || '';
+  target.meta.styleNotes = (cur ? `${cur}\n\n` : '') + S.styleDraft;
+  await api.put(`/api/novels/${target.id}`, { meta: target.meta });
+  $('#styleBox').innerHTML += `<div class="status-ok">已写入《${esc(target.title)}》的文风要求。</div>`;
+  toast(`已写入《${target.title}》的文风档案`, 'ok');
 });
 $('#openDataBtn').addEventListener('click', () => {
   showModal(`<h3>数据目录</h3>
@@ -14675,11 +14881,19 @@ async function readDocxFile(file) {
   }
 }
 
-function openImportModal(file) {
-  if (!S.novel) return toast('先打开作品', 'err');
-  const more = S.novel.chapters.length ? '追加到现有章节末尾' : '作为这本书的第一批章节';
-  showModal(`<h3>导入已有文稿</h3>
-    <p class="modal-sub">导入到《${esc(S.novel.title)}》：支持 .txt / .md / .docx，自动识别文本编码；Word 稿按段落还原。按「第X章」切分，按「第X卷」分组，${more}。</p>
+function openImportModal(file, opts = {}) {
+  const newBook = !!opts.newBook;
+  if (!newBook && !S.novel) return toast('先打开作品', 'err');
+  const more = newBook
+    ? '确认后创建作品并导入，书名可以随时改'
+    : (S.novel.chapters.length ? '追加到现有章节末尾' : '作为这本书的第一批章节');
+  showModal(`<h3>${newBook ? '导入已有稿子' : '导入已有文稿'}</h3>
+    <p class="modal-sub">${newBook
+      ? '选一份旧稿（.txt / .md / .docx），也可以直接粘贴。选好文件后书名默认取文件名，确认后才建作品。'
+      : `导入到《${esc(S.novel.title)}》。`}支持 .txt / .md / .docx，自动识别文本编码；Word 稿按段落还原。按「第X章」切分，按「第X卷」分组，${more}。</p>
+    ${newBook ? `<label class="field-label">书名<span class="field-hint">选文件后自动取文件名，可改</span>
+      <input id="impTitle" class="input" placeholder="例如：旧稿《半盏残雪》" autocomplete="off" />
+    </label>` : ''}
     <div class="import-drop" id="impDrop" title="选择文件，或把文件拖到这里" role="button" tabindex="0">
       ${ico('upload')}
       <div><b>选择文件</b><span class="dim">或拖到这里</span></div>
@@ -14691,7 +14905,7 @@ function openImportModal(file) {
     </label>
     <div class="import-note dim small" id="impNote" hidden></div>
     <label class="find-check" id="impFrontWrap" style="margin-top:8px" hidden><input type="checkbox" id="impFront" /> 连开头的前置内容一起导入（书名页 / 创作说明）</label>
-    <div class="modal-foot"><button class="btn btn-text" id="impCancel">取消</button><button class="btn btn-primary" id="impOk">导入</button></div>`,
+    <div class="modal-foot"><button class="btn btn-text" id="impCancel">取消</button><button class="btn btn-primary" id="impOk">${newBook ? '创建并导入' : '导入'}</button></div>`,
     (box) => {
       const drop = box.querySelector('#impDrop');
       const input = box.querySelector('#impFile');
@@ -14700,6 +14914,11 @@ function openImportModal(file) {
       const note = box.querySelector('#impNote');
       const frontWrap = box.querySelector('#impFrontWrap');
       const frontBox = box.querySelector('#impFront');
+      const titleEl = box.querySelector('#impTitle');
+      let titleTouched = false;
+      titleEl?.addEventListener('input', () => { titleTouched = true; });
+      // 建过一次就复用：导入失败重试时不要把空作品建第二本
+      let newBookId = '';
       let docxState = null;
 
       const resetDocx = () => {
@@ -14725,6 +14944,10 @@ function openImportModal(file) {
       const loadFile = async (f) => {
         if (!f) return;
         if (!isImportFile(f)) return toast('只支持 .txt / .md / .docx 文件', 'err');
+        // 空书架导入：书名默认取文件名（去掉扩展名），用户改过就不再覆盖
+        if (newBook && titleEl && !titleTouched) {
+          titleEl.value = f.name.replace(/\.[^.]+$/, '').trim();
+        }
         info.textContent = `读取 ${f.name}…`;
         note.hidden = true;
         ta.value = '';
@@ -14798,14 +15021,26 @@ function openImportModal(file) {
         btn.disabled = true;
         btn.textContent = '导入中…';
         try {
-          const r = await api.send(`/api/novels/${S.novel.id}/import`, { text });
+          // 空书架模式：先按书名建作品，再导入；选错文件也不会白建一本
+          let novelId = S.novel?.id;
+          if (newBook) {
+            if (!newBookId) {
+              const title = (titleEl?.value || '').trim() || '导入的作品';
+              const made = await api.send('/api/novels', { title });
+              newBookId = made.novel.id;
+              await loadNovels();
+              await openNovel(newBookId);
+            }
+            novelId = newBookId;
+          }
+          const r = await api.send(`/api/novels/${novelId}/import`, { text });
           closeModal();
-          await openNovel(S.novel.id, { chapterId: r.firstChapterId });
+          await openNovel(novelId, { chapterId: r.firstChapterId });
           toast(`导入 ${r.imported} 章${r.volumes ? ` · ${r.volumes} 卷` : ''}`, 'ok');
         } catch (err) {
           toast(`导入失败：${err.message}`, 'err');
           btn.disabled = false;
-          btn.textContent = '导入';
+          btn.textContent = newBook ? '创建并导入' : '导入';
         }
       };
 
@@ -14847,7 +15082,11 @@ window.addEventListener('drop', (e) => {
   showDropMask(false);
   const f = e.dataTransfer.files?.[0];
   if (!f) return;
-  if (!S.novel) return toast('先打开一部作品，再把文稿拖进来', 'err');
+  if (!S.novel) {
+    if (!isImportFile(f)) return toast('只支持 .txt / .md / .docx 文件', 'err');
+    // 还没打开作品时拖进来：直接走「创建并导入」，书名默认取文件名
+    return openImportModal(f, { newBook: true });
+  }
   if (!isImportFile(f)) return toast('只支持 .txt / .md / .docx 文件', 'err');
   openImportModal(f);
 });
@@ -15094,6 +15333,9 @@ function exportBook() {
       };
       const total = S.novel.chapters.length;
       const doneCount = S.novel.chapters.filter((c) => stageOf(c) === 'done').length;
+      // 只要还有没定稿的章节，就默认只导出定稿：导出是投稿前最后一步，
+      // 别让作者一按「下载」把草稿和修改中的内容一起交出去。
+      doneEl.checked = doneCount > 0 && doneCount < total;
       // 随稿附带的材料：只有作品里真写了才有得选
       const extrasRow = box.querySelector('#exExtras');
       const outlineEl = box.querySelector('#exOutline');
@@ -15205,7 +15447,9 @@ function exportBook() {
         doneEl.disabled = doneCount === 0;
         doneRow.classList.toggle('disabled', doneCount === 0);
         if (doneCount === 0) doneEl.checked = false;
-        doneCountEl.textContent = doneCount ? `已定稿 ${doneCount} / ${total} 章` : '还没有定稿章节';
+        doneCountEl.textContent = doneCount
+          ? `已定稿 ${doneCount} / ${total} 章${doneCount < total && !doneEl.checked ? `　·　会带上 ${total - doneCount} 章未定稿` : ''}`
+          : '还没有定稿章节';
         doneHintEl.hidden = !(showDone && doneEl.checked);
         // 区间的实际内容：跟导出时用的是同一套筛选，数字才对得上
         if (showRange) {
@@ -15515,7 +15759,11 @@ async function openHistory(presetWord = '') {
   await saveChapterNow().catch(() => {});
   const novelId = S.novel.id;
   showModal(`<h3>版本历史 · 《${esc(S.novel.title)}》</h3>
-    <p class="modal-sub">写作时每 10 分钟自动存一份；AI 替换正文、删除章节前也会自动备份。恢复前会先把当前版本存一份，所以恢复本身也能撤回。不确定改了什么时，先点「对比」看当前章与那一版的差异；对比里也可以只恢复本章正文，不会动其他章节。</p>
+    <p class="modal-sub">每 10 分钟自动备份；恢复前会自动再存一份，可撤回。</p>
+    <details class="details hist-note">
+      <summary>更多说明</summary>
+      <p class="dim small">AI 替换正文、删除章节前也会自动备份。不确定改了什么时，点「对比」看当前章与那一版的差异；对比里也可以只恢复本章正文，不会动其他章节。</p>
+    </details>
     <div class="hist-bar">
       <button class="btn btn-primary btn-sm" id="histNow">${ico('clock')}立即备份当前版本</button>
       <span class="hist-count" id="histCount"></span>
@@ -16205,16 +16453,53 @@ function cmdkSource() {
       });
     });
   }
-  return out.filter((x) => typeof x.run === 'function');
+  return out.filter((x) => typeof x.run === 'function')
+    .map((it) => ({ ...it, id: it.id || `${it.g}|${it.label}` }));
+}
+
+const CMDK_RECENT_KEY = 'shu.cmdk.recent.v1';
+const CMDK_RECENT_MAX = 6;
+
+function cmdkRecentIds() {
+  try {
+    const raw = localStorage.getItem(CMDK_RECENT_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function cmdkRemember(it) {
+  if (!it?.id) return;
+  try {
+    const next = [it.id, ...cmdkRecentIds().filter((x) => x !== it.id)].slice(0, CMDK_RECENT_MAX);
+    localStorage.setItem(CMDK_RECENT_KEY, JSON.stringify(next));
+  } catch { /* 存不了就只是没有最近使用，不影响命令本身 */ }
+}
+
+/** 把「最近使用」的一组副本插到最前；原命令仍留在各自的组里（搜索时只搜原件） */
+function cmdkWithRecent(items) {
+  const ids = cmdkRecentIds();
+  const recent = [];
+  for (const id of ids) {
+    const it = items.find((x) => x.id === id);
+    if (it) recent.push({ ...it, g: '最近使用', recent: true });
+  }
+  return recent.concat(items);
 }
 
 function cmdkQuery(q) {
   const raw = String(q || '').trim();
-  if (!raw) return cmdk.items.slice(0, 40);
+  if (!raw) {
+    // 空搜索：最近使用的副本排最前，原命令不重复出现
+    const recentIds = new Set(cmdkRecentIds());
+    return cmdk.items.filter((it) => it.recent || !recentIds.has(it.id)).slice(0, 40);
+  }
   const needle = raw.toLowerCase();
   const terms = raw.split(/\s+/).map(normalizeMentionText).filter(Boolean);
   const hit = [];
-  cmdk.items.forEach((it) => {
+  cmdk.items.filter((it) => !it.recent).forEach((it) => {
     const l = it.label.toLowerCase();
     let s = -1;
     if (l.startsWith(needle)) s = 0;
@@ -16263,6 +16548,7 @@ function cmdkMove(step) {
 
 function cmdkRun(i) {
   const it = cmdk.list[i ?? cmdk.idx];
+  if (it) cmdkRemember(it);
   closeCmdk();
   if (it) setTimeout(() => it.run(), 30);
 }
@@ -16273,7 +16559,7 @@ function openCmdk() {
   cmdkPrevFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
     ? document.activeElement
     : null;
-  cmdk.items = cmdkSource();
+  cmdk.items = cmdkWithRecent(cmdkSource());
   cmdk.idx = 0;
   cmdk.list = cmdkQuery('');
   mask.hidden = false;

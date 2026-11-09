@@ -8,10 +8,11 @@ import { exec } from 'node:child_process';
 import {
   ROOT, DATA_DIR, ensureDirs, loadConfig, saveConfig, maskKey,
   listNovels, createNovel, createSampleNovel, getNovel, saveNovel, deleteNovel, trashNovel, listTrash, restoreNovel, purgeTrash, purgeAllTrash, newId, countWords,
-  listSnapshots, createSnapshot, readSnapshot, chapterVolumeIds, volumeLabel,
+  listSnapshots, createSnapshot, readSnapshot, chapterVolumeIds, volumeLabel, chapterTitleText,
   findOutlineEntry, CHAPTER_STAGES, cleanTargetWords, cleanPalette,
   applyFragmentData,
 } from './store.js';
+import { nextChapterTitle } from '../web/lib/data.js';
 import { buildTask, TASKS, TEMPLATE_SLOTS, TEMPLATE_VARS } from './prompts.js';
 import { buildEpub } from './epub.js';
 import { buildPrintHtml } from './print.js';
@@ -853,7 +854,7 @@ async function handleApi(req, res, url) {
         const body = await readBody(req);
         const ch = {
           id: newId('c'),
-          title: body.title || `第 ${n.chapters.length + 1} 章`,
+          title: body.title || nextChapterTitle(n.chapters),
           summary: body.summary || '',
           content: body.content || '',
           status: 'draft',
@@ -870,6 +871,8 @@ async function handleApi(req, res, url) {
             return exists ? oid : '';
           })(),
           memory: null,
+          // 拆分 / 合并章节时要把批注一起迁过去，新章可以直接带上来
+          annotations: Array.isArray(body.annotations) ? body.annotations : [],
           // 归入哪一卷由前端决定（新章节默认跟着前一章走，见 web/app.js 的 addChapter）
           volumeId: typeof body.volumeId === 'string' ? body.volumeId : '',
           createdAt: Date.now(),
@@ -1040,7 +1043,13 @@ async function handleApi(req, res, url) {
       // 整本作品备份：原样导出作品 JSON，保留正文、设定、大纲、记忆和修订；
       // 恢复时由前端新建一部作品，不覆盖现有稿件。
       if (format === 'json') {
-        const body = JSON.stringify(n, null, 2);
+        // 自定义封面是单独的文件（data/covers/<id>.<ext>），不进作品 JSON；
+        // 备份要能换机恢复，所以把图片 base64 内嵌进来（上限 8 MB，体积可控）。
+        const coverImg = readCoverImage(n);
+        const backup = coverImg
+          ? { ...n, cover: { ...n.cover, data: coverImg.data.toString('base64') } }
+          : n;
+        const body = JSON.stringify(backup, null, 2);
         const name = `${safeName(n.title)}_备份.json`;
         res.writeHead(200, {
           'Content-Type': 'application/json; charset=utf-8',
@@ -1410,14 +1419,15 @@ function exportTxt(n, chapters, extras = {}) {
     // 每卷只在它的第一章前面写一次卷名
     const vor = v && v.id !== lastVol ? `\n\n${'-'.repeat(30)}\n${volumeLabel(v, v.no)}` : '';
     lastVol = v ? v.id : '';
-    return `${vor}\n\n第${c.no}章 ${c.title}\n\n${(c.content || '').trim()}`;
+    return `${vor}\n\n第${c.no}章${chapterTitleText(c.title) ? ` ${chapterTitleText(c.title)}` : ''}\n\n${(c.content || '').trim()}`;
   }).join('\n');
   const front = extras.note ? `${txtNote(n, bookWords(n))}\n\n${'='.repeat(32)}\n\n` : '';
   return `${front}${head}\n${'-'.repeat(30)}${body}\n`;
 }
 
 function exportMarkdown(n, chapters, extras = {}) {
-  const lines = [`# ${n.title}`];
+  // 前置页用机器可读标记包住：书匠自己回导时整块跳过，不会凭空多一章「前言」
+  const lines = ['<!-- shujiang:frontmatter -->', `# ${n.title}`];
   if (n.author) lines.push(`作者：${n.author}`);
   if (n.meta?.contact) lines.push(`联系方式：${n.meta.contact}`);
   if (n.genre) lines.push(`类型：${n.genre}`);
@@ -1436,25 +1446,27 @@ function exportMarkdown(n, chapters, extras = {}) {
     }
     lines.push(`\n${block.join('\n')}`);
   }
-  lines.push('\n---\n');
+  lines.push('\n---\n', '<!-- /shujiang:frontmatter -->');
   const plan = volumePlan(n);
   let lastVol = '';
   chapters.forEach((c) => {
     const v = plan.of(c);
     if (v && v.id !== lastVol) lines.push(`**${volumeLabel(v, v.no)}**\n`);
     lastVol = v ? v.id : '';
-    lines.push(`## 第${c.no}章 ${c.title}\n`);
+    const title = chapterTitleText(c.title);
+    lines.push(`## 第${c.no}章${title ? ` ${title}` : ''}\n`);
     lines.push((c.content || '').trim().split(/\n+/).map((p) => `　　${p}`).join('\n\n'));
     lines.push('');
   });
-  // 附带材料：放在正文后面，方便编辑连着看
+  // 附带材料：放在正文后面，方便编辑连着看；同样用标记包住，回导时整段跳过
   if (extras.outline) {
     const o = outlineRows(n, chapters);
     if (o.volumes.length) {
-      lines.push('\n---\n');
+      // 分隔线也包进标记里：回导时整块丢掉，不会在末章正文留下一条 ---
+      lines.push('\n<!-- shujiang:outline -->\n---\n');
       lines.push('## 全书大纲\n');
       for (const v of o.volumes) {
-        lines.push(`### 第${v.no}卷 ${v.name}\n`);
+        lines.push(`### ${volumeLabel(v, v.no)}\n`);
         if (v.desc) lines.push(`> ${v.desc}\n`);
         for (const e of v.entries) {
           lines.push(`**${e.no ? `第${e.no}章 ` : ''}${e.title}**${e.words ? `　（${e.words} 字）` : ''}\n`);
@@ -1463,12 +1475,13 @@ function exportMarkdown(n, chapters, extras = {}) {
         }
       }
       if (o.missing) lines.push(`\n> 另有 ${o.missing} 章还没写章纲。\n`);
+      lines.push('<!-- /shujiang:outline -->');
     }
   }
   if (extras.characters) {
     const rows = characterRows(n);
     if (rows.length) {
-      lines.push('\n---\n');
+      lines.push('\n<!-- shujiang:characters -->\n---\n');
       lines.push('## 人物小传\n');
       for (const c of rows) {
         lines.push(`### ${c.name}\n`);
@@ -1478,6 +1491,7 @@ function exportMarkdown(n, chapters, extras = {}) {
         }
         lines.push('');
       }
+      lines.push('<!-- /shujiang:characters -->');
     }
   }
   return lines.join('\n');
@@ -1667,10 +1681,11 @@ const PROSE_LEAD_RE = /^[的了地得着之是在这那我你他她它们把被�
 function headingInfo(line) {
   const t = cleanHeading(line);
   if (!t) return null;
+  // 全书大纲里的大纲条目行：「第1章 雪落长安村**　（382 字）」是给人看的统计，不是章标题
+  if (/[（(]\s*[\d,，]+\s*字\s*[）)]\s*$/.test(t)) return null;
   let m = t.match(VOLUME_RE) || t.match(VOLUME_SHORT_RE);
   if (m) {
     const name = (m[1] || '').trim();
-    if (name && PROSE_LEAD_RE.test(name)) return null;
     return { kind: 'volume', name, raw: t };
   }
   m = t.match(VOLUME_TIGHT_RE) || t.match(VOLUME_SHORT_TIGHT_RE);
@@ -1681,8 +1696,8 @@ function headingInfo(line) {
   }
   m = t.match(CHAPTER_RE);
   if (m) {
+    // 带空格的章标题基本不会是行文：「第2章 她又笑了」要照常切章（虚词判断只留给紧凑写法）
     const title = (m[1] || '').trim();
-    if (title && PROSE_LEAD_RE.test(title)) return null;  // 「第1章 的内容」是行文
     return { kind: 'chapter', title: title || t, raw: t };
   }
   m = t.match(CHAPTER_TIGHT_RE);
@@ -1695,6 +1710,32 @@ function headingInfo(line) {
   return null;
 }
 
+/** 去掉导出时加的机器可读标记块（前置页 / 全书大纲 / 人物小传） */
+function stripMarkedBlocks(text) {
+  return String(text || '').replace(
+    /<!--\s*shujiang:(?:frontmatter|outline|characters)\s*-->[\s\S]*?<!--\s*\/shujiang:(?:frontmatter|outline|characters)\s*-->/g,
+    '\n',
+  );
+}
+
+/** 旧版导出的 Markdown / TXT 没有标记：靠开头几行认出前置页，别把它当成「前言」 */
+function looksLikeFrontMatter(text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  const lines = t.split('\n').map((l) => l.trim()).filter(Boolean);
+  const first = lines[0] || '';
+  // 只有一行标题（外加分隔线）也算前置页：没有作者 / 类型时，导出就只剩这一行
+  const bodyLines = lines.filter((l) => !/^-{3,}$/.test(l) && !/^={3,}$/.test(l));
+  const titleOnly = bodyLines.length <= 1 && (/^#\s+\S/.test(first) || /^《.+》$/.test(first));
+  const hasMeta = /(^|\n)\s*(作者|类型|联系方式|节选|简介)[:：]/.test(t)
+    || /(^|\n)\s*##\s*(作品简介|创作说明)/.test(t);
+  if (!hasMeta) return titleOnly;
+  return /^#\s+\S/.test(first) || /^《.+》$/.test(first) || first === '创作说明';
+}
+
+/** 旧版导出的附录（全书大纲 / 人物小传）没有标记：见到这些标题就停止收集正文 */
+const LEGACY_APPENDIX_HEADS = new Set(['全书大纲', '人物小传', '创作说明']);
+
 /**
  * 把整份文稿拆成章节；卷标题之间的章节归入该卷。
  * 返回 { chapters: [{ title, content, volume }], volumes: [{ name }] }
@@ -1702,15 +1743,31 @@ function headingInfo(line) {
  * 没有章标题但只有卷标题时（比如按卷写的旧稿），每卷正文会变成一章。
  */
 function parseManuscript(text) {
-  const src = String(text || '').replace(/\r\n?/g, '\n').trim();
+  const src = stripMarkedBlocks(text).replace(/\r\n?/g, '\n').trim();
   if (!src) return { chapters: [], volumes: [] };
-  const lines = src.split('\n');
+  let lines = src.split('\n');
+
+  // 旧版导出（没有标记）：附录标题之后的内容不是正文，整段丢掉
+  let seenHeading = false;
+  let appendixAt = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    const t = cleanHeading(lines[i]);
+    if (!t) continue;
+    if (seenHeading && LEGACY_APPENDIX_HEADS.has(t)) { appendixAt = i; break; }
+    if (headingInfo(lines[i])) seenHeading = true;
+  }
+  if (appendixAt >= 0) {
+    lines = lines.slice(0, appendixAt);
+    // 附录前那条 --- 分隔线也一并去掉
+    while (lines.length && /^-{3,}\s*$/.test((lines[lines.length - 1] || '').trim())) lines.pop();
+  }
+
   const marks = [];
   lines.forEach((line, i) => {
     const h = headingInfo(line);
     if (h) marks.push({ i, ...h });
   });
-  if (!marks.length) return { chapters: [{ title: '导入内容', content: src, volume: null }], volumes: [] };
+  if (!marks.length) return { chapters: [{ title: '导入内容', content: lines.join('\n').trim(), volume: null }], volumes: [] };
 
   const volumes = [];
   const chapters = [];
@@ -1728,7 +1785,8 @@ function parseManuscript(text) {
   };
 
   const head = lines.slice(0, marks[0].i).join('\n').trim();
-  if (head) chapters.push({ title: '前言', content: head, volume: null });
+  // 书匠自己导出的前置页（书名 / 作者 / 简介 / 创作说明）是元数据，不是正文
+  if (head && !looksLikeFrontMatter(head)) chapters.push({ title: '前言', content: head, volume: null });
 
   marks.forEach((mk, k) => {
     const end = k + 1 < marks.length ? marks[k + 1].i : lines.length;

@@ -1,7 +1,7 @@
 // EPUB 3 导出：零依赖，手写 ZIP + XHTML。
 // 只做正文阅读所需的最小结构：标题页、目录、分卷、章节、少量排版 CSS。
 import { randomUUID } from 'node:crypto';
-import { chapterVolumeIds, countWords, volumeLabel } from './store.js';
+import { chapterVolumeIds, countWords, volumeLabel, chapterTitleText } from './store.js';
 import { coverSvg, readCoverImage } from './cover.js';
 import { outlineRows, characterRows, submissionFacts, submissionNote } from './manuscript.js';
 import { zip } from './zip.js';
@@ -9,8 +9,13 @@ import { zip } from './zip.js';
 const XML_HEAD = '<?xml version="1.0" encoding="utf-8"?>';
 const CHAPTER_FILE = (i) => `chapter-${String(i + 1).padStart(3, '0')}.xhtml`;
 
+/** 去掉 XML 1.0 不允许的控制字符；正文里从 TXT/PDF 粘来的 0x01、0x07 会让 XHTML 直接解析失败 */
+function clean(s) {
+  return String(s ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, '');
+}
+
 function esc(s) {
-  return String(s ?? '')
+  return clean(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -19,7 +24,7 @@ function esc(s) {
 }
 
 function chapterLabel(c) {
-  const title = String(c.title || '').trim();
+  const title = chapterTitleText(c.title);
   return `第${c.no}章${title ? ` ${title}` : ''}`;
 }
 
@@ -138,7 +143,7 @@ ${links}
 function outlinePage(novel, chapters) {
   const o = outlineRows(novel, chapters);
   const body = o.volumes.map((v) => `
-<h2>第${v.no}卷 ${esc(v.name)}</h2>
+<h2>${esc(volumeLabel(v, v.no))}</h2>
 ${v.desc ? `<p class="vol-desc">${esc(v.desc)}</p>` : ''}
 ${v.entries.map((e) => `<section class="ol-entry">
 <h3>${e.no ? `第${e.no}章 ` : ''}${esc(e.title)}${e.words ? `　<span class="ol-words">${e.words} 字</span>` : ''}</h3>

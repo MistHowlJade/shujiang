@@ -23,7 +23,7 @@ import { zip, unzipEntry } from '../server/zip.js';
 import { extractDocxText } from '../server/docx-import.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown } from '../web/lib/consistency.js';
 import { countWords, createWordCounter } from '../web/lib/util.js';
-import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, readerChapterRead, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch } from '../web/lib/data.js';
+import { normalizeMentionText, worldMentionKeys, buildMentionIndex, worldMentionChapters, entryStateChanges, buildCharacterAppearances, appearancesForCharacter, filterEntriesBySearch, characterAliases, findCharacterByMention, collectCharacterNodes, buildCharacterArcs, arcSearchText, searchRelationGraph, collectThreads, threadSearchText, parseTimelineTime, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, READER_POSITION_LIMIT, clampReaderRatio, normalizeReaderProgress, readerPositionOf, readerChapterRead, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, EDITOR_POSITION_LIMIT, normalizeEditorPosition, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, filterSnapshotsBySearch, filterTrashBySearch, nextChapterTitle } from '../web/lib/data.js';
 import { buildPropagationReport } from '../web/lib/propagate.js';
 import { buildPayoffProfile, payoffTier } from '../web/lib/payoff.js';
 import { buildCompletionProfile, completionTier } from '../web/lib/completion.js';
@@ -1981,6 +1981,17 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('作者体测：出现在一致性报告 voice 类里', sc.byKind.voice > 0, JSON.stringify(sc.byKind));
   const bl = buildAuthorBaseline({ title: 'T', chapters: [baseline, same1, same2] });
   check('作者体测：baseline 给出平均句长', bl && bl.avgSentLen > 0 && bl.person !== 'mixed');
+}
+
+/* ---------- 新建章节的默认标题 ---------- */
+{
+  check('新章标题：连续编号 +1', nextChapterTitle([{ title: '第 1 章' }, { title: '第 2 章' }, { title: '第 3 章' }]) === '第 4 章');
+  // 删掉中间的第 2 章后再建：按最大章号 +1，绝不和现有的「第 3 章」撞名
+  check('新章标题：删掉中间章不撞名', nextChapterTitle([{ title: '第 1 章' }, { title: '第 3 章' }]) === '第 4 章',
+    nextChapterTitle([{ title: '第 1 章' }, { title: '第 3 章' }]));
+  check('新章标题：认中文数字', nextChapterTitle([{ title: '第一章' }, { title: '第二章' }]) === '第 3 章');
+  check('新章标题：空书从第 1 章开始', nextChapterTitle([]) === '第 1 章');
+  check('新章标题：认「第N回」', nextChapterTitle([{ title: '第一回' }, { title: '第二回' }]) === '第 3 章');
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);

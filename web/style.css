@@ -235,6 +235,14 @@ main:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-line); border-radi
   box-shadow: 0 0 0 3px var(--accent-bg), 0 0 0 1.5px var(--accent);
 }
 .topbar-mid .ico { width: 13px; height: 13px; color: var(--text-4); }
+/* 顶栏导出入口上的「导出」二字：图标之外再给一个明确的动作提示 */
+.topbar-mid .top-export-cue {
+  display: inline-flex; align-items: center; gap: 4px; margin-left: 2px;
+  padding-left: 8px; border-left: 1px solid var(--border);
+  color: var(--accent-hover); font-weight: 600; white-space: nowrap;
+}
+.topbar-mid .top-export-cue .ico { color: var(--accent-hover); }
+.topbar-mid .top-export:hover .top-export-cue { color: var(--text-1); }
 /* 全书目标的进度：跟在书名后面 */
 .top-goal {
   display: inline-flex; align-items: center; gap: 4px;
@@ -308,6 +316,14 @@ main { flex: 1; min-height: 0; position: relative; }
 .btn-danger-ghost:hover { background: var(--danger-solid); color: #fff; border-color: transparent; }
 .btn-row { display: flex; gap: 8px; margin-top: 10px; }
 .btn-row.wrap { flex-wrap: wrap; }
+/* 「更多 AI 操作」按用途分组：写作 / 检查 / 批量，别让 13 个按钮平铺 */
+.quick-groups { display: grid; gap: 10px; margin-top: 8px; }
+.quick-group { display: grid; gap: 4px; }
+.quick-group-label {
+  font-size: 11px; font-weight: 600; letter-spacing: .06em;
+  color: var(--text-4); padding-left: 2px;
+}
+.quick-group .btn-row { gap: 4px; }
 
 .icon-btn {
   width: 30px; height: 30px; flex: 0 0 auto; padding: 0; display: inline-grid; place-items: center;
@@ -2375,6 +2391,11 @@ body[data-theme="light"] .dock-main .assist-pane > .card {
 .help-list b { display: block; margin-bottom: 3px; font-size: 14px; color: var(--text-1); }
 .help-list span { font-size: 12.5px; line-height: 1.65; color: var(--text-3); }
 .help-note { margin-top: 14px; font-size: 12px; color: var(--text-4); }
+/* 新手指南里的第二段：写完之后 */
+.help-sub {
+  margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--border);
+  font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--text-4);
+}
 
 /* ==========================================================================
    设置

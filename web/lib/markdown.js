@@ -63,7 +63,7 @@ export function importBibleMarkdown(mdText) {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const chapterMatch = line.match(/^## 第(\d+)章\s+(.+)$/);
+    const chapterMatch = line.match(/^## 第(\d+)章(?:\s+(.+))?$/);
     const volMatch = line.match(/^\*\*第(\d+)卷\s+(.+)\*\*$/);
 
     if (volMatch) {
@@ -79,7 +79,8 @@ export function importBibleMarkdown(mdText) {
       }
       currentChapter = {
         id: uid('c'),
-        title: chapterMatch[2].trim(),
+        // 没有单独标题（「## 第1章」）时就用编号当标题，保证回导后还能看出是第几章
+        title: (chapterMatch[2] || `第${chapterMatch[1]}章`).trim(),
         content: '',
         stage: 'draft',
       };
@@ -110,8 +111,9 @@ export function importBibleMarkdown(mdText) {
       inOutline = true;
       continue;
     }
-    if (inOutline && line.startsWith('### 第') && line.includes('卷')) {
-      const match = line.match(/^### 第(\d+)卷\s+(.+)$/);
+    if (inOutline && line.startsWith('### ') && line.includes('卷')) {
+      // 卷标题可能是「第1卷 风起」，也可能本身就写成「第一卷 · 雪岭」
+      const match = line.match(/^###\s+(?:第(?:\d+)卷\s+)?(.+)$/);
       if (match) {
         currentVol = {
           id: uid('v'),

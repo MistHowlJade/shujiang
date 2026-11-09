@@ -3,7 +3,7 @@
 // 一份给编辑的稿子：书名页、可选的创作说明、分卷页、每章另起一页；
 // A4、宋体 12pt、1.95 倍行距、首行缩进两字，页脚居中页码（书名页不编号）。
 // 分页、页码都交给 Word 自己的排版引擎，不在服务端算页。
-import { chapterVolumeIds, countWords, volumeLabel } from './store.js';
+import { chapterVolumeIds, countWords, volumeLabel, chapterTitleText } from './store.js';
 import { submissionFacts, submissionNote } from './manuscript.js';
 import { zip } from './zip.js';
 
@@ -35,7 +35,7 @@ function esc(s) {
 }
 
 function chapterLabel(c) {
-  const title = str(c?.title);
+  const title = chapterTitleText(c?.title);
   return `第${c?.no}章${title ? ` ${title}` : ''}`;
 }
 

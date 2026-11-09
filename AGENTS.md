@@ -23,7 +23,7 @@
 | 语言 | JavaScript（ES modules，`"type": "module"`）|
 | 运行时 Node | 18+，但当前用 `tools/node/node.exe` (22.0.0) |
 | 平台 | Windows 为主（`win-unpacked`、`ShuJiang-Portable-1.0.25.exe`、`win-x64.zip`）|
-| 测试 | `npm run regress`（295 项检查）、`npm test` (`lib-test.mjs` 635 项) |
+| 测试 | `npm run regress`（318 项检查）、`npm test` (`lib-test.mjs` 640 项) |
 | 代码量 | ~3.5 万行（server+web+electron+build ≈ 3.3 万，含 dev/ 约 0.4 万）|
 | 前端 | 原生 JS + 自研设计系统，无 React/Vue/Svelte |
 | HTML/CSS | ~1300 行 HTML、~4000 行 CSS |
@@ -109,8 +109,8 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
 
 ## 测试与质量保证
 
-- 每次改完跑 `npm run regress`——mock 起来 295 项、mock 没起 288 项，区别在模型对比/人话错误提示两组会自动跳过
-- 每次改完跑 `npm test`（lib 单元测试 635 项）
+- 每次改完跑 `npm run regress`——mock 起来 318 项、mock 没起 311 项，区别在模型对比/人话错误提示两组会自动跳过
+- 每次改完跑 `npm test`（lib 单元测试 640 项）
 - 改完 lib/ 先跑 `npm run check-refs`
 - 改完回到浏览器确认控制台 0 error（见 `tools/node`: Chrome DevTools Console）
 - 做完记得 `git status --short` 确认没有污染的 `.tmp-*` / `dist/` / `data/`
