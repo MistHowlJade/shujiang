@@ -1,6 +1,8 @@
 # 书匠
 
-完全本地运行的中文长篇小说创作台。AI 辅助起稿、续写与润色，设定库、大纲、版本历史和正文都保存在本机 `data/`；除你自己配置并主动触发的模型接口外，应用不发出任何网络请求。
+完全本地运行的中文长篇小说创作台。AI 辅助起稿、续写与润色，作品、设定与版本历史都保存在本机 `data/`；除你配置并主动触发的模型接口外，不发出任何网络请求。
+
+**本地优先 · 运行时零依赖 · 数据可迁移**
 
 当前版本 **v1.0.27**，[更新记录](RELEASE_NOTES.md) · [下载](https://github.com/MistHowlJade/shujiang/releases/latest)
 
@@ -19,21 +21,21 @@
 
 ## 下载
 
-| 文件 | 说明 |
-| --- | --- |
-| [ShuJiang-Portable-1.0.27.exe](https://github.com/MistHowlJade/shujiang/releases/download/v1.0.27/ShuJiang-Portable-1.0.27.exe) | 单文件便携版，无需安装 |
-| [ShuJiang-1.0.27-win-x64.zip](https://github.com/MistHowlJade/shujiang/releases/download/v1.0.27/ShuJiang-1.0.27-win-x64.zip) | 绿色版，解压后运行 `书匠.exe` |
+| 文件 | 大小 | 说明 |
+| --- | --- | --- |
+| [ShuJiang-Portable-1.0.27.exe](https://github.com/MistHowlJade/shujiang/releases/download/v1.0.27/ShuJiang-Portable-1.0.27.exe) | 105 MB | 单文件便携版，无需安装 |
+| [ShuJiang-1.0.27-win-x64.zip](https://github.com/MistHowlJade/shujiang/releases/download/v1.0.27/ShuJiang-1.0.27-win-x64.zip) | 155 MB | 绿色版，解压后运行 `书匠.exe` |
 
-发布包未签名，首次运行时 Windows SmartScreen 会提示，选择「更多信息 → 仍要运行」即可。便携版不写入系统安装目录，作品数据位于 exe 同级的 `data/`。
+系统要求：Windows 10 / 11；源码模式需要 Node.js 18+。发布包未签名，首次运行时 Windows SmartScreen 会提示，选择「更多信息 → 仍要运行」即可。便携版不写入系统安装目录，作品数据位于 exe 同级的 `data/`。
 
 ## 快速开始
 
 1. 下载并运行便携版。
 2. 在空书架选择 **一键开书**、**手动新建** 或 **导入旧稿**；也可先复制示例作品《雪岭问剑》了解功能。
 3. 首次使用 AI 时，按提示选择服务商、填写 API Key 并获取模型列表。
-4. 写作、检查、导出。所有内容实时保存到本机。
+4. 写作、检查、导出。AI 结果先停在输出区，确认后才写入正文；所有内容实时保存到本机。
 
-源码模式需要 Node.js 18+；也可双击 `启动.bat`，或运行：
+源码模式：双击 `启动.bat`，或运行：
 
 ```bat
 tools\node\node.exe server\server.js
@@ -115,6 +117,8 @@ tools\node\node.exe dev\regress.mjs
 
 ## 常见问题
 
+**AI 会覆盖正文吗？** 不会。生成结果先停在输出区，点「追加 / 替换 / 插入」才写入；替换前自动留版本历史，`Ctrl+Z` 可撤销。
+
 **浏览器打不开或端口被占用？** 8848 被占用时服务会切换到 8849，看命令行窗口输出的地址。
 
 **提示「未配置模型」？** 在设置中添加服务商并保存，确认密钥在当前激活的服务商上、模型名正确。
@@ -126,3 +130,5 @@ tools\node\node.exe dev\regress.mjs
 ## 许可
 
 MIT，见 [LICENSE](LICENSE)。发布包未签名，SmartScreen 提示时选择「更多信息 → 仍要运行」。所有发行版均可由本仓库源码通过 `npm run dist` 构建验证。
+
+问题与建议：<https://github.com/MistHowlJade/shujiang/issues>
