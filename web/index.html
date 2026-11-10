@@ -995,21 +995,13 @@
 
               <!-- 检查 -->
               <div class="assist-pane" data-pane="check" role="tabpanel" id="paneAssistCheck" aria-labelledby="tabAssistCheck">
-                <div class="card revision-card" id="revisionCard" hidden>
+                <div class="card cc-card" id="checkCard">
                   <div class="card-head">
-                    <h3>本章修订</h3>
+                    <h3>检查中心</h3>
                     <span class="rev-count" id="revCount"></span>
-                    <button type="button" class="btn btn-sm btn-text rev-all" id="revAll" title="查看全书修订清单">全书</button>
+                    <button type="button" class="btn btn-sm btn-text" id="revAll" title="查看全书修订清单">全书修订</button>
                   </div>
-                  <div class="rev-add">
-                    <input class="input" id="revInput" maxlength="240" placeholder="记一条要改的地方，回车添加" autocomplete="off" aria-label="记一条要改的地方" />
-                    <button class="btn btn-sm btn-primary" id="revAdd"><svg class="ico"><use href="#i-plus" /></svg>添加</button>
-                  </div>
-                  <p class="rev-hint">先在正文里选中要改的句子，再添加；之后点引文就能跳回原处。</p>
-                  <ul class="rev-list" id="revList"></ul>
-                </div>
-                <div class="card">
-                  <label class="field-label">检查范围</label>
+                  <label class="field-label">检查范围<span class="field-hint">只对本页范围内的问题负责；设定库检查只看自相矛盾</span></label>
                   <select id="checkScope" class="select" aria-label="检查范围">
                     <option value="current">当前章</option>
                     <option value="last3">最近 3 章</option>
@@ -1017,16 +1009,36 @@
                     <option value="all">全书（自动截断）</option>
                     <option value="bible">只查设定库自相矛盾</option>
                   </select>
-                  <div class="btn-row">
-                    <button class="btn btn-primary" id="consistencyBtn" title="按人物、时间线、伏笔、口吻，找明显矛盾"><svg class="ico"><use href="#i-shield" /></svg>一致性检查</button>
-                    <button class="btn" id="reviewBtn" title="让模型从编辑视角指出可读性问题，而不是抠错字"><svg class="ico"><use href="#i-stamp" /></svg>责编评审</button>
+                  <div class="btn-row cc-run-row">
+                    <button class="btn btn-sm btn-text cc-chip" id="ccProofBtn" title="标点、引号、常见叠字、段落收尾，本机规则，不花 token"><svg class="ico"><use href="#i-proof" /></svg>本地校对</button>
+                    <button class="btn btn-sm btn-text cc-chip" id="ccConsistencyBtn" title="按人物、时间线、伏笔、口吻，找明显矛盾"><svg class="ico"><use href="#i-shield" /></svg>一致性检查</button>
+                    <button class="btn btn-sm btn-text cc-chip" id="ccReviewBtn" title="让模型从编辑视角指出可读性问题，而不是抠错字"><svg class="ico"><use href="#i-stamp" /></svg>责编评审</button>
+                    <button class="btn btn-sm btn-text cc-chip" id="ccHealthBtn" title="全书体检：重复段落、口头禅、节奏、人物断档"><svg class="ico"><use href="#i-pulse" /></svg>全书体检</button>
+                    <button class="btn btn-sm btn-text cc-chip" id="ccSubmitBtn" title="投稿前检查：正文字数、空章、定稿度、材料齐不齐"><svg class="ico"><use href="#i-check" /></svg>交稿检查</button>
+                  </div>
+                  <div class="btn-row cc-run-row">
+                    <button class="btn btn-sm btn-text cc-chip" id="ccPoisonBtn" title="AI 找出弃书点">毒点检查</button>
+                    <button class="btn btn-sm btn-text cc-chip" id="ccHookBtn" title="评估断章位置">断章评估</button>
+                    <button class="btn btn-sm btn-text cc-chip" id="ccSensitivityBtn" title="圈出可能踩线的位置">敏感内容</button>
+                    <span class="dim small">AI 扫描</span>
                   </div>
                   <div class="btn-row">
                     <button class="btn btn-danger-ghost btn-block" id="stopBtn2" hidden title="停止本次生成，已生成的内容会保留"><svg class="ico"><use href="#i-stop" /></svg>停止</button>
                   </div>
+                  <div class="cc-rev-add">
+                    <input class="input" id="revInput" maxlength="240" placeholder="记一条要改的地方，回车添加（选中正文后引文自动带上）" autocomplete="off" aria-label="记一条要改的地方" />
+                    <button class="btn btn-sm btn-primary" id="revAdd"><svg class="ico"><use href="#i-plus" /></svg>添加</button>
+                  </div>
+                  <p class="rev-hint">先在正文里选中要改的句子，再添加；之后点引文就能跳回原处。</p>
+                  <ul class="cc-list" id="checkList"></ul>
+                  <div class="cc-empty dim small" id="checkEmpty">点上面的检查，结果会聚合到这里；忽略只作用于本机。</div>
+                  <div class="cc-foot" id="checkFoot" hidden>
+                    <span class="dim small" id="checkFootInfo"></span>
+                    <span style="flex:1"></span>
+                    <button type="button" class="btn btn-sm btn-text" id="ccRestoreAll" hidden>恢复已忽略</button>
+                    <button type="button" class="btn btn-sm btn-text" id="ccClearAll">清空列表</button>
+                  </div>
                 </div>
-                <div class="section-head"><span>结果</span></div>
-                <div class="output output-plain" id="checkBox"></div>
               </div>
 
               <!-- 批注/高亮 -->

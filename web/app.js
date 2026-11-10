@@ -557,7 +557,6 @@ const S = {
   focusMode: false,        // 专注写作模式：只留稿纸
   threadFilter: 'all',     // 线索页筛选：all / unresolved / foreshadowing
   bibleSearch: { outline: '', characters: '', world: '', timeline: '', threads: '', arcs: '', relations: '', timelineViz: '' }, // 设定库搜索词，按页签分别记住
-  revisionDraftChapterId: null, // 修订输入框里未提交的草稿属于哪一章
   out: '',
   outTask: '',      // 输出区这份内容属于哪个任务：只有正文类任务才显示「写进正文」
   reasoning: '',
@@ -3837,7 +3836,7 @@ function openHealthReport() {
 }
 
 // 「更多」菜单进来的体检统一跳到「检查」页签，体检本身由检查中心发起（#27）
-$('#healthBtn')?.addEventListener('click', () => { setView('studio'); showAssistTab('check'); });
+$('#healthBtn')?.addEventListener('click', () => { setView('studio'); showAssistTab('check'); $('#ccHealthBtn')?.click(); });
 
 async function openProof() {
   if (!S.novel) return toast('先打开作品', 'err');
@@ -4040,7 +4039,7 @@ async function openProof() {
   render();
 }
 
-$('#proofBtn')?.addEventListener('click', openProof);
+$('#proofBtn')?.addEventListener('click', () => { setView('studio'); showAssistTab('check'); setTimeout(() => $('#ccProofBtn')?.click(), 0); });
 
 /* ============================================================
  * 4.6 分卷：章节目录按卷归组
@@ -6839,7 +6838,7 @@ $('#chStage').addEventListener('change', () => {
         localStorage.setItem('shu.proofHint.v1', '1');
         setTimeout(() => toast('这一章定稿了。要不要顺手跑一次文字校对？', 'ok', {
           label: '运行校对',
-          onClick: () => { setView('studio'); openProof(); },
+          onClick: () => { setView('studio'); showAssistTab('check'); setTimeout(() => $('#ccProofBtn')?.click(), 0); },
         }), 900);
       }
     } catch { /* 存不了偏好就每次都不提示，不影响正文 */ }
@@ -8077,8 +8076,8 @@ function setBusy(busy) {
   $('#aiGenBtn').disabled = busy;
   $('#aiContBtn').disabled = busy;
   $('#cmpBtn').disabled = busy;
-  $('#consistencyBtn').disabled = busy;
-  $('#reviewBtn').disabled = busy;
+  $('#ccConsistencyBtn').disabled = busy;
+  $('#ccReviewBtn').disabled = busy;
   $$('[data-quick]').forEach((b) => { b.disabled = busy; });
   // 生成/批量任务跑起来时收起「用 AI 写初稿」，避免连点
   updateFootSuggest();
@@ -8122,8 +8121,6 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
     $('#outInfo').textContent = '';
     renderOut();
     if (PROSE_OUT_TASKS.has(S.outTask)) revealOutput();
-  } else if (target === 'check') {
-    $('#checkBox').innerHTML = '<span class="dim">生成中…</span>';
   } else {
     // 诊断模式：不写 UI，只累加文本到 acc 返回
   }
@@ -8146,7 +8143,7 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
       onDelta: (d) => {
         acc += d;
         if (target === 'out') { S.out += d; renderOut(); }
-        else if (target === 'check') { if (!/^\s*[[{]/.test(acc)) $('#checkBox').innerHTML = mdLite(acc); }
+        // diag / check：只累加到 acc，由调用方决定怎么处理
         // diag: just accumulate
       },
       onReasoning: (r) => { if (target === 'out') { S.reasoning += r; renderOut(); } },
@@ -8159,7 +8156,6 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
       openGenerateModelSetup(body, () => runStream(body, { target, retried: true }));
     } else {
       toast(err.message, 'err', { label: '打开设置', onClick: openSettings });
-      if (target !== 'out') $('#checkBox').innerHTML = `<span class="status-err">${esc(err.message)}</span>`;
     }
   } finally {
     S.controller = null;
@@ -8177,7 +8173,6 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
       ? '模型这一回只返回了思考内容，没写出正文。可以在设置把「单次最大输出 tokens」调大，或换个模型。'
       : '模型这一回没写出任何内容。可能是 Key、额度或模型名有问题，可以在设置里检查后再试。';
     if (target === 'out') $('#outInfo').textContent = '没有返回内容';
-    else $('#checkBox').innerHTML = `<span class="status-err">${esc(msg)}</span>`;
     toast(msg, 'err', { label: '打开设置', onClick: openSettings });
   }
   recordGenAudit(body, { auditMeta, outChars: acc.length, streamFailed, lastError });
@@ -9284,9 +9279,9 @@ $$('[data-quick]').forEach((btn) => btn.addEventListener('click', async () => {
   if (kind === 'batchMemory') return openBatchMemory();
   if (kind === 'propagate') return openPropagationAnalysis();
   if (kind === 'payoff') return runPayoffAnalysis();
-  if (kind === 'poison') return runPoisonCheck();
-  if (kind === 'hook') return runHookCheck();
-  if (kind === 'sensitivity') return runSensitivityCheck();
+  if (kind === 'poison') { showAssistTab('check'); return $('#ccPoisonBtn')?.click(); }
+  if (kind === 'hook') { showAssistTab('check'); return $('#ccHookBtn')?.click(); }
+  if (kind === 'sensitivity') { showAssistTab('check'); return $('#ccSensitivityBtn')?.click(); }
   if (kind === 'focus') return openFocusLens();
   if (kind === 'scene') return runSceneCheck();
 
@@ -9484,48 +9479,264 @@ function syncRevisionBadge(ch) {
   li.title = `${STAGE_LABEL[stageOf(ch)]}${ch.memory ? ' · 已有章节记忆' : ''}${n ? ` · ${n} 项待改` : ''}`;
 }
 
-function revisionItemHtml(rev) {
+function revisionItemHtml(rev, chapterNo) {
   const rawText = String(rev.text || '').trim() || '未填写内容';
   const quote = String(rev.quote || '').replace(/\s+/g, ' ').trim();
   const shortQuote = quote.length > 58 ? `${quote.slice(0, 58)}…` : quote;
   const quoteHtml = quote
     ? `<button type="button" class="rev-quote" data-rev-act="quote" title="${esc(quote)}">${esc(shortQuote)}</button>`
     : '';
-  return `<li class="rev-item${rev.done ? ' done' : ''}" data-rev-id="${esc(rev.id || '')}">
-    <button type="button" class="rev-check" data-rev-act="toggle" role="checkbox" aria-checked="${rev.done ? 'true' : 'false'}" title="${rev.done ? '标记为未完成' : '标记为已完成'}">${rev.done ? ico('check') : ''}</button>
-    <div class="rev-main"><span class="rev-text">${esc(rawText)}</span>${quoteHtml}</div>
-    <button type="button" class="rev-del" data-rev-act="del" title="删除这条修订" aria-label="删除这条修订">${ico('x')}</button>
+  return `<li class="cc-item rev-item${rev.done ? ' done' : ''}" data-rev-id="${esc(rev.id || '')}">
+    <div class="cc-item-head">
+      <span class="cc-source">我的修订${chapterNo ? ` · 第 ${chapterNo} 章` : ''}</span>
+      <button type="button" class="rev-check" data-rev-act="toggle" role="checkbox" aria-checked="${rev.done ? 'true' : 'false'}" title="${rev.done ? '标记为未完成' : '标记为已完成'}">${rev.done ? ico('check') : ''}</button>
+      <span class="cc-message">${esc(rawText)}</span>
+      <span style="flex:1"></span>
+      <button type="button" class="rev-del" data-rev-act="del" title="删除这条修订" aria-label="删除这条修订">${ico('x')}</button>
+    </div>
+    ${quoteHtml}
   </li>`;
 }
 
-function renderRevisionCard() {
-  const card = $('#revisionCard');
-  if (!card) return;
+/* =====================================================
+ * 检查中心（#27）：本地校对 / 一致性 / 责编评审 / 全书体检 / 交稿检查
+ * 统一成一条问题列表，每条带：来源、章节、引文、说明，
+ * 动作固定为「定位 / 忽略 / 标记已修」，跟「我的修订」并存于同一卡。
+ * =================================================== */
+const CC_SOURCES = {
+  proof: '本地校对',
+  consistency: '一致性',
+  review: '责编评审',
+  health: '全书体检',
+  submit: '交稿检查',
+  poison: '毒点',
+  hook: '断章',
+  sensitivity: '敏感',
+  revision: '我的修订',
+};
+const CC_AI_SOURCES = new Set(['poison', 'hook', 'sensitivity', 'review']);
+
+/* AI 扫描报告（毒点 / 断章 / 敏感）入列：AI 给 JSON，取 quote 定位落点；解析不了就整段进来一条 */
+function ccAiScanItems(raw, source, chapter) {
+  const parsed = parseJsonLoose(raw);
+  const list = (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
+    .filter((x) => x && typeof x === 'object')
+    .slice(0, 8);
+  if (!list.length) {
+    const text = String(raw || '').trim();
+    return [{
+      source, severity: 'hint', chapterNo: chapter?.no, chId: chapter?.id,
+      message: 'AI 扫描结果', detail: text.slice(0, 4000),
+    }];
+  }
+  return list.map((x) => {
+    const quote = String(x.quote || x.title || '').trim();
+    const content = String(chapter?.content || '');
+    const start = quote ? content.indexOf(quote) : -1;
+    return {
+      source, severity: 'hint', chapterNo: chapter?.no, chId: chapter?.id,
+      message: String(x.problem || x.title || x.point || x.issue || quote || '疑似弃书点').trim(),
+      quote,
+      detail: String(x.reason || x.detail || x.suggest || x.advice || '').trim(),
+      start: start >= 0 ? start : undefined,
+      end: start >= 0 ? start + Math.max(1, quote.length) : undefined,
+    };
+  });
+}
+
+/* 把要展示的扫描结果存成 ccItems；id 自增便于渲染与忽略 */
+let ccItems = [];
+let ccSeq = 0;
+
+function ccAdd(items) {
+  for (const raw of items) {
+    ccItems.push({ id: `cc-${Date.now().toString(36)}-${++ccSeq}`, ignored: false, ...raw });
+  }
+  ccRender();
+}
+
+function ccRender() {
+  const listEl = $('#checkList');
+  if (!listEl) return;
   const ch = currentChapter();
-  if (!ch) {
-    card.hidden = true;
-    $('#revList').innerHTML = '';
-    $('#revCount').textContent = '';
-    S.revisionDraftChapterId = null;
+  const revs = ch ? revisionsOf(ch) : [];
+  const revCountEl = $('#revCount');
+  if (revCountEl) {
+    const open = revs.filter((r) => !r.done).length;
+    const done = revs.length - open;
+    revCountEl.textContent = revs.length ? `修订 ${open} 项待改${done ? ` · ${done} 项完成` : ''}` : '';
+    revCountEl.classList.toggle('done', revs.length > 0 && open === 0);
+  }
+  const revHtml = revs
+    .slice()
+    .sort((a, b) => Number(!!a.done) - Number(!!b.done) || (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))
+    .map((rev) => revisionItemHtml(rev, ch?.no))
+    .join('');
+  const visible = ccItems.filter((it) => !it.ignored);
+  const checkHtml = visible.map(ccItemHtml).join('');
+  listEl.innerHTML = `${revHtml}${revHtml && checkHtml ? '<li class="cc-group-title">检查结果</li>' : ''}${checkHtml}`;
+  const emptyEl = $('#checkEmpty');
+  if (emptyEl) emptyEl.hidden = revs.length > 0 || visible.length > 0;
+  const foot = $('#checkFoot');
+  if (foot) {
+    foot.hidden = visible.length === 0;
+    const info = $('#checkFootInfo');
+    if (info) info.textContent = `${visible.length} 条检查结果`;
+  }
+  const restoreBtn = $('#ccRestoreAll');
+  if (restoreBtn) restoreBtn.hidden = ignoredCount() === 0;
+}
+
+function ignoredCount() {
+  const proof = (S.novel?.meta?.proofIgnored || []).length;
+  const cons = (S.novel?.meta?.consistencyIgnored || []).length;
+  const health = (S.novel?.meta?.healthIgnored || []).length;
+  return proof + cons + health;
+}
+
+function ccItemHtml(it) {
+  const src = CC_SOURCES[it.source] || '检查';
+  const chapter = Number.isFinite(Number(it.chapterNo)) ? `第 ${Number(it.chapterNo)} 章` : '全书';
+  const sev = it.severity || 'hint';
+  const locateBtn = it.chId
+    ? `<button class="btn btn-sm btn-text cc-locate" data-cc-locate="${it.id}">定位</button>`
+    : '';
+  const quote = it.quote
+    ? `<div class="cc-quote">${esc(it.quote)}</div>`
+    : '';
+  const fixBtn = it.source === 'revision'
+    ? ''
+    : `<button class="btn btn-sm btn-text cc-fixed" data-cc-fixed="${it.id}">标记已修</button>`;
+  const detail = it.detail
+    ? `<div class="cc-detail">${esc(it.detail)}</div>`
+    : '';
+  return `<li class="cc-item sev-${esc(sev)}" data-cc-id="${it.id}">
+    <div class="cc-item-head">
+      <span class="cc-source">${esc(src)}</span>
+      <span class="cc-chapter">${esc(chapter)}</span>
+      <span class="cc-message">${esc(it.message || '')}</span>
+    </div>
+    ${quote}
+    ${detail}
+    <div class="cc-actions">
+      ${locateBtn}
+      <button class="btn btn-sm btn-text cc-ignore" data-cc-ignore="${it.id}">忽略</button>
+      ${fixBtn}
+    </div>
+  </li>`;
+}
+
+function ccLocateItem(it) {
+  const chId = it.chId;
+  if (!chId) return;
+  if (Number.isFinite(Number(it.start)) && Number.isFinite(Number(it.end))) {
+    return jumpToHit(chId, Number(it.start), Math.max(1, Number(it.end) - Number(it.start)));
+  }
+  const ch = S.novel?.chapters.find((c) => c.id === chId);
+  if (ch) {
+    setView('studio');
+    openChapterFromIndex(ch.id);
+  }
+}
+
+function ccPersistIgnore(it) {
+  if (it.source === 'proof' && it.key) {
+    const list = (Array.isArray(S.novel?.meta?.proofIgnored) ? S.novel.meta.proofIgnored.slice() : []);
+    if (!list.some((x) => (x?.key || x) === it.key)) {
+      list.push({ key: it.key, type: it.kind || '', message: it.message || '', no: it.chapterNo, title: '', ts: Date.now() });
+      saveProofIgnoreList(list.slice(-500));
+    }
+    return true;
+  }
+  if (it.source === 'consistency' && (it.fingerprint || it.key)) {
+    const fp = it.fingerprint || it.key;
+    const list = (Array.isArray(S.novel?.meta?.consistencyIgnored) ? S.novel.meta.consistencyIgnored.slice() : []);
+    const keyOf = (x) => (typeof x === 'string' ? x : x?.key);
+    if (!list.some((x) => keyOf(x) === fp)) {
+      list.push({ key: fp, label: `${it.source}: ${String(it.message || '').slice(0, 30)}`, ts: Date.now() });
+      saveConsistencyIgnoreList(list);
+    }
+    return true;
+  }
+  if (it.source === 'health') {
+    const list = (Array.isArray(S.novel?.meta?.healthIgnored) ? S.novel.meta.healthIgnored.slice() : []);
+    const key = it.key || `${it.source}|${it.message}`;
+    if (!list.some((x) => x?.key === key)) {
+      list.push({ key, label: String(it.message || '').slice(0, 40), ts: Date.now() });
+      saveHealthIgnoreList(list.slice(-500));
+    }
+    return true;
+  }
+  return false;
+}
+
+function ccIgnoreItem(it) {
+  ccPersistIgnore(it);
+  ccItems = ccItems.filter((x) => x !== it);
+  ccRender();
+}
+
+function ccFixedItem(it) {
+  // 标记已修：立即出列但不进忽略清单——下次检查如果还在就会再出现
+  ccItems = ccItems.filter((x) => x !== it);
+  ccRender();
+}
+
+function saveProofIgnoreList(list) {
+  S.novel.meta = { ...(S.novel.meta || {}), proofIgnored: list };
+  saveNovelPart({ meta: S.novel.meta });
+}
+function saveConsistencyIgnoreList(list) {
+  S.novel.meta = { ...(S.novel.meta || {}), consistencyIgnored: list };
+  saveNovelPart({ meta: S.novel.meta });
+}
+function saveHealthIgnoreList(list) {
+  S.novel.meta = { ...(S.novel.meta || {}), healthIgnored: list };
+  saveNovelPart({ meta: S.novel.meta });
+}
+
+/* 列表里的动作统一委托：定位 / 忽略 / 标记已修 */
+$('#checkList')?.addEventListener('click', (e) => {
+  const locate = e.target.closest('[data-cc-locate]');
+  const ignore = e.target.closest('[data-cc-ignore]');
+  const fixed = e.target.closest('[data-cc-fixed]');
+  if (locate) {
+    const it = ccItems.find((x) => x.id === locate.dataset.ccLocate);
+    if (it) ccLocateItem(it);
     return;
   }
-  card.hidden = false;
-  if (S.revisionDraftChapterId !== ch.id) {
-    S.revisionDraftChapterId = ch.id;
-    const input = $('#revInput');
-    if (input) input.value = '';
+  if (ignore) {
+    const it = ccItems.find((x) => x.id === ignore.dataset.ccIgnore);
+    if (it) ccIgnoreItem(it);
+    return;
   }
-  const revs = revisionsOf(ch);
-  const open = revs.filter((r) => !r.done).length;
-  const done = revs.length - open;
-  const countEl = $('#revCount');
-  countEl.textContent = revs.length ? `${open} 项待改${done ? ` · ${done} 项完成` : ''}` : '暂无';
-  countEl.classList.toggle('done', revs.length > 0 && open === 0);
-  const ordered = revs.slice().sort((a, b) => Number(!!a.done) - Number(!!b.done) || (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
-  $('#revList').innerHTML = ordered.length
-    ? ordered.map(revisionItemHtml).join('')
-    : '<li class="rev-empty">还没有修订项。选中正文里的句子，再在这里记一条，之后能一键跳回原处。</li>';
+  if (fixed) {
+    const it = ccItems.find((x) => x.id === fixed.dataset.ccFixed);
+    if (it) ccFixedItem(it);
+  }
+});
+
+$('#ccClearAll')?.addEventListener('click', () => {
+  ccItems = [];
+  ccRender();
+});
+$('#ccRestoreAll')?.addEventListener('click', () => {
+  try {
+    saveProofIgnoreList([]);
+    saveConsistencyIgnoreList([]);
+    saveHealthIgnoreList([]);
+    toast('已恢复全部忽略项，下次检查会重新出现', 'ok');
+  } catch (err) {
+    toast(`恢复失败：${errMsg(err)}`, 'err');
+  }
+  ccRender();
+});
+
+/* ccNeed to refresh the revision rows in unified list */
+function renderRevisionCard() {
+  ccRender();
 }
+
 
 function addRevision() {
   const ch = currentChapter();
@@ -9768,7 +9979,7 @@ $('#revInput')?.addEventListener('keydown', (e) => {
     addRevision();
   }
 });
-$('#revList')?.addEventListener('click', (e) => {
+$('#checkList')?.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-rev-act]');
   if (!btn) return;
   const id = btn.closest('.rev-item')?.dataset.revId;
@@ -9791,145 +10002,155 @@ function scopeForCheck() {
   };
 }
 
-function renderConsistencyReport(report) {
-  const box = $('#checkBox');
-  const ignoredList = Array.isArray(S.novel?.meta?.consistencyIgnored) ? S.novel.meta.consistencyIgnored : [];
-  const ignoredHtml = ignoredList.length ? `
-    <div class="proof-ignored" id="consistencyIgnoredBox">
-      <div class="proof-ignored-head">
-        <span>已忽略 ${ignoredList.length} 条</span>
-        <span style="flex:1"></span>
-        <button type="button" class="btn btn-sm btn-text" id="consistencyRestoreAll">全部恢复</button>
-      </div>
-      <div class="proof-ignored-list">
-        ${ignoredList.slice().reverse().map((x) => {
-          const key = typeof x === 'string' ? x : x?.key || '';
-          const label = typeof x === 'string' ? x : x?.label || key;
-          return `<div class="proof-ignored-row">
-            <span class="proof-main"><span class="proof-msg">${esc(label)}</span></span>
-            <button type="button" class="btn btn-sm btn-text" data-consistency-restore="${esc(key)}">恢复</button>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>` : '';
-
-  const restoreIgnored = async (keys) => {
-    const remove = new Set(keys);
-    const list = (S.novel.meta?.consistencyIgnored || []).filter((x) => {
-      const key = typeof x === 'string' ? x : x?.key;
-      return key && !remove.has(key);
-    });
-    try {
-      await api.put(`/api/novels/${S.novel.id}`, { meta: { consistencyIgnored: list } });
-    } catch (err) {
-      toast(err.message, 'err');
-      return;
-    }
-    S.novel.meta = { ...(S.novel.meta || {}), consistencyIgnored: list };
-    toast(keys.length > 1 ? '已恢复全部忽略项' : '已恢复这一条', 'ok');
-    $('#consistencyBtn').click();
-  };
-  const bindConsistencyIgnored = (host) => {
-    host.querySelectorAll('[data-consistency-restore]').forEach((btn) => {
-      btn.onclick = () => restoreIgnored([btn.dataset.consistencyRestore]);
-    });
-    const all = host.querySelector('#consistencyRestoreAll');
-    if (all) {
-      all.onclick = () => restoreIgnored(
-        (S.novel.meta?.consistencyIgnored || [])
-          .map((x) => (typeof x === 'string' ? x : x?.key))
-          .filter(Boolean),
-      );
-    }
-  };
-
-  if (!report.issues?.length) {
-    box.innerHTML = `<div class="status-ok">✓ 一致性检查通过，未发现明显矛盾。</div>${ignoredHtml}`;
-    bindConsistencyIgnored(box);
-    return;
-  }
-  const byKind = {};
-  for (const it of report.issues) {
-    if (!byKind[it.kind]) byKind[it.kind] = [];
-    byKind[it.kind].push(it);
-  }
-  const kindMeta = {
-    setting: { icon: '🛡️', label: '设定冲突' },
-    timeline: { icon: '🕰️', label: '时间线矛盾' },
-    character: { icon: '👤', label: '人物行为异常' },
-    name: { icon: '✍️', label: '人物姓名笔误' },
-    voice: { icon: '🎙️', label: '口吻/语风差异' },
-  };
-  const sevClass = (s) => s === 'hint' ? 'hint' : '';
-  let html = ignoredHtml + '<div class="consistency-report">';
-  for (const [kind, list] of Object.entries(byKind)) {
-    const meta = kindMeta[kind] || { icon: '•', label: kind };
-    html += `<div class="consistency-kind"><h4>${meta.icon} ${meta.label} (${list.length})</h4>`;
-    for (const it of list) {
-      const sev = sevClass(it.severity);
-      const fingerprint = it.fingerprint || consistencyKey(it.kind, it.id);
-      const ignored = (S.novel.meta?.consistencyIgnored || []).some(x => x.key === fingerprint || x === fingerprint);
-      html += `
-        <div class="issue ${sev}" data-fingerprint="${esc(fingerprint)}">
-          <div class="is-head"><b>${esc(it.message)}</b>${ignored ? '<span class="ignored-badge">已忽略</span>' : ''}</div>
-          ${it.loc ? `<div class="is-loc">${esc(it.loc)}</div>` : ''}
-          ${!ignored ? `
-            <div class="is-actions">
-              <button class="btn btn-sm btn-text ignore-btn" data-fingerprint="${esc(fingerprint)}" data-kind="${esc(it.kind)}" data-label="${esc(it.message.slice(0, 30))}">忽略此项</button>
-            </div>` : ''}
-        </div>`;
-    }
-    html += '</div>';
-  }
-  html += '</div>';
-  box.innerHTML = html;
-  bindConsistencyIgnored(box);
-  // 绑定忽略按钮
-  box.querySelectorAll('.ignore-btn').forEach(btn => {
-    btn.onclick = async () => {
-      const fp = btn.dataset.fingerprint;
-      const kind = btn.dataset.kind;
-      const label = btn.dataset.label;
-      const ign = (S.novel.meta?.consistencyIgnored || []).slice();
-      ign.push({ key: fp, label: `${kind}: ${label}`, ts: Date.now() });
-      try {
-        await api.put(`/api/novels/${S.novel.id}`, { meta: { consistencyIgnored: ign } });
-      } catch (err) {
-        toast(err.message, 'err');
-        return;
-      }
-      S.novel.meta = { ...(S.novel.meta || {}), consistencyIgnored: ign };
-      toast('已加入忽略清单', 'ok');
-      // 重新渲染
-      const scopeValue = $('#checkScope').value;
-      const scopeMap = { current: 'current', last3: 'last3', last5: 'last5', all: 'book', bible: 'book' };
-      const scope = scopeMap[scopeValue] || 'book';
-      const currentChapterId = scopeValue === 'current' ? S.chapterId : null;
-      const report = scanConsistency(S.novel, scope, currentChapterId);
-      const filtered = applyConsistencyIgnored(report, ign);
-      renderConsistencyReport(filtered);
-    };
-  });
-}
-
-$('#consistencyBtn').addEventListener('click', async () => {
+async function ccConsistencyScan() {
   if (!S.novel) return toast('先打开作品', 'err');
+  await saveChapterNow().catch(() => {});
   const scopeValue = $('#checkScope').value;
   const scopeMap = { current: 'current', last3: 'last3', last5: 'last5', all: 'book', bible: 'book' };
   const scope = scopeMap[scopeValue] || 'book';
   const currentChapterId = scopeValue === 'current' ? S.chapterId : null;
   const report = scanConsistency(S.novel, scope, currentChapterId);
-  // 应用忽略清单
   const ignored = S.novel.meta?.consistencyIgnored || [];
   const filtered = applyConsistencyIgnored(report, ignored);
-  renderConsistencyReport(filtered);
-});
+  if (!filtered.issues?.length) {
+    ccAdd([{ source: 'consistency', severity: 'hint', message: '一致性检查通过，未发现明显矛盾' }]);
+    return;
+  }
+  ccAdd(filtered.issues.map((it) => {
+    const fp = it.fingerprint || consistencyKey(it.kind, it.id);
+    const noFromLoc = String(it.loc || '').match(/第\s*(\d+)\s*章/)?.[1];
+    const ch = (it.chapterNo != null
+      ? S.novel.chapters.find((c) => Number(c.no) === Number(it.chapterNo))
+      : noFromLoc ? S.novel.chapters.find((c) => Number(c.no) === Number(noFromLoc)) : null);
+    return {
+      source: 'consistency',
+      severity: it.severity === 'warn' || it.severity === 'high' ? 'warn' : 'hint',
+      message: String(it.message || '一致性问题').trim(),
+      detail: String(it.loc || ''),
+      chapterNo: ch?.no ?? it.chapterNo ?? null,
+      chId: ch?.id ?? null,
+      fingerprint: fp,
+    };
+  }));
+}
 
-$('#reviewBtn').addEventListener('click', async () => {
+$('#ccConsistencyBtn').addEventListener('click', ccConsistencyScan);
+
+$('#ccReviewBtn').addEventListener('click', async () => {
   if (!S.novel) return toast('先打开作品', 'err');
   const text = await runStream({ task: 'review', novelId: S.novel.id, chapterId: S.chapterId, payload: scopeForCheck() }, { target: 'check' });
-  if (text) $('#checkBox').innerHTML = mdLite(text);
+  if (text?.trim()) {
+    showAssistTab('check');
+    ccAdd([{ source: 'review', severity: 'hint', message: '责编评审意见', detail: text }]);
+  }
 });
+
+async function ccProof() {
+  if (!S.novel) return toast('先打开作品', 'err');
+  await saveChapterNow().catch(() => {});
+  const scopeValue = $('#checkScope').value;
+  const report = buildProofReport(S.novel, scopeValue === 'current' ? 'chapter' : 'book', scopeValue === 'current' ? S.chapterId : null);
+  const ignored = new Set((S.novel.meta?.proofIgnored || []).map((x) => (typeof x === 'string' ? x : x?.key)).filter(Boolean));
+  const chapters = (S.novel.chapters || []);
+  const curIdx = chapters.findIndex((c) => c.id === S.chapterId);
+  const pickIds = scopeValue === 'current' && curIdx >= 0 ? new Set([S.chapterId])
+    : scopeValue === 'last3' && curIdx >= 0 ? new Set(chapters.slice(Math.max(0, curIdx - 2), curIdx + 1).map((c) => c.id))
+    : scopeValue === 'last5' && curIdx >= 0 ? new Set(chapters.slice(Math.max(0, curIdx - 4), curIdx + 1).map((c) => c.id)) : null;
+  const items = [];
+  for (const it of (report.issues || [])) {
+    if (ignored.has(it.key)) continue;
+    if (pickIds && !pickIds.has(it.chId)) continue;
+    items.push({
+      source: 'proof',
+      severity: it.type === 'ending' ? 'hint' : 'warn',
+      key: it.key, kind: it.type,
+      chapterNo: it.no, chId: it.chId,
+      message: it.message, quote: it.snippet,
+      start: it.start, end: it.end,
+    });
+    if (items.length >= 60) {
+      items.push({ source: 'proof', severity: 'hint', message: '只展示前 60 处，其余请用全书体检核对' });
+      break;
+    }
+  }
+  if (!items.length) items.push({ source: 'proof', severity: 'hint', message: '本地校对通过：标点、引号、叠字和段落收尾都没有问题' });
+  ccAdd(items);
+}
+
+async function ccSubmit() {
+  if (!S.novel) return toast('先打开作品', 'err');
+  const list = (S.novel.chapters || []).filter(Boolean).slice().sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0));
+  const report = buildSubmitCheck(S.novel, list, {});
+  const errs = (report.items || []).filter((x) => x.level !== 'ok');
+  ccAdd(errs.map((x) => ({
+    source: 'submit',
+    severity: x.level === 'error' ? 'error' : 'warn',
+    message: x.title,
+    detail: x.detail || '',
+    chId: x.action?.kind === 'chapter' ? x.action.id : null,
+    chapterNo: x.action?.kind === 'chapter' ? (S.novel.chapters.find((c) => c.id === x.action.id)?.no ?? null) : null,
+  })));
+  if (!errs.length) ccAdd([{ source: 'submit', severity: 'hint', message: '交稿检查：正文、篇幅、定稿度和材料都达标' }]);
+}
+
+async function ccHealth() {
+  if (!S.novel) return toast('先打开作品', 'err');
+  await saveChapterNow().catch(() => {});
+  const ignored = S.novel.meta?.healthIgnored || [];
+  const report = applyHealthIgnored(buildHealthReport(S.novel), ignored);
+  const items = [];
+  for (const c of (report.outliers || [])) items.push({ source: 'health', severity: 'warn', key: healthKey('outlier', c.id), chapterNo: c.no, chId: c.id, message: `第 ${c.no} 章字数异常：约 ${fmtWords(c.words)} 字（偏离全书均值）` });
+  for (const g of (report.duplicates || [])) items.push({ source: 'health', severity: 'warn', key: healthKey('dup', String(g.sample || '').slice(0, 40)), message: `重复段落 ${g.count} 处：「${String(g.sample || '').slice(0, 60)}」` });
+  for (const p of (report.longParagraphs || [])) items.push({ source: 'health', severity: 'hint', key: healthKey('longpara', p.id), chapterNo: p.no, chId: p.id, message: `第 ${p.no} 章有 ${p.count} 段 ≥320 字（最长 ${p.max} 字）` });
+  for (const p of (report.phrases || [])) items.push({ source: 'health', severity: 'hint', key: healthKey('phrase', p.text), message: `口头禅「${p.text}」出现 ${p.count} 次` });
+  for (const g of (report.gaps || [])) items.push({ source: 'health', severity: 'hint', key: healthKey('gap', g.name), message: `人物「${g.name}」${g.gap} 章没出现` });
+  for (const t of (report.staleThreads || [])) items.push({ source: 'health', severity: 'hint', key: healthKey('thread', t.text), message: `线索「${String(t.text || '').slice(0, 40)}」迟迟没回收` });
+  for (const s of (report.payoffSlumps || [])) items.push({ source: 'health', severity: 'hint', key: healthKey('payoff', s.id || s), message: `爽点断档 ${s.count} 章 ≤1 分` });
+  for (const c of (report.lowDialogue || [])) items.push({ source: 'health', severity: 'hint', chapterNo: c.no, chId: c.id, message: `第 ${c.no} 章对话密度偏低（${(c.dialogue * 100).toFixed(1)}%）` });
+  for (const c of (report.highDialogue || [])) items.push({ source: 'health', severity: 'hint', chapterNo: c.no, chId: c.id, message: `第 ${c.no} 章对话密度偏高（${(c.dialogue * 100).toFixed(1)}%）` });
+  if (!items.length) items.push({ source: 'health', severity: 'hint', message: '全书体检通过：没有需要提醒的问题' });
+  ccAdd(items);
+}
+
+function ccAiScan(raw, source, chapter) {
+  const parsed = parseJsonLoose(raw);
+  const arr = (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
+    .filter((x) => x && typeof x === 'object')
+    .slice(0, 8);
+  if (!arr.length) {
+    const detail = String(raw || '').trim();
+    return [{ source, severity: 'hint', chapterNo: chapter?.no, chId: chapter?.id, message: 'AI 扫描结果', detail: detail.slice(0, 4000) }];
+  }
+  const content = String(chapter?.content || '');
+  return arr.map((x) => {
+    const quote = String(x.quote || x.title || x.point || x.issue || '').trim();
+    const start = quote ? content.indexOf(quote) : -1;
+    return {
+      source, severity: 'hint', chapterNo: chapter?.no, chId: chapter?.id,
+      message: String(x.problem || x.title || x.point || x.issue || quote || '疑似弃书点').trim(),
+      quote,
+      detail: String(x.reason || x.detail || x.suggest || x.advice || '').trim(),
+      start: start >= 0 ? start : undefined,
+      end: start >= 0 ? start + Math.max(1, quote.length) : undefined,
+    };
+  });
+}
+
+async function ccAiScanRun(task, source) {
+  const ch = currentChapter();
+  if (!ch) return toast('先打开一章', 'err');
+  if (!String(ch.content || '').trim()) return toast('这一章还没有正文', 'err');
+  if (S.controller) return toast('生成中——先停一下', 'err');
+  const acc = await runStream({ task, novelId: S.novel.id, chapterId: ch.id }, { target: 'diag' });
+  ccAdd(ccAiScan(acc, source, ch));
+}
+$('#ccPoisonBtn').addEventListener('click', () => ccAiScanRun('poison', 'poison'));
+$('#ccHookBtn').addEventListener('click', () => ccAiScanRun('hook', 'hook'));
+$('#ccSensitivityBtn').addEventListener('click', () => ccAiScanRun('sensitivity', 'sensitivity'));
+
+$('#ccProofBtn').addEventListener('click', ccProof);
+$('#ccHealthBtn').addEventListener('click', ccHealth);
+$('#ccSubmitBtn').addEventListener('click', ccSubmit);
 
 /* ============================================================
  * 8. 资料面板（上下文预览 / 改后重发）
@@ -12234,87 +12455,6 @@ function readerRowsHtml(list, { riskLabel = true, suggest = true } = {}) {
     </div>`).join('');
 }
 
-async function runPoisonCheck() {
-  const ch = currentChapter();
-  if (!ch) return toast('先打开一章', 'err');
-  if (!String(ch.content || '').trim()) return toast('这一章还没有正文', 'err');
-  if (S.controller) return toast('生成中——先停一下', 'err');
-  openReaderScanModal('毒点检查 · 本章', 'AI 从读者角度找「这里会让人想退书」的点——只提示，不改原文。');
-  try {
-    const acc = await runStream({ task: 'poison', novelId: S.novel.id, chapterId: ch.id }, { target: 'diag' });
-    const box = document.querySelector('#readerScanList');
-    if (!box) return;
-    const parsed = parseJsonLoose(acc);
-    const list = (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
-      .filter((x) => x && String(x.quote || '').trim()).slice(0, 8);
-    if (!list.length) {
-      box.innerHTML = parsed == null
-        ? '<p class="qs-error">AI 没按要求返回 JSON 清单——可以换个模型再试。</p>'
-        : '<p class="health-ok">没发现明显的弃书点——接着写。</p>';
-      return;
-    }
-    box.innerHTML = readerRowsHtml(list, { suggest: true });
-  } catch (err) {
-    paintReaderScanError(err);
-  }
-}
-
-async function runSensitivityCheck() {
-  const ch = currentChapter();
-  if (!ch) return toast('先打开一章', 'err');
-  if (!String(ch.content || '').trim()) return toast('这一章还没有正文', 'err');
-  if (S.controller) return toast('生成中——先停一下', 'err');
-  openReaderScanModal('敏感内容提醒 · 本章', 'AI 圈出「可能踩线」的位置——不是判决，以你和平台判断为准；正常情节冲突不算。');
-  try {
-    const acc = await runStream({ task: 'sensitivity', novelId: S.novel.id, chapterId: ch.id }, { target: 'diag' });
-    const box = document.querySelector('#readerScanList');
-    if (!box) return;
-    const parsed = parseJsonLoose(acc);
-    const list = (Array.isArray(parsed) ? parsed : parsed?.list || parsed?.items || [])
-      .filter((x) => x && String(x.quote || '').trim()).slice(0, 8);
-    if (!list.length) {
-      box.innerHTML = parsed == null
-        ? '<p class="qs-error">AI 没按要求返回 JSON 清单——可以换个模型再试。</p>'
-        : '<p class="health-ok">没发现明显踩线的位置。</p>';
-      return;
-    }
-    box.innerHTML = readerRowsHtml(list, { suggest: false });
-  } catch (err) {
-    paintReaderScanError(err);
-  }
-}
-
-async function runHookCheck() {
-  const ch = currentChapter();
-  if (!ch) return toast('先打开一章', 'err');
-  if (!String(ch.content || '').trim()) return toast('这一章还没有正文', 'err');
-  if (S.controller) return toast('生成中——先停一下', 'err');
-  openReaderScanModal('断章评估 · 本章', 'AI 看本章结尾适不适合连载断更——读者追到这里还会不会点开下一章。');
-  try {
-    const acc = await runStream({ task: 'hook', novelId: S.novel.id, chapterId: ch.id }, { target: 'diag' });
-    const box = document.querySelector('#readerScanList');
-    if (!box) return;
-    const obj = parseJsonLoose(acc);
-    if (!obj || typeof obj !== 'object') {
-      box.innerHTML = '<p class="qs-error">AI 没按要求返回 JSON——可以换个模型再试。</p>';
-      return;
-    }
-    const score = Math.max(0, Math.min(5, Math.round(Number(obj.score) || 0)));
-    box.innerHTML = `
-      <div class="hook-card">
-        <div class="payoff-head">
-          <span class="payoff-title">断章强度</span>
-          <span class="payoff-dots" aria-label="断章强度 ${score}/5">${[0, 1, 2, 3, 4].map((i) => `<i class="${i < score ? 'on' : ''}"></i>`).join('')}</span>
-          <span class="payoff-score">${score}<small>/5</small></span>
-          <span class="payoff-type">${esc(obj.verdict || '')}</span>
-        </div>
-        ${obj.reason ? `<p class="payoff-note">${esc(obj.reason)}</p>` : ''}
-        ${obj.better ? `<p class="hook-better"><b>更好的位置：</b>${esc(obj.better)}</p>` : ''}
-      </div>`;
-  } catch (err) {
-    paintReaderScanError(err);
-  }
-}
 
 const verdictClass = (v) => { const s = String(v || ''); return s.includes('注水') ? 'water' : s.includes('可删') ? 'cut' : 'good'; };
 
@@ -16536,7 +16676,9 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.altKey && String(e.key).toLowerCase() === 'p') {
     e.preventDefault();
-    openProof();
+    setView('studio');
+    showAssistTab('check');
+    setTimeout(() => $('#ccProofBtn')?.click(), 0);
     return;
   }
   if (e.altKey && String(e.key).toLowerCase() === 'b') {
@@ -16629,15 +16771,15 @@ function cmdkSource() {
     op('续写当前章', 'pen', () => { setView('studio'); showAssistTab('write'); continueWriting(); }, 'Ctrl+↵');
     op('对比两个模型', 'columns', () => { setView('studio'); showAssistTab('write'); openModelCompare(); });
     op('爽点档', 'pulse', () => { setView('studio'); showAssistTab('write'); runPayoffAnalysis(); });
-    op('毒点检查', 'shield', () => { setView('studio'); showAssistTab('write'); runPoisonCheck(); });
-    op('断章评估', 'clock', () => { setView('studio'); showAssistTab('write'); runHookCheck(); });
-    op('敏感内容提醒', 'shield', () => { setView('studio'); showAssistTab('write'); runSensitivityCheck(); });
+    op('毒点检查', 'shield', () => { setView('studio'); showAssistTab('check'); $('#ccPoisonBtn')?.click(); });
+    op('断章评估', 'clock', () => { setView('studio'); showAssistTab('check'); $('#ccHookBtn')?.click(); });
+    op('敏感内容提醒', 'shield', () => { setView('studio'); showAssistTab('check'); $('#ccSensitivityBtn')?.click(); });
     op('结构检查', 'columns', () => { setView('studio'); showAssistTab('write'); runSceneCheck(); });
     op('本章设定记忆', 'refresh', () => { setView('studio'); showAssistTab('write'); $('[data-quick="memory"]')?.click(); });
     op('生成本章概要', 'check', () => { setView('studio'); showAssistTab('write'); $('[data-quick="summarize"]')?.click(); });
     op('起名 / 改名', 'pen', () => { setView('studio'); showAssistTab('write'); $('[data-quick="titles"]')?.click(); });
-    op('一致性检查', 'shield', () => { setView('studio'); showAssistTab('check'); $('#consistencyBtn').click(); });
-    op('责编评审', 'stamp', () => { setView('studio'); showAssistTab('check'); $('#reviewBtn').click(); });
+    op('一致性检查', 'shield', () => { setView('studio'); showAssistTab('check'); $('#ccConsistencyBtn')?.click(); });
+    op('责编评审', 'stamp', () => { setView('studio'); showAssistTab('check'); $('#ccReviewBtn')?.click(); });
     op('导入文稿', 'upload', () => { setView('studio'); openImportModal(); });
     op('批量补全章节记忆', 'refresh', () => { setView('studio'); openBatchMemory(); });
     op('导出作品', 'download', () => exportBook(), 'Ctrl+Shift+E');
@@ -16650,12 +16792,12 @@ function cmdkSource() {
     op('撤销', 'undo', () => { setView('studio'); doUndo(); }, 'Ctrl+Z');
     op('重做', 'redo', () => { setView('studio'); doRedo(); }, 'Ctrl+Shift+Z');
     op('全书查找 / 替换', 'search', () => { setView('studio'); openFind(); }, 'Ctrl+F');
-    op('全书体检', 'pulse', () => { setView('studio'); openHealthReport(); });
+    op('全书体检', 'pulse', () => { setView('studio'); showAssistTab('check'); $('#ccHealthBtn')?.click(); });
     op('影响范围分析', 'git-branch', () => { setView('studio'); openPropagationAnalysis(); });
-    op('交稿检查', 'stamp', () => openSubmitCheck());
+    op('交稿检查', 'stamp', () => { setView('studio'); showAssistTab('check'); $('#ccSubmitBtn')?.click(); });
     op('本章聚焦', 'eye', () => { setView('studio'); openFocusLens(); });
     op('章节看板', 'columns', () => { setView('studio'); openChapterBoard(); }, 'Ctrl+Alt+B');
-    op('文字校对', 'proof', () => { setView('studio'); openProof(); }, 'Ctrl+Alt+P');
+    op('文字校对', 'proof', () => { setView('studio'); showAssistTab('check'); setTimeout(() => $('#ccProofBtn')?.click(), 0); }, 'Ctrl+Alt+P');
     op('本章修订清单', 'check', () => {
       if (!currentChapter()) return toast('先打开一章', 'err');
       setView('studio');
