@@ -220,6 +220,8 @@ $('#modalMask').addEventListener('mousedown', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  // 中文输入法里 Esc 是「取消候选」：别让这一下把正在填的弹窗一起关掉
+  if (e.isComposing) return;
   if (e.defaultPrevented) return;   // 输入框里的 Esc 已经处理过（例如关命令面板），别再往下退专注
   // 弹窗、命令面板、阅读器、浮层和选中工具条优先处理 Esc，避免误退出专注模式
   if (!$('#modalMask').hidden && !S.batchController) { closeModal(); return; }
@@ -491,6 +493,37 @@ const S = {
     cols: {},             // stage -> { firstIdx, lastIdx, total, rows, offsets, totalHeight, scrollHandler, measureDone }
   },
 };
+
+/* ------------------------------------------------------------
+ * 输出区草稿按「作品 + 章节」暂存
+ * 生成完还没来得及采用就切走，回来还能接着用；切章不再把草稿当垃圾扔掉。
+ * ------------------------------------------------------------ */
+const OUT_DRAFT_LIMIT = 20;
+const outDrafts = new Map();
+const outDraftKey = (novelId, chapterId) => `${novelId || ''}\u0000${chapterId || ''}`;
+
+function stashOutDraft(novelId, chapterId) {
+  if (!chapterId) return;
+  const key = outDraftKey(novelId, chapterId);
+  if (S.out || S.reasoning) {
+    outDrafts.delete(key);
+    outDrafts.set(key, {
+      out: S.out, outTask: S.outTask, outModel: S.outModel, outMd: !!S.outMd, reasoning: S.reasoning,
+    });
+    while (outDrafts.size > OUT_DRAFT_LIMIT) outDrafts.delete(outDrafts.keys().next().value);
+  } else {
+    outDrafts.delete(key);
+  }
+}
+
+function loadOutDraft(novelId, chapterId) {
+  const d = outDrafts.get(outDraftKey(novelId, chapterId));
+  S.out = d?.out || '';
+  S.outTask = d?.outTask || '';
+  S.outModel = d?.outModel || '';
+  S.outMd = !!d?.outMd;
+  S.reasoning = d?.reasoning || '';
+}
 
 function setSave(flag, text) {
   const pill = $('#savePill');
@@ -3088,6 +3121,11 @@ async function openNovel(id, opts = {}) {
   // 换作品前先把当前作品的改动落盘 —— 一旦换过去，旧作品的内存内容就被替换了，
   // 没落盘的部分谁也救不回来。落不下去时明确问一句，别默默丢。
   const same = !!S.novel && S.novel.id === id;
+  // 生成中换作品：流的目标还是旧书，继续切会把结果和草稿弄乱
+  if (!same && S.controller) {
+    toast('正在生成——先等它写完，或点「停止」再换作品', 'err');
+    return false;
+  }
   // 设定库 / 大纲的防抖保存也要先落盘：它记的是旧作品的对象，不能等切完再发
   const partsOk = await saveNovelPart.flush();
   if (!partsOk) {
@@ -3107,6 +3145,8 @@ async function openNovel(id, opts = {}) {
     }
   }
   if (same) { setView('studio'); renderStudio(); return true; }
+  // 旧作品的输出区草稿先收起来；切回来还能接着用
+  stashOutDraft(S.novel?.id, S.chapterId);
   const seq = ++openNovelSeq;
   let novel;
   try {
@@ -3119,7 +3159,7 @@ async function openNovel(id, opts = {}) {
   S.novel = novel;
   const want = opts.chapterId && novel.chapters.some((c) => c.id === opts.chapterId) ? opts.chapterId : null;
   S.chapterId = want || novel.chapters[0]?.id || null;
-  S.out = ''; S.outTask = ''; S.reasoning = '';
+  loadOutDraft(novel.id, S.chapterId);
   volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   S.stageFilter = '';          // 筛选也一样，换作品先看全貌
   S.chapterSearch = '';        // 章节搜索属于上一本书，别带过去
@@ -5450,7 +5490,7 @@ function makeChapterItem(c, i, { filtered = false, group = null } = {}) {
     if (act === 'menu') return openChapterMenu(e.target.closest('.mini-act'), i);
     if (act === 'del') {
       (async () => {
-        if (!confirm(`删除第 ${i + 1} 章「${c.title}」？`)) return;
+        if (!confirm(`删除第 ${i + 1} 章「${c.title}」？\n\n删除前会自动在「版本历史」里留一份快照，删错了可以从那里恢复。`)) return;
         const hadVol = typeof c.volumeId === 'string' ? c.volumeId : '';
         const nextCh = S.novel.chapters[i + 1];
         const { novel } = await api.del(`/api/novels/${S.novel.id}/chapters/${c.id}`);
@@ -6593,14 +6633,18 @@ function clearFiltersHidingChapter(id) {
 }
 
 function selectChapter(id) {
+  // 生成中切章会让「追加到正文」写错章，也容易把草稿弄丢：先停下或等它写完
+  if (S.controller) return toast('正在生成——先等它写完，或点「停止」再切章', 'err');
+  const prevId = S.chapterId;
   // 从看板 / 全局检索 / 命令面板跳过来时，目标章可能被搜索或筛选藏起来，先恢复完整列表
   const hidden = clearFiltersHidingChapter(id);
   // 搜索还在时，光标跟着选中章走，继续按 ↑ / ↓ 就从这里往下翻
   S.chapterCursor = S.chapterSearch.trim() ? id : '';
   paintChapterCursor();
   flushSave();
+  if (id !== prevId) stashOutDraft(S.novel?.id, prevId);
   S.chapterId = id;
-  S.out = ''; S.reasoning = '';
+  if (id !== prevId) loadOutDraft(S.novel?.id, id);
   renderOut();
   // 列表已经在就只挪选中态；首次进入 / 刚切回写作台时才整块重建
   const hasList = !!$('#chapterList').querySelector('.chapter-item');
@@ -7902,6 +7946,8 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
   setBusy(true);
   // 产出文档型内容（大纲/起名/文风档案）的任务按 Markdown 渲染，正文类任务保持纯文本
   if (target === 'out') {
+    // 这次新生成会覆盖当前章旧草稿；先把它从暂存里删掉，免得切回来又冒出来
+    outDrafts.delete(outDraftKey(body.novelId || S.novel?.id, body.chapterId || S.chapterId));
     S.out = ''; S.outTask = body.task || ''; S.reasoning = ''; S.outModel = '';
     S.outMd = MD_OUT_TASKS.has(body.task);
     $('#outInfo').textContent = '';
