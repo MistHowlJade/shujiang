@@ -857,75 +857,82 @@
                   </div>
                   <div class="co-body" id="coBody"></div>
                 </div>
-                <div class="card">
-                  <label class="field-label">本章要求<span class="field-hint">留空则按章纲推进</span></label>
-                  <textarea id="genReq" class="textarea" rows="3" aria-label="本章要求（留空则按章纲推进）" placeholder="例：主角第一次进宗门大比，遇上宿敌，只暴露一半实力，结尾被长老注意到。"></textarea>
-                  <div class="field-row">
-                    <label class="field-label">目标字数<input id="genWords" class="input" type="number" value="3000" min="300" step="100" /></label>
-                    <label class="field-label">模型<input id="genModel" class="input" placeholder="默认" /></label>
-                    <label class="field-label">节奏<select id="genRhythm" class="input">
-                      <option value="">不指定</option>
-                      <option value="calm">平静铺垫</option>
-                      <option value="rising">逐章升温</option>
-                      <option value="peak">全场高潮</option>
-                      <option value="ebb">事后喘息</option>
-                      <option value="sweet">轻松明快</option>
-                    </select></label>
+                <details class="dock-fold gen-settings" id="genSettings">
+                  <summary>
+                    <span>生成设置</span>
+                    <span class="dock-fold-hint">本章要求 · 目标字数 · 模型 · 节奏</span>
+                  </summary>
+                  <div class="dock-fold-body">
+                    <label class="field-label">本章要求<span class="field-hint">留空则按章纲推进</span></label>
+                    <textarea id="genReq" class="textarea" rows="3" aria-label="本章要求（留空则按章纲推进）" placeholder="例：主角第一次进宗门大比，遇上宿敌，只暴露一半实力，结尾被长老注意到。"></textarea>
+                    <div class="field-row">
+                      <label class="field-label">目标字数<input id="genWords" class="input" type="number" value="3000" min="300" step="100" /></label>
+                      <label class="field-label">模型<input id="genModel" class="input" placeholder="默认" /></label>
+                      <label class="field-label">节奏<select id="genRhythm" class="input">
+                        <option value="">不指定</option>
+                        <option value="calm">平静铺垫</option>
+                        <option value="rising">逐章升温</option>
+                        <option value="peak">全场高潮</option>
+                        <option value="ebb">事后喘息</option>
+                        <option value="sweet">轻松明快</option>
+                      </select></label>
+                    </div>
+                  </div>
+                </details>
+                <div class="card draft-card" id="draftCard">
+                  <div class="section-head">
+                    <span>草稿</span>
+                    <span class="dim-text" id="outInfo"></span>
                   </div>
                   <div class="btn-row stop-row">
                     <button class="btn btn-danger-ghost" id="stopBtn" hidden title="停止本次生成，已生成的内容会保留"><svg class="ico"><use href="#i-stop" /></svg>停止</button>
                   </div>
-                  <button type="button" class="btn btn-sm btn-text quick-toggle" id="quickToggle" aria-expanded="false" aria-controls="quickRow"><svg class="ico"><use href="#i-more" /></svg>更多 AI 操作</button>
-                  <div class="quick-groups" id="quickRow" hidden>
-                    <div class="quick-group">
-                      <span class="quick-group-label">写作</span>
-                      <div class="btn-row wrap">
-                        <button class="btn btn-sm btn-text" data-quick="summarize" title="给本章写一句概要">生成概要</button>
-                        <button class="btn btn-sm btn-text" data-quick="titles">起名</button>
-                        <button class="btn btn-sm btn-text" data-quick="scene" title="拆成场景序列评估推进">结构检查</button>
-                        <button class="btn btn-sm btn-text" data-quick="memory" title="把本章的人物 / 伏笔 / 状态存下来，生成后续章节时会自动带上"><svg class="ico"><use href="#i-refresh" /></svg>存章节记忆</button>
-                      </div>
-                    </div>
-                    <div class="quick-group">
-                      <span class="quick-group-label">检查</span>
-                      <div class="btn-row wrap">
-                        <button class="btn btn-sm btn-text" data-quick="payoff" title="AI 给本章打一个 0-5 的爽点分">爽点档</button>
-                        <button class="btn btn-sm btn-text" data-quick="poison" title="AI 找出弃书点">毒点检查</button>
-                        <button class="btn btn-sm btn-text" data-quick="hook" title="评估断章位置">断章评估</button>
-                        <button class="btn btn-sm btn-text" data-quick="sensitivity" title="圈出可能踩线的位置">敏感内容提醒</button>
-                        <button class="btn btn-sm btn-text" data-quick="propagate" title="分析这段文字里命中的设定痕迹，在其他章节哪里出现过——改动这里会牵动哪些章">影响范围</button>
-                        <button class="btn btn-sm btn-text" data-quick="focus" title="本章 POV / 章纲缺口 / 未决线索">聚焦</button>
-                      </div>
-                    </div>
-                    <div class="quick-group">
-                      <span class="quick-group-label">批量</span>
-                      <div class="btn-row wrap">
-                        <button class="btn btn-sm btn-text" id="batchHintBtn" title="从当前章开始，连续生成多章草稿；每章你确认后继续，不会覆盖已有正文"><svg class="ico"><use href="#i-spark" /></svg>批量生成（逐章确认）</button>
-                        <button class="btn btn-sm btn-text" data-quick="batchMemory" title="把还没存记忆的章节批量补上；会逐章调用模型">批量补记忆</button>
-                        <button class="btn btn-sm btn-text" id="cmpBtn" title="同一段上下文跑两个模型，并排看，选一个采用"><svg class="ico"><use href="#i-columns" /></svg>对比模型</button>
-                      </div>
+                  <div class="output" id="outBox"></div>
+                  <div class="out-next" id="outNext" hidden></div>
+                  <div class="btn-row wrap" id="outActions" hidden>
+                    <button class="btn btn-sm btn-primary" id="applyAppend">追加到正文</button>
+                    <button class="btn btn-sm" id="applyReplace">替换正文</button>
+                    <button class="btn btn-sm" id="applyInsert">插入光标处</button>
+                    <button class="btn btn-sm btn-text" id="diagnoseBtn" title="生成完后 AI 已在后台默默预审过——点开直接看结果，不产生二次费用；再点不重复跑">自检</button>
+                    <button class="btn btn-sm btn-primary" id="diagnoseFixAllBtn" title="自检 → 自动逐条修复 → 自动复诊，最多三轮。改的是输出草稿，不动正文——满意后你再点「追加到正文」">一键自检并修复</button>
+                    <button class="btn btn-sm btn-text" id="copyOut"><svg class="ico"><use href="#i-copy" /></svg>复制</button>
+                    <button class="btn btn-sm btn-text" id="clearOut">清空</button>
+                  </div>
+                  <div class="diag-list" id="diagList" hidden></div>
+                  <div class="payoff-card" id="payoffCard" hidden></div>
+                </div>
+                <button type="button" class="btn btn-sm btn-text quick-toggle" id="quickToggle" aria-expanded="false" aria-controls="quickRow"><svg class="ico"><use href="#i-more" /></svg>更多 AI 操作</button>
+                <div class="quick-groups" id="quickRow" hidden>
+                  <div class="quick-group">
+                    <span class="quick-group-label">写作</span>
+                    <div class="btn-row wrap">
+                      <button class="btn btn-sm btn-text" data-quick="summarize" title="给本章写一句概要">生成概要</button>
+                      <button class="btn btn-sm btn-text" data-quick="titles">起名</button>
+                      <button class="btn btn-sm btn-text" data-quick="scene" title="拆成场景序列评估推进">结构检查</button>
+                      <button class="btn btn-sm btn-text" data-quick="memory" title="把本章的人物 / 伏笔 / 状态存下来，生成后续章节时会自动带上"><svg class="ico"><use href="#i-refresh" /></svg>存章节记忆</button>
                     </div>
                   </div>
-                  <p class="assist-hint" id="quickHint" hidden>按 <kbd>Esc</kbd> 收起「更多 AI 操作」；<kbd>Ctrl</kbd><kbd>K</kbd> 搜「生成」「续写」「体检」——所有 AI 功能都在命令面板里，不占屏幕。</p>
+                  <div class="quick-group">
+                    <span class="quick-group-label">检查</span>
+                    <div class="btn-row wrap">
+                      <button class="btn btn-sm btn-text" data-quick="payoff" title="AI 给本章打一个 0-5 的爽点分">爽点档</button>
+                      <button class="btn btn-sm btn-text" data-quick="poison" title="AI 找出弃书点">毒点检查</button>
+                      <button class="btn btn-sm btn-text" data-quick="hook" title="评估断章位置">断章评估</button>
+                      <button class="btn btn-sm btn-text" data-quick="sensitivity" title="圈出可能踩线的位置">敏感内容提醒</button>
+                      <button class="btn btn-sm btn-text" data-quick="propagate" title="分析这段文字里命中的设定痕迹，在其他章节哪里出现过——改动这里会牵动哪些章">影响范围</button>
+                      <button class="btn btn-sm btn-text" data-quick="focus" title="本章 POV / 章纲缺口 / 未决线索">聚焦</button>
+                    </div>
+                  </div>
+                  <div class="quick-group">
+                    <span class="quick-group-label">批量</span>
+                    <div class="btn-row wrap">
+                      <button class="btn btn-sm btn-text" id="batchHintBtn" title="从当前章开始，连续生成多章草稿；每章你确认后继续，不会覆盖已有正文"><svg class="ico"><use href="#i-spark" /></svg>批量生成（逐章确认）</button>
+                      <button class="btn btn-sm btn-text" data-quick="batchMemory" title="把还没存记忆的章节批量补上；会逐章调用模型">批量补记忆</button>
+                      <button class="btn btn-sm btn-text" id="cmpBtn" title="同一段上下文跑两个模型，并排看，选一个采用"><svg class="ico"><use href="#i-columns" /></svg>对比模型</button>
+                    </div>
+                  </div>
                 </div>
-                <div class="payoff-card" id="payoffCard" hidden></div>
-
-                <div class="section-head">
-                  <span>输出</span>
-                  <span class="dim-text" id="outInfo"></span>
-                </div>
-                <div class="output" id="outBox"></div>
-                <div class="out-next" id="outNext" hidden></div>
-                <div class="btn-row wrap" id="outActions" hidden>
-                  <button class="btn btn-sm btn-primary" id="applyAppend">追加到正文</button>
-                  <button class="btn btn-sm" id="applyReplace">替换正文</button>
-                  <button class="btn btn-sm" id="applyInsert">插入光标处</button>
-                  <button class="btn btn-sm btn-text" id="diagnoseBtn" title="生成完后 AI 已在后台默默预审过——点开直接看结果，不产生二次费用；再点不重复跑">自检</button>
-                  <button class="btn btn-sm btn-primary" id="diagnoseFixAllBtn" title="自检 → 自动逐条修复 → 自动复诊，最多三轮。改的是输出草稿，不动正文——满意后你再点「追加到正文」">一键自检并修复</button>
-                  <button class="btn btn-sm btn-text" id="copyOut"><svg class="ico"><use href="#i-copy" /></svg>复制</button>
-                  <button class="btn btn-sm btn-text" id="clearOut">清空</button>
-                </div>
-                <div class="diag-list" id="diagList" hidden></div>
+                <p class="assist-hint" id="quickHint" hidden>按 <kbd>Esc</kbd> 收起「更多 AI 操作」；<kbd>Ctrl</kbd><kbd>K</kbd> 搜「生成」「续写」「体检」——所有 AI 功能都在命令面板里，不占屏幕。</p>
 
                 <!-- 辅助面板：上下文 / 场景卡片 / AI 对话，放在一起 -->
                 <details class="dock-fold" id="foldAssist">
