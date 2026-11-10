@@ -1,7 +1,7 @@
 /* 书匠 · 前端逻辑（原生 ES 模块，无构建步骤） */
 
 import { $, $$, esc, ico, debounce, toast, countWords, createWordCounter, fmtWords, fmtDate, fmtAgo, uid } from './lib/util.js';
-import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, readerChapterRead, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph, nextChapterTitle } from './lib/data.js';
+import { THREAD_KINDS, memoryItems, revisionsOf, openRevisionCount, splitMemoryCharacters, normalizeCharacterName, buildCharacterAppearances, appearancesForCharacter, collectThreads, threadSearchText, buildMentionIndex, worldMentionChapters, worldMentionKeys, entryStateChanges, filterEntriesBySearch, collectCharacterNodes, findCharacterByMention, buildTimelineEvents, timelineEventSearchText, filterOutlineVolumes, chapterMatchesSearch, chapterBoardMatchesSearch, buildChapterPaletteEntries, buildReaderToc, readerTocGroupKey, defaultReaderTocClosed, normalizeReaderProgress, readerPositionOf, readerChapterRead, readerPercentOf, readerBookPercent, readerChapterLabel, buildContinueReadingEntries, mergeReaderProgress, editorPositionOf, mergeEditorPosition, NOVEL_TAG_LIMIT, parseNovelTags, toggleSearchTerm, shelfTagView, normalizeMentionText, novelSearchText, filterChaptersBySearch, stepSearchCursor, filterNovelsBySearch, sortNovels, SHELF_SORT_OPTIONS, SNAP_KINDS, filterSnapshotsBySearch, filterTrashBySearch, buildCharacterArcs, arcSearchText, searchRelationGraph, nextChapterTitle, chapterNumberOf } from './lib/data.js';
 import { BIBLE_TRASH_LIMIT, filterBibleTrash, addBibleTrashRecord, insertBibleTrashItem, hasBibleTrashItem } from './lib/trash.js';
 import { PROOF_KINDS, PROOF_MAX_CHAPTER_ISSUES, PROOF_PAGE, proofText, proofParagraphs, proofSnippet, proofIssue, scanProofChapter, buildProofReport, proofSnippetHtml } from './lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey, healthChip, healthOk, healthMarkdown, copyHealthReport } from './lib/health.js';
@@ -8406,9 +8406,9 @@ $('#applyMenuBtn')?.addEventListener('click', (e) => { e.stopPropagation(); togg
 applyForkMenu?.addEventListener('click', (e) => {
   const item = e.target.closest('.apply-fork-item');
   if (!item) return;
+  // 只设定模式 + 收菜单；菜单项上挂的直接监听会把动作执行一次
   setApplyMode(item.dataset.apply);
   closeApplyFork();
-  runApplyMode(item.dataset.apply);
 });
 document.addEventListener('click', (e) => { if (!e.target.closest('#applyFork')) closeApplyFork(); });
 document.addEventListener('keydown', (e) => {
@@ -9649,13 +9649,29 @@ function ccAiScanItems(raw, source, chapter) {
   });
 }
 
-/* 把要展示的扫描结果存成 ccItems；id 自增便于渲染与忽略 */
+/* 把要展示的扫描结果存成 ccItems；按 fingerprint / key / source+message+chId 去重：
+   同一来源、同一指纹的结果只保留一条，重复执行时刷新内容，不堆积视觉重复项 */
 let ccItems = [];
 let ccSeq = 0;
 
+function ccItemKey(it) {
+  return it.fingerprint
+    || it.key
+    || `${it.source}|${it.kind || ''}|${it.message || ''}|${it.chId || ''}|${it.chapterNo || ''}`;
+}
+
 function ccAdd(items) {
   for (const raw of items) {
-    ccItems.push({ id: `cc-${Date.now().toString(36)}-${++ccSeq}`, ignored: false, ...raw });
+    const key = ccItemKey(raw);
+    if (!key) continue;
+    const entry = { id: `cc-${Date.now().toString(36)}-${++ccSeq}`, ignored: false, ...raw };
+    const idx = ccItems.findIndex((it) => ccItemKey(it) === key);
+    if (idx >= 0) {
+      entry.id = ccItems[idx].id;
+      ccItems[idx] = entry;
+    } else {
+      ccItems.push(entry);
+    }
   }
   ccRender();
 }
@@ -9707,7 +9723,8 @@ function ignoredCount() {
 
 function ccItemHtml(it) {
   const src = CC_SOURCES[it.source] || '检查';
-  const chapter = Number.isFinite(Number(it.chapterNo)) ? `第 ${Number(it.chapterNo)} 章` : '全书';
+  const chNo = Number(it.chapterNo);
+  const chapter = Number.isFinite(chNo) && chNo > 0 ? `第 ${chNo} 章` : '全书';
   const sev = it.severity || 'hint';
   const locateBtn = it.chId
     ? `<button class="btn btn-sm btn-text cc-locate" data-cc-locate="${it.id}">定位</button>`
@@ -10129,16 +10146,18 @@ async function ccConsistencyScan() {
   }
   ccAdd(filtered.issues.map((it) => {
     const fp = it.fingerprint || consistencyKey(it.kind, it.id);
-    const noFromLoc = String(it.loc || '').match(/第\s*(\d+)\s*章/)?.[1];
-    const ch = (it.chapterNo != null
-      ? S.novel.chapters.find((c) => Number(c.no) === Number(it.chapterNo))
-      : noFromLoc ? S.novel.chapters.find((c) => Number(c.no) === Number(noFromLoc)) : null);
+    // 一致性结果的章节号散落在 loc 或 location 里，两边都认，数字和中文数字都支持
+    const loc = String(it.loc || it.location || '').trim();
+    const from = (String(it.chapterNo ?? '').trim() || loc || String(it.message || ''));
+    const m = String(from).match(/第\s*([0-9０-９零一二三四五六七八九十百千两]+)\s*章/);
+    const no = m ? Number(chapterNumberOf(m[1])) : (Number.isFinite(Number(it.chapterNo)) && String(it.chapterNo).trim() !== '' ? Number(it.chapterNo) : null);
+    const ch = no != null ? S.novel.chapters.find((c) => Number(c.no) === no) : null;
     return {
       source: 'consistency',
       severity: it.severity === 'warn' || it.severity === 'high' ? 'warn' : 'hint',
-      message: String(it.message || '一致性问题').trim(),
-      detail: String(it.loc || ''),
-      chapterNo: ch?.no ?? it.chapterNo ?? null,
+      message: String(it.message || loc || '一致性问题').trim(),
+      detail: loc,
+      chapterNo: ch?.no ?? (no ?? null),
       chId: ch?.id ?? null,
       fingerprint: fp,
     };
@@ -10214,7 +10233,16 @@ async function ccHealth() {
   for (const g of (report.duplicates || [])) items.push({ source: 'health', severity: 'warn', key: healthKey('dup', String(g.sample || '').slice(0, 40)), message: `重复段落 ${g.count} 处：「${String(g.sample || '').slice(0, 60)}」` });
   for (const p of (report.longParagraphs || [])) items.push({ source: 'health', severity: 'hint', key: healthKey('longpara', p.id), chapterNo: p.no, chId: p.id, message: `第 ${p.no} 章有 ${p.count} 段 ≥320 字（最长 ${p.max} 字）` });
   for (const p of (report.phrases || [])) items.push({ source: 'health', severity: 'hint', key: healthKey('phrase', p.text), message: `口头禅「${p.text}」出现 ${p.count} 次` });
-  for (const g of (report.gaps || [])) items.push({ source: 'health', severity: 'hint', key: healthKey('gap', g.name), message: `人物「${g.name}」${g.gap} 章没出现` });
+  for (const g of (report.gaps || [])) {
+    // 章节记忆里没有出场记录的不能当成「N 章没出现」——只是没写进记忆里而已
+    const neverSeen = !Number(g.lastNo);
+    items.push({
+      source: 'health', severity: 'hint', key: healthKey('gap', g.name),
+      message: neverSeen
+        ? `人物「${g.name}」尚未在章节记忆中出现（全书 ${report.lastNo} 章）`
+        : `人物「${g.name}」${g.gap} 章没出现（记忆到第 ${g.lastNo} 章为止）`,
+    });
+  }
   for (const t of (report.staleThreads || [])) items.push({ source: 'health', severity: 'hint', key: healthKey('thread', t.text), message: `线索「${String(t.text || '').slice(0, 40)}」迟迟没回收` });
   for (const s of (report.payoffSlumps || [])) items.push({ source: 'health', severity: 'hint', key: healthKey('payoff', s.id || s), message: `爽点断档 ${s.count} 章 ≤1 分` });
   for (const c of (report.lowDialogue || [])) items.push({ source: 'health', severity: 'hint', chapterNo: c.no, chId: c.id, message: `第 ${c.no} 章对话密度偏低（${(c.dialogue * 100).toFixed(1)}%）` });

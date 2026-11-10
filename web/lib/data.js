@@ -5,7 +5,7 @@
 const CN_DIGIT = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
 
 /** 「十二」「一百零三」「12」都认，认不出返回 0 */
-function chapterNumberOf(text) {
+export function chapterNumberOf(text) {
   const s = String(text || '').trim();
   if (!s) return 0;
   if (/^[0-9０-９]+$/.test(s)) return Number(s.normalize('NFKC'));
