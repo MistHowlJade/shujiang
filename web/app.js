@@ -685,7 +685,7 @@ function openStudioPane(which) {
   studioPane = which;
   syncStudioPaneUI();
   if (which === 'chapters') $('#chapterSearch')?.focus({ preventScroll: true });
-  else $('#assistTabs .on, #assistTabs button')?.focus({ preventScroll: true });
+  else $('#aiGenBtn')?.focus({ preventScroll: true });
 }
 
 function closeStudioPane({ returnFocus = false } = {}) {
@@ -7803,6 +7803,8 @@ function renderAnnotationSidebar() {
   }
   const annotations = getChapterAnnotations(ch);
   if (countEl) countEl.textContent = annotations.length ? `${annotations.length} 条` : '';
+  const hint = $('#annoFoldHint');
+  if (hint) hint.textContent = annotations.length ? `${annotations.length} 条` : '';
   if (!annotations.length) {
     sidebar.innerHTML = '<p class="dim">这章还没有批注。选中文字点高亮图标添加。</p>';
     return;
@@ -8025,10 +8027,8 @@ function renderOutActions() {
   $('#diffActions').hidden = true;
   $('#outActions').hidden = !hasOut;
   const canApply = hasOut && !S.controller && PROSE_OUT_TASKS.has(S.outTask);
-  ['#applyAppend', '#applyReplace', '#applyInsert'].forEach((sel) => {
-    const el = $(sel);
-    if (el) el.hidden = !canApply;
-  });
+  const fork = $('#applyFork');
+  if (fork) fork.hidden = !canApply;
   const next = $('#outNext');
   if (!next) return;
   next.hidden = !canApply;
@@ -8348,6 +8348,75 @@ $('#stopBtn').addEventListener('click', () => S.controller?.abort());
 $('#stopBtn2').addEventListener('click', () => S.controller?.abort());
 $('#clearOut').addEventListener('click', () => { S.out = ''; S.reasoning = ''; $('#diagList').hidden = true; setDraftMode('gen'); renderOut(); });
 
+/* ============================================================
+ * 采纳方式：一个分段按钮「采纳到本章」+ 下拉选 追加 / 替换 / 插入。
+ * 追加 = 接在本章末尾；替换 = 整段覆盖；插入 = 插到当前光标处。
+ * 三个菜单项保留 applyAppend / applyReplace / applyInsert 的 id，
+ * 其它检查不必动；点开以外的地方，菜单自动收起。
+ * ============================================================ */
+let applyMode = 'append';
+const applyForkMenu = $('#applyMenu');
+const applyMain = $('#applyMain');
+const applyMenuBtn = $('#applyMenuBtn');
+
+function applyTitle(mode) {
+  const labels = { append: '把草稿追加到本章末尾', replace: '用草稿整段替换正文（覆盖原文）', insert: '把草稿插入到当前光标处' };
+  return labels[mode] || labels.append;
+}
+
+function setApplyMode(mode) {
+  if (!['append', 'replace', 'insert'].includes(mode)) return;
+  applyMode = mode;
+  applyForkMenu?.querySelectorAll('.apply-fork-item').forEach((btn) => {
+    const on = btn.dataset.apply === mode;
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-checked', String(on));
+  });
+  if (applyMain) {
+    const icon = applyMain.querySelector('svg');
+    const label = mode === 'append' ? '采纳到本章' : (mode === 'replace' ? '替换正文' : '插入光标处');
+    applyMain.innerHTML = `${icon ? icon.outerHTML : ''}<span>${esc(label)}</span>`;
+    applyMain.title = applyTitle(mode);
+  }
+  applyMenuBtn?.setAttribute('aria-expanded', 'false');
+}
+
+function closeApplyFork() {
+  if (!applyForkMenu) return;
+  applyForkMenu.hidden = true;
+  applyMenuBtn?.setAttribute('aria-expanded', 'false');
+}
+
+function toggleApplyFork() {
+  if (!applyForkMenu || !applyMenuBtn) return;
+  const next = applyForkMenu.hidden;
+  applyForkMenu.hidden = !next;
+  applyMenuBtn.setAttribute('aria-expanded', String(next));
+  if (next) applyForkMenu.querySelector('.apply-fork-item')?.focus();
+}
+
+const APPLY_MODE_ACTIONS = { append: applyAppendAction, replace: applyReplaceAction, insert: applyInsertAction };
+function runApplyMode(mode = applyMode) {
+  const fn = APPLY_MODE_ACTIONS[mode];
+  if (fn) fn();
+}
+
+$('#applyMain')?.addEventListener('click', () => runApplyMode(applyMode));
+$('#applyMenuBtn')?.addEventListener('click', (e) => { e.stopPropagation(); toggleApplyFork(); });
+applyForkMenu?.addEventListener('click', (e) => {
+  const item = e.target.closest('.apply-fork-item');
+  if (!item) return;
+  setApplyMode(item.dataset.apply);
+  closeApplyFork();
+  runApplyMode(item.dataset.apply);
+});
+document.addEventListener('click', (e) => { if (!e.target.closest('#applyFork')) closeApplyFork(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (applyForkMenu && !applyForkMenu.hidden) { closeApplyFork(); applyMenuBtn?.focus(); }
+});
+setApplyMode('append');
+
 /* —— 诊断：AI 指出问题，逐条一键修 —— */
 const diagList = $('#diagList');
 /** 生成完成后后台默默跑的一份预诊结果；按钮里显示计数角标，点击自检直接展示，不重复烧 token */
@@ -8596,20 +8665,35 @@ function insertIntoContent(text, mode) {
   // 正文从空变成有内容后，提示语也该跟着变
   renderOutActions();
 }
-$('#applyAppend').addEventListener('click', () => { if (S.out) { insertIntoContent(S.out, 'append'); toast('已追加到正文 · 按 Ctrl+Z 可撤销', 'ok'); } });
-$('#applyReplace').addEventListener('click', async () => {
+function applyAppendAction() {
   if (!S.out) return;
-  if (!(await confirmDialog({
+  insertIntoContent(S.out, 'append');
+  toast('已追加到正文 · 按 Ctrl+Z 可撤销', 'ok');
+}
+function applyReplaceAction() {
+  if (!S.out) return;
+  confirmDialog({
     title: '替换正文',
     message: '用输出内容替换本章正文？原有内容会被覆盖。\n替换前会自动留一份版本历史。',
     okLabel: '替换正文',
     danger: true,
-  }))) return;
-  await snapshotNow('AI 替换前');   // 覆盖前留一份，替换错了能从版本历史里捞回来
-  insertIntoContent(S.out, 'replace');
-  toast('已替换 · Ctrl+Z 可撤销，原稿也在「版本历史」里', 'ok');
-});
-$('#applyInsert').addEventListener('click', () => { if (S.out) { insertIntoContent(S.out, 'insert'); toast('已插入光标处 · 按 Ctrl+Z 可撤销', 'ok'); } });
+  }).then((ok) => {
+    if (!ok) return;
+    return snapshotNow('AI 替换前').then(() => {
+      insertIntoContent(S.out, 'replace');
+      toast('已替换 · Ctrl+Z 可撤销，原稿也在「版本历史」里', 'ok');
+    });
+  });
+}
+function applyInsertAction() {
+  if (!S.out) return;
+  insertIntoContent(S.out, 'insert');
+  toast('已插入光标处 · 按 Ctrl+Z 可撤销', 'ok');
+}
+
+$('#applyAppend').addEventListener('click', applyAppendAction);
+$('#applyReplace').addEventListener('click', applyReplaceAction);
+$('#applyInsert').addEventListener('click', applyInsertAction);
 
 /* ============================================================
  * 6.5 模型对比：同一段上下文跑两个模型，并排看，选一个采用
@@ -9411,28 +9495,9 @@ function showDiff(oldText, newText, op, range) {
 /* ============================================================
  * 7. 检查
  * ============================================================ */
-const assistTabButtons = $$('#assistTabs button');
-assistTabButtons.forEach((b) => b.addEventListener('click', () => {
-  showAssistTab(b.dataset.tab);
-}));
-assistTabButtons.forEach((b, _, buttons) => b.addEventListener('keydown', (e) => {
-  // 标准的 tablist 键盘语义：左右移动焦点，Home/End 跳到首尾
-  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
-  e.preventDefault();
-  const current = document.activeElement?.dataset?.tab
-    ? buttons.findIndex((x) => x.dataset.tab === document.activeElement.dataset.tab)
-    : buttons.findIndex((x) => x.classList.contains('on'));
-  let idx = current < 0 ? 0 : current;
-  if (e.key === 'ArrowRight') idx = (idx + 1) % buttons.length;
-  else if (e.key === 'ArrowLeft') idx = (idx - 1 + buttons.length) % buttons.length;
-  else if (e.key === 'Home') idx = 0;
-  else if (e.key === 'End') idx = buttons.length - 1;
-  buttons[idx].focus();
-  showAssistTab(buttons[idx].dataset.tab);
-}));
 /* 上下文 / 场景 / AI 对话已经整合为「写作」页里的一个「辅助工具」折叠块：
- * 旧调用名继续有效，只是先切回写作页，再展开折叠块并打开对应子页签。 */
-const ASSIST_TAB_ALIASES = { context: 'write', scenes: 'write', chat: 'write' };
+ * 旧调用名继续有效，只是先展开折叠块并打开对应子页签。 */
+const ASSIST_TAB_ALIASES = { context: 'write', scenes: 'write', chat: 'write', write: 'write', check: 'check', annotations: 'annotations' };
 const ASSIST_SUBTABS = ['context', 'scenes', 'chat'];
 function setAssistSubtab(name, { focusChat = false } = {}) {
   const target = ASSIST_SUBTABS.includes(name) ? name : 'context';
@@ -9472,19 +9537,22 @@ $$('#assistSubtabs button[data-subtab]').forEach((b, _, buttons) => b.addEventLi
   buttons[idx].focus();
   setAssistSubtab(buttons[idx].dataset.subtab, { focusChat: buttons[idx].dataset.subtab === 'chat' });
 }));
+/* 顶层不再分页签：showAssistTab('check'|'annotations') 就是把对应折叠区展开并滚过去 */
 function showAssistTab(name) {
   const target = ASSIST_TAB_ALIASES[name] || name;
-  $$('#assistTabs button').forEach((x) => {
-    const on = x.dataset.tab === target;
-    x.classList.toggle('on', on);
-    x.setAttribute('aria-selected', String(on));
-    // 标准 tablist 语义：只有当前页签在 Tab 顺序里
-    x.setAttribute('tabindex', on ? '0' : '-1');
-  });
-  $$('.assist-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === target));
+  if (target === 'check') {
+    const fold = $('#foldCheck');
+    if (fold) { fold.open = true; fold.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+    renderRevisionCard();
+    return;
+  }
+  if (target === 'annotations') {
+    const fold = $('#foldAnnotations');
+    if (fold) { fold.open = true; fold.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+    renderAnnotationSidebar();
+    return;
+  }
   if (ASSIST_SUBTABS.includes(name)) openAssistTool(name);
-  if (target === 'check') renderRevisionCard();
-  if (target === 'annotations') renderAnnotationSidebar();
 }
 
 /* ------------------------------------------------------------
@@ -9603,6 +9671,12 @@ function ccRender() {
     const done = revs.length - open;
     revCountEl.textContent = revs.length ? `修订 ${open} 项待改${done ? ` · ${done} 项完成` : ''}` : '';
     revCountEl.classList.toggle('done', revs.length > 0 && open === 0);
+    const hintEl = $('#checkFoldHint');
+    if (hintEl) {
+      const openCount = revs.filter((r) => !r.done).length;
+      const checkCount = ccItems.filter((it) => !it.ignored).length;
+      hintEl.textContent = (openCount || checkCount) ? `${openCount + checkCount} 项待修` : '';
+    }
   }
   const revHtml = revs
     .slice()

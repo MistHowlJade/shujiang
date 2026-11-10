@@ -1448,34 +1448,27 @@ body[data-theme="light"] .dock-main {
   border-left: 1px solid rgba(15, 15, 15, .07);
 }
 .dock-main .dock-body { display: flex; flex-direction: column; gap: 12px; flex: 1; overflow: auto; }
-.dock-main .assist-pane { display: contents; }
-.dock-main .assist-pane > .card {
+.main-thread { display: contents; }
+.main-thread > .card {
   display: flex; flex-direction: column; gap: 10px;
   padding: 14px; border-radius: 14px;
   background: rgba(38, 32, 26, .55);
   border: 1px solid rgba(255, 220, 180, .09);
   box-shadow: inset 0 1px 1px rgba(255, 220, 180, .08), 0 6px 24px rgba(0, 0, 0, .25);
 }
-body[data-theme="light"] .dock-main .assist-pane > .card {
+body[data-theme="light"] .main-thread > .card {
   background: rgba(255, 255, 255, .68);
   border: 1px solid rgba(15, 15, 15, .07);
   box-shadow: inset 0 1px 1px rgba(255, 255, 255, .9), 0 6px 24px rgba(15, 15, 15, .1);
 }
-.dock-main .assist-pane > .card-head,
-.dock-main .assist-pane > .card-head h2,
-.dock-main .assist-pane > .card-head h3 { background: transparent; }
 .dock-main .card-head { border-bottom: 1px solid rgba(255,255,255,.07); padding-bottom: 8px; }
 .dock-main .card-head h2, .dock-main .card-head h3 { color: var(--text-1); font-weight: 600; }
 .dock-main .card-head .co-title { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent-hover); }
-.dock-main .assist-pane.workspace > .section-head { color: var(--accent-hover); }
 .dock-main kbd { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.11); }
 .dock-main .assist-hint {
   padding: 10px 12px; border-radius: 12px;
   border: 1px dashed rgba(255,255,255,.09); color: var(--text-3); font-size: 12.5px;
 }
-.assist-main { display: contents; }
-.assist-pane, .assist-pane.on { display: contents; animation: none; }
-.dock-main .assist-pane:not(.on) { display: none !important; }
 
 
 .output {
@@ -4008,5 +4001,23 @@ body[data-theme="light"] .btn-primary {
 .cc-quote { font-size: 11px; line-height: 1.6; color: var(--text-3); border-left: 2px solid var(--border-2); padding-left: 8px; max-height: 68px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
 .cc-actions { display: flex; gap: 6px; }
 .cc-actions .btn { font-size: 11.5px; }
+
+/* 分段「采纳到本章」：主按钮 = 当前方式，右半按钮 = 选方式
+   覆盖 .btn 的默认值，让两个按钮融成一块，上边沿不断 */
+.apply-fork { position: relative; display: inline-flex; }
+.apply-fork > .btn.btn-primary { border-top-right-radius: 0; border-bottom-right-radius: 0; margin-right: -1px; }
+.apply-fork-caret.btn.btn-primary { border-top-left-radius: 0; border-bottom-left-radius: 0; padding: 0 8px; min-width: 30px; display: inline-flex; align-items: center; justify-content: center; }
+.apply-fork-caret .ico { width: 14px; height: 14px; }
+.apply-fork-menu {
+  position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 60; min-width: 200px;
+  background: var(--surface-1); border: 1px solid var(--border-2); border-radius: var(--r-md);
+  box-shadow: var(--sh-2); padding: 4px; display: grid; gap: 2px;
+}
+.apply-fork-item { display: grid; gap: 1px; padding: 6px 10px; text-align: left; background: transparent; border: 0; border-radius: 6px; color: var(--text-1); font-size: 12.5px; font-weight: 500; cursor: pointer; }
+.apply-fork-item:hover { background: var(--surface-3); }
+.apply-fork-item:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -1px; }
+.apply-fork-item.on { background: var(--accent-bg); color: var(--accent-hover); }
+.apply-fork-item .dim { font-size: 10.5px; color: var(--text-4); }
+.out-apply-bar { align-items: center; }
 
 
