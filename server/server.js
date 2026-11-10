@@ -1718,23 +1718,37 @@ function stripMarkedBlocks(text) {
   );
 }
 
-/** 旧版导出的 Markdown / TXT 没有标记：靠开头几行认出前置页，别把它当成「前言」 */
+/** 旧版导出的 Markdown / TXT 没有标记：靠结构认出前置页，别把它当成「前言」 */
 function looksLikeFrontMatter(text) {
   const t = String(text || '').trim();
   if (!t) return false;
   const lines = t.split('\n').map((l) => l.trim()).filter(Boolean);
   const first = lines[0] || '';
+  const startsLikeTitle = /^#\s+\S/.test(first) || /^《.+》$/.test(first) || first === '创作说明';
+  if (!startsLikeTitle) return false;
   // 只有一行标题（外加分隔线）也算前置页：没有作者 / 类型时，导出就只剩这一行
   const bodyLines = lines.filter((l) => !/^-{3,}$/.test(l) && !/^={3,}$/.test(l));
-  const titleOnly = bodyLines.length <= 1 && (/^#\s+\S/.test(first) || /^《.+》$/.test(first));
-  const hasMeta = /(^|\n)\s*(作者|类型|联系方式|节选|简介)[:：]/.test(t)
+  if (bodyLines.length <= 1) return true;
+  // 旧版导出在正文前一定有一条 --- / === 分隔线；序言里随口提到「作者：」不会长这样
+  if (!/^([-*_=])\1{2,}$/.test(lines[lines.length - 1] || '')) return false;
+  return /(^|\n)\s*(作者|类型|联系方式|节选|简介)[:：]/.test(t)
     || /(^|\n)\s*##\s*(作品简介|创作说明)/.test(t);
-  if (!hasMeta) return titleOnly;
-  return /^#\s+\S/.test(first) || /^《.+》$/.test(first) || first === '创作说明';
 }
 
 /** 旧版导出的附录（全书大纲 / 人物小传）没有标记：见到这些标题就停止收集正文 */
 const LEGACY_APPENDIX_HEADS = new Set(['全书大纲', '人物小传', '创作说明']);
+
+/**
+ * 正文里也可能独立成行地出现「全书大纲」「创作说明」这些词（作者在行文里提到它们）。
+ * 只有长得像旧版导出的附录标题时才截断：Markdown 标题行，或紧跟在 --- 分隔线后面；
+ * 否则会把后面的章节整段吞掉，而且导入时没有任何提示。
+ */
+function isLegacyAppendixHead(line, prevLine) {
+  const raw = String(line || '').trim();
+  if (!LEGACY_APPENDIX_HEADS.has(cleanHeading(raw))) return false;
+  if (/^#{1,6}[ \t　]+\S/.test(raw)) return true;
+  return /^([-*_])\1{2,}$/.test(String(prevLine || '').trim());
+}
 
 /**
  * 把整份文稿拆成章节；卷标题之间的章节归入该卷。
@@ -1753,7 +1767,7 @@ function parseManuscript(text) {
   for (let i = 0; i < lines.length; i += 1) {
     const t = cleanHeading(lines[i]);
     if (!t) continue;
-    if (seenHeading && LEGACY_APPENDIX_HEADS.has(t)) { appendixAt = i; break; }
+    if (seenHeading && isLegacyAppendixHead(lines[i], lines[i - 1])) { appendixAt = i; break; }
     if (headingInfo(lines[i])) seenHeading = true;
   }
   if (appendixAt >= 0) {

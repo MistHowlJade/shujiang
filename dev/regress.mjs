@@ -428,6 +428,25 @@ async function main() {
     const n4 = (await get(`${BASE}/api/novels/${rid4}`)).novel;
     check('旧版只有书名的前置页不算前言', !(n4?.chapters || []).some((c) => c.title === '前言'),
       JSON.stringify((n4?.chapters || []).map((c) => c.title)));
+
+    // 正文里独立成行的「全书大纲」是行文，不是附录：后面的章节不能整段被吞掉
+    const rid5 = await mk('正文提到大纲');
+    const prose = '第1章 起\n\n正文第一段。\n\n全书大纲\n\n这里是正文里的四个字。\n\n第2章 承\n\n第二章正文。';
+    const impProse = await post(`${BASE}/api/novels/${rid5}/import`, { text: prose });
+    const n5 = (await get(`${BASE}/api/novels/${rid5}`)).novel;
+    check('正文里的「全书大纲」不截断后续章节', impProse.imported === 2 && (n5?.chapters || []).length === 2,
+      `imported=${impProse.imported} / ${(n5?.chapters || []).length} 章`);
+    check('正文里的「全书大纲」留在原章', (n5?.chapters?.[0]?.content || '').includes('全书大纲'));
+
+    // 序言里提到「作者：」不是书名页：不能把整段序言当成前置页丢掉
+    const rid6 = await mk('序言误判');
+    const preface = '# 序\n\n作者：某位读者在信里这样写。\n\n这是序言正文。\n\n第1章 起\n\n正文。';
+    const impPreface = await post(`${BASE}/api/novels/${rid6}/import`, { text: preface });
+    const n6 = (await get(`${BASE}/api/novels/${rid6}`)).novel;
+    check('序言提到「作者：」不会整段丢失', impPreface.imported === 2 && (n6?.chapters || []).length === 2,
+      `imported=${impPreface.imported} / ${(n6?.chapters || []).length} 章`);
+    check('序言保留为「前言」', (n6?.chapters?.[0]?.title === '前言'
+      && (n6?.chapters?.[0]?.content || '').includes('这是序言正文')), JSON.stringify((n6?.chapters || []).map((c) => c.title)));
   }
 
   // 删掉中间章后新建：默认标题按已有最大章号 +1，不能撞名
