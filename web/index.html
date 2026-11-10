@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow" />
 <meta name="theme-color" content="#f3f1ea" />
 <title>书匠 · AI 长篇小说创作台</title>
-<link rel="stylesheet" href="/style.css?v=1.0.27" />
+<link rel="stylesheet" href="/style.css?v=1.0.28" />
 <style id="designv1011">
   /* 书匠 · v1.0.11「东方典籍」视觉重写 —— 暖墨：衬线 + 赭金 + 朱砂 */
   @font-face { font-family: '思源宋体 VF'; src: local('Noto Serif SC'), local('Noto Serif SC VF'), local('NotoSerifSC-VF'); font-display: swap; }
@@ -667,7 +667,7 @@
             </div>
             <button class="btn" id="globalSearchBtn" title="在所有作品的正文和章节标题中检索（Ctrl+Shift+F）"><svg class="ico"><use href="#i-search" /></svg><span>全局检索</span></button>
             <button class="btn" id="restoreBackupBtn" title="从书匠 JSON 备份恢复为一部新作品"><svg class="ico"><use href="#i-upload" /></svg>恢复备份</button>
-            <input type="file" id="restoreBackupInput" accept=".json,application/json" hidden />
+            <input type="file" id="restoreBackupInput" accept=".json,application/json" aria-label="选择书匠 JSON 备份文件" hidden />
             <button class="btn" id="newNovelBtn"><svg class="ico"><use href="#i-plus" /></svg>新建作品</button>
             <button class="btn" id="inspirationBtn" title="让 AI 按当前中文网文风向给你 8 个开书灵感——看看现在什么好卖、什么好写"><svg class="ico"><use href="#i-bulb" /></svg>AI 灵感</button>
             <button class="btn btn-primary" id="quickStartBtn" title="写一句想法，自动生成书名、人物、大纲和第一章"><svg class="ico"><use href="#i-spark" /></svg>一键开书</button>
@@ -777,8 +777,8 @@
                   <option value="done">定稿</option>
                 </select>
                 <button type="button" class="chip chip-target" id="chWords" title="设置本章目标字数" aria-label="设置本章目标字数" aria-haspopup="dialog" aria-expanded="false" disabled>0 字</button>
-                <button type="button" class="btn btn-primary btn-sm ai-cta" id="aiGenBtn" title="按章纲生成本章初稿——满意后点「追加到正文」，AI 不会覆盖已有正文" aria-label="AI 生成本章"><svg class="ico"><use href="#i-spark" /></svg><span>生成本章</span></button>
-                <button type="button" class="btn btn-sm ai-cta ai-cta-cont" id="aiContBtn" title="从当前正文接着写；没有正文时等同于「生成本章」" aria-label="AI 续写"><svg class="ico"><use href="#i-pen" /></svg><span>续写</span></button>
+                <button type="button" class="btn btn-primary btn-sm ai-cta" id="aiGenBtn" title="按章纲生成本章初稿（Ctrl+Shift+Enter）——满意后点「追加到正文」，AI 不会覆盖已有正文" aria-label="AI 生成本章"><svg class="ico"><use href="#i-spark" /></svg><span>生成本章</span></button>
+                <button type="button" class="btn btn-sm ai-cta ai-cta-cont" id="aiContBtn" title="从当前正文接着写（Ctrl+Enter）；没有正文时等同于「生成本章」" aria-label="AI 续写"><svg class="ico"><use href="#i-pen" /></svg><span>续写</span></button>
                 <button class="icon-btn sm" id="previewBtn" title="阅读模式（可翻章、调字号）" aria-label="阅读模式"><svg class="ico"><use href="#i-eye" /></svg></button>
                 <button class="icon-btn sm" id="editorMoreBtn" title="更多：视角、撤销、排版、写作计时、全书体检" aria-label="更多编辑操作" aria-haspopup="menu" aria-expanded="false"><svg class="ico"><use href="#i-more" /></svg></button>
               </div>

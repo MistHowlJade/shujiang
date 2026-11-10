@@ -4,7 +4,7 @@
 
 **本地优先 · 运行时零依赖 · 数据可迁移**
 
-当前版本 **v1.0.27**，[更新记录](RELEASE_NOTES.md) · [下载](https://github.com/MistHowlJade/shujiang/releases/latest)
+当前版本 **v1.0.28**，[更新记录](RELEASE_NOTES.md) · [下载](https://github.com/MistHowlJade/shujiang/releases/latest)
 
 ## 界面
 
@@ -23,8 +23,8 @@
 
 | 文件 | 大小 | 说明 |
 | --- | --- | --- |
-| [ShuJiang-Portable-1.0.27.exe](https://github.com/MistHowlJade/shujiang/releases/download/v1.0.27/ShuJiang-Portable-1.0.27.exe) | 105 MB | 单文件便携版，无需安装 |
-| [ShuJiang-1.0.27-win-x64.zip](https://github.com/MistHowlJade/shujiang/releases/download/v1.0.27/ShuJiang-1.0.27-win-x64.zip) | 155 MB | 绿色版，解压后运行 `书匠.exe` |
+| [ShuJiang-Portable-1.0.28.exe](https://github.com/MistHowlJade/shujiang/releases/download/v1.0.28/ShuJiang-Portable-1.0.28.exe) | 105 MB | 单文件便携版，无需安装 |
+| [ShuJiang-1.0.28-win-x64.zip](https://github.com/MistHowlJade/shujiang/releases/download/v1.0.28/ShuJiang-1.0.28-win-x64.zip) | 155 MB | 绿色版，解压后运行 `书匠.exe` |
 
 系统要求：Windows 10 / 11；源码模式需要 Node.js 18+。发布包未签名，首次运行时 Windows SmartScreen 会提示，选择「更多信息 → 仍要运行」即可。便携版不写入系统安装目录，作品数据位于 exe 同级的 `data/`。
 
@@ -96,7 +96,7 @@ data/
 | `npm run desktop` | Electron 桌面版 |
 | `npm run mock` | 假模型服务，默认 8890 |
 | `npm run regress` | 回归测试，322 项（未启动假模型时 315 项） |
-| `npm test` | lib 单元测试，640 项 |
+| `npm test` | lib 单元测试，641 项 |
 | `npm run check-refs` | 模块引用检查 |
 | `npm run dist` | 构建便携版 |
 

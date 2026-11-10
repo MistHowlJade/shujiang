@@ -1994,5 +1994,22 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
   check('新章标题：认「第N回」', nextChapterTitle([{ title: '第一回' }, { title: '第二回' }]) === '第 3 章');
 }
 
+/* ---------- 静态按钮绑定检查 ---------- */
+{
+  // 正文工具条曾有两个按钮只写了 HTML、没绑事件，点了完全没反应。
+  // 这里静态查一遍：每个带 id 的静态按钮，要么在 app.js 里被引用，要么走 data-* 事件委托。
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const app = fs.readFileSync('web/app.js', 'utf8');
+  const dead = [];
+  for (const m of html.matchAll(/<button\b[^>]*>/g)) {
+    const tag = m[0];
+    const id = (tag.match(/\bid="([^"]+)"/) || [])[1];
+    if (!id) continue;
+    if (/\bdata-[a-z-]+=/.test(tag)) continue;
+    if (!app.includes(`#${id}`) && !app.includes(`'${id}'`) && !app.includes(`"${id}"`)) dead.push(id);
+  }
+  check('所有静态按钮都有绑定或事件委托', dead.length === 0, dead.join(', '));
+}
+
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
 process.exit(fail ? 1 : 0);

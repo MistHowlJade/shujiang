@@ -7860,6 +7860,9 @@ function setBusy(busy) {
   $('#stopBtn2').hidden = !busy;
   $('#genChapterBtn').disabled = busy;
   $('#contBtn').disabled = busy;
+  // 正文顶部工具条上的两个 AI 按钮也要跟着禁用，别让人以为还能再点一次
+  $('#aiGenBtn').disabled = busy;
+  $('#aiContBtn').disabled = busy;
   $('#cmpBtn').disabled = busy;
   $('#consistencyBtn').disabled = busy;
   $('#reviewBtn').disabled = busy;
@@ -8028,6 +8031,7 @@ async function generateChapter() {
   });
 }
 $('#genChapterBtn').addEventListener('click', generateChapter);
+$('#aiGenBtn')?.addEventListener('click', () => { showAssistTab('write'); generateChapter(); });
 
 /** 有监督批量生成：连续生成 N 章草稿，每章停一下等作者看完再继续；全程不覆盖已有正文 */
 function askBatchNext(message, primary) {
@@ -8116,6 +8120,7 @@ async function continueWriting() {
   });
 }
 $('#contBtn').addEventListener('click', continueWriting);
+$('#aiContBtn')?.addEventListener('click', () => { showAssistTab('write'); continueWriting(); });
 $('#stopBtn').addEventListener('click', () => S.controller?.abort());
 $('#stopBtn2').addEventListener('click', () => S.controller?.abort());
 $('#clearOut').addEventListener('click', () => { S.out = ''; S.reasoning = ''; $('#diagList').hidden = true; renderOut(); });
