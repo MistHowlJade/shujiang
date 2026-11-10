@@ -881,14 +881,23 @@
                 </details>
                 <div class="card draft-card" id="draftCard">
                   <div class="section-head">
-                    <span>草稿</span>
+                    <span id="outTitle">草稿</span>
                     <span class="dim-text" id="outInfo"></span>
                   </div>
                   <div class="btn-row stop-row">
                     <button class="btn btn-danger-ghost" id="stopBtn" hidden title="停止本次生成，已生成的内容会保留"><svg class="ico"><use href="#i-stop" /></svg>停止</button>
                   </div>
                   <div class="output" id="outBox"></div>
+                  <div class="diff-body" id="outDiff" hidden>
+                    <div class="diff-col"><div class="diff-lbl">原文</div><div class="diff-text" id="diffOld"></div></div>
+                    <div class="diff-col"><div class="diff-lbl">新文</div><div class="diff-text" id="diffNew"></div></div>
+                  </div>
                   <div class="out-next" id="outNext" hidden></div>
+                  <div class="btn-row wrap" id="diffActions" hidden>
+                    <button class="btn btn-primary" id="diffAccept"><svg class="ico"><use href="#i-check" /></svg>采用</button>
+                    <button class="btn" id="diffRetry"><svg class="ico"><use href="#i-refresh" /></svg>重试</button>
+                    <button class="btn btn-text" id="diffReject">放弃</button>
+                  </div>
                   <div class="btn-row wrap" id="outActions" hidden>
                     <button class="btn btn-sm btn-primary" id="applyAppend">追加到正文</button>
                     <button class="btn btn-sm" id="applyReplace">替换正文</button>
@@ -1326,21 +1335,7 @@
   </div>
 </div>
 
-<div class="diff-panel" id="diffPanel" hidden>
-  <div class="diff-head">
-    <span class="diff-title" id="diffTitle">改写结果</span>
-    <button class="icon-btn sm" id="diffClose" title="关闭" aria-label="关闭"><svg class="ico"><use href="#i-x" /></svg></button>
-  </div>
-  <div class="diff-body">
-    <div class="diff-col"><div class="diff-lbl">原文</div><div class="diff-text" id="diffOld"></div></div>
-    <div class="diff-col"><div class="diff-lbl">新文</div><div class="diff-text" id="diffNew"></div></div>
-  </div>
-  <div class="diff-foot">
-    <button class="btn btn-primary" id="diffAccept"><svg class="ico"><use href="#i-check" /></svg>接受替换</button>
-    <button class="btn" id="diffRetry"><svg class="ico"><use href="#i-refresh" /></svg>再生成一次</button>
-    <button class="btn btn-text" id="diffReject">丢弃</button>
-  </div>
-</div>
+
 
 <script src="/app.js" type="module"></script>
 </body>

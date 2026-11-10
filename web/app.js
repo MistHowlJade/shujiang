@@ -7081,16 +7081,20 @@ $('#editorEmptyBtn').addEventListener('click', addChapter);
 
 $('#formatBtn').addEventListener('click', () => {
   const ta = $('#chContent');
-  const lines = ta.value.replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim());
+  const original = ta?.value || '';
+  if (!original.trim()) return toast('本章还没正文', 'err');
+  const range = { start: 0, end: original.length };
+  const lines = original.replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim());
   const out = [];
   lines.forEach((l) => {
     if (l === '') { if (out.length && out[out.length - 1] !== '') out.push(''); return; }
     out.push(`　　${l.replace(/^[　\s]+/, '')}`);
   });
   while (out.length && out[out.length - 1] === '') out.pop();
-  ta.value = out.join('\n');
-  ta.dispatchEvent(new Event('input'));
-  toast('已统一段落格式 · 按 Ctrl+Z 可撤销', 'ok');
+  const formatted = out.join('\n');
+  if (formatted === original) return toast('排版已经是这个样子了', 'ok');
+  S.lastOp = null;
+  showDiff(original, formatted, '一键排版', range);
 });
 
 /** 阅读模式：整章排版阅读，可左右翻章与调字号，不改动正文 */
@@ -8011,6 +8015,14 @@ function outNextText() {
 /** 输出区的按钮跟着任务类型走：正文类才给「写进正文」，其它任务只留复制 / 清空 */
 function renderOutActions() {
   const hasOut = !!S.out;
+  if (S.segmentDiff) {
+    $('#outActions').hidden = true;
+    $('#diffActions').hidden = false;
+    $('#outNext').hidden = true;
+    $('#diagList').hidden = true;
+    return;
+  }
+  $('#diffActions').hidden = true;
   $('#outActions').hidden = !hasOut;
   const canApply = hasOut && !S.controller && PROSE_OUT_TASKS.has(S.outTask);
   ['#applyAppend', '#applyReplace', '#applyInsert'].forEach((sel) => {
@@ -8034,6 +8046,8 @@ function renderOut() {
   box.innerHTML = (S.reasoning ? `<div class="reasoning">${esc(S.reasoning)}</div>` : '')
     + (S.outMd ? mdLite(S.out) : esc(S.out))
     + (S.controller ? '<span class="cursor"></span>' : '');
+  const titleEl = $('#outTitle');
+  if (titleEl) titleEl.textContent = S.out ? (GEN_TASK_LABEL[S.outTask] || '草稿') : '草稿';
   box.scrollTop = box.scrollHeight;
   renderOutActions();
   if (S.out) {
@@ -8118,6 +8132,7 @@ async function runStream(body, { target = 'out', retried = false } = {}) {
     outDrafts.delete(outDraftKey(body.novelId || S.novel?.id, body.chapterId || S.chapterId));
     S.out = ''; S.outTask = body.task || ''; S.reasoning = ''; S.outModel = '';
     S.outMd = MD_OUT_TASKS.has(body.task);
+    setDraftMode('gen');
     $('#outInfo').textContent = '';
     renderOut();
     if (PROSE_OUT_TASKS.has(S.outTask)) revealOutput();
@@ -8331,7 +8346,7 @@ async function continueWriting() {
 $('#aiContBtn')?.addEventListener('click', () => { showAssistTab('write'); continueWriting(); });
 $('#stopBtn').addEventListener('click', () => S.controller?.abort());
 $('#stopBtn2').addEventListener('click', () => S.controller?.abort());
-$('#clearOut').addEventListener('click', () => { S.out = ''; S.reasoning = ''; $('#diagList').hidden = true; renderOut(); });
+$('#clearOut').addEventListener('click', () => { S.out = ''; S.reasoning = ''; $('#diagList').hidden = true; setDraftMode('gen'); renderOut(); });
 
 /* —— 诊断：AI 指出问题，逐条一键修 —— */
 const diagList = $('#diagList');
@@ -9343,32 +9358,54 @@ async function runSegmentOp(op, text, range, extra = {}) {
   showDiff(text, out.trim(), op, range);
 }
 
+/* =====================================================
+ * 草稿卡模式：'gen' = AI 写出的整章/续文（追加/替换/插入）；
+ *             'segment' = 段落操作产物（diff 左右对照，采用/重试/放弃）。
+ * 所有写作类 AI 结果都落到同一张草稿卡上（#28）。
+ * =================================================== */
+function setDraftMode(mode) {
+  const isSeg = mode === 'segment';
+  $('#outDiff').hidden = !isSeg;
+  $('#outBox').hidden = isSeg;
+  if (isSeg) {
+    $('#outActions').hidden = true;
+    $('#diffActions').hidden = !S.segmentDiff;
+    $('#outNext').hidden = true;
+  } else {
+    S.segmentDiff = null;
+    $('#diffActions').hidden = true;
+    renderOutActions();
+  }
+}
+
 function showDiff(oldText, newText, op, range) {
-  const panel = $('#diffPanel');
   const names = { polish: '润色', expand: '扩写', shorten: '精简', rewrite: '改写', custom: '按指令处理' };
-  $('#diffTitle').textContent = `${names[op] || op}结果 · ${countWords(oldText)} 字 → ${countWords(newText)} 字`;
-  // 差异高亮：左边标出被改掉的字，右边标出新写的字，一眼看出动在哪
+  const label = names[op] || op || '草稿';
+  $('#outTitle').textContent = `${label}结果 · ${countWords(oldText)} → ${countWords(newText)} 字`;
+  $('#outInfo').textContent = `${S.outModel || '本地规则'} · ${countWords(newText)} 字`;
   const d = diffProse(oldText, newText);
   $('#diffOld').innerHTML = diffSideHtml(d.segs, 'old');
   $('#diffNew').innerHTML = diffSideHtml(d.segs, 'new');
-  panel.hidden = false;
+  S.segmentDiff = { op, range, chapterId: S.chapterId };
+  $('#diffRetry').hidden = !S.lastOp;
+  setDraftMode('segment');
   $('#diffAccept').onclick = () => {
     const ta = $('#chContent');
-    if (currentChapter()?.id === S.lastOp?.chapterId) {
+    if (currentChapter()?.id === S.segmentDiff?.chapterId) {
       const base = ta.value;
       ta.value = base.slice(0, range.start) + newText + base.slice(range.end);
       ta.setSelectionRange(range.start, range.start + newText.length);
       ta.dispatchEvent(new Event('input'));
     }
     toast('已替换 · 按 Ctrl+Z 可撤销', 'ok');
-    panel.hidden = true;
+    setDraftMode('gen');
   };
   $('#diffRetry').onclick = async () => {
-    panel.hidden = true;
-    if (S.lastOp) await runSegmentOp(S.lastOp.op, S.lastOp.text, S.lastOp.range, S.lastOp.extra);
+    setDraftMode('gen');
+    if (S.lastOp) return runSegmentOp(S.lastOp.op, S.lastOp.text, S.lastOp.range, S.lastOp.extra);
+    return undefined;
   };
-  $('#diffReject').onclick = () => { panel.hidden = true; };
-  $('#diffClose').onclick = () => { panel.hidden = true; };
+  $('#diffReject').onclick = () => setDraftMode('gen');
 }
 
 /* ============================================================
