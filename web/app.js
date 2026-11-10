@@ -219,6 +219,90 @@ function closeModal() {
 function closeIfCurrent(box, gen) {
   if (box?._gen === gen && !$('#modalMask').hidden) closeModal();
 }
+
+/* ------------------------------------------------------------
+ * 自绘确认框
+ * 原生 confirm() 样式和应用割裂，还会阻塞整页；这里用和弹窗一致的样式，
+ * 返回 Promise<boolean>。可以叠在已有弹窗之上，Esc = 取消，危险操作默认焦点在取消上。
+ * ------------------------------------------------------------ */
+let confirmActive = null;
+
+function confirmDialog(opts = {}) {
+  const o = typeof opts === 'string' ? { message: opts } : (opts || {});
+  const {
+    title = '确认操作',
+    message = '',
+    okLabel = '确定',
+    cancelLabel = '取消',
+    danger = false,
+  } = o;
+
+  // 同时只留一个确认框：上一个当作「取消」收尾，避免 Promise 永远悬着
+  if (confirmActive) {
+    try { confirmActive(false); } catch { /* 忽略 */ }
+    confirmActive = null;
+  }
+
+  return new Promise((resolve) => {
+    const layer = document.createElement('div');
+    layer.className = 'modal-mask confirm-mask';
+    layer.id = 'confirmMask';
+    layer.innerHTML = `
+      <div class="modal confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMsg">
+        <h3 id="confirmTitle"></h3>
+        <p class="confirm-msg" id="confirmMsg"></p>
+        <div class="modal-foot">
+          <button type="button" class="btn btn-text" data-confirm="0"></button>
+          <button type="button" class="btn confirm-ok" data-confirm="1"></button>
+        </div>
+      </div>`;
+    layer.querySelector('#confirmTitle').textContent = title;
+    layer.querySelector('#confirmMsg').textContent = message;
+    const cancelBtn = layer.querySelector('[data-confirm="0"]');
+    const okBtn = layer.querySelector('[data-confirm="1"]');
+    cancelBtn.textContent = cancelLabel;
+    okBtn.textContent = okLabel;
+    okBtn.classList.toggle('danger', !!danger);
+
+    const prevFocus = document.activeElement;
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      confirmActive = null;
+      document.removeEventListener('keydown', onKey, true);
+      layer.remove();
+      try { if (prevFocus?.isConnected) prevFocus.focus({ preventScroll: true }); } catch { /* 元素可能已不在 */ }
+      resolve(!!ok);
+    };
+    confirmActive = finish;
+
+    function onKey(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        finish(false);
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const btns = [cancelBtn, okBtn];
+      const at = btns.indexOf(document.activeElement);
+      e.preventDefault();
+      const next = e.shiftKey ? (at <= 0 ? btns[1] : btns[0]) : (at === -1 || at === 1 ? btns[0] : btns[1]);
+      next.focus();
+    }
+
+    layer.addEventListener('click', (e) => {
+      if (e.target === layer) return finish(false);
+      const btn = e.target.closest('[data-confirm]');
+      if (btn) finish(btn.dataset.confirm === '1');
+    });
+    document.addEventListener('keydown', onKey, true);
+    document.body.appendChild(layer);
+    // 危险操作把焦点放在「取消」上：直接回车不会误删
+    (danger ? cancelBtn : okBtn).focus();
+  });
+}
 $('#modalMask').addEventListener('mousedown', (e) => {
   if (e.target.id === 'modalMask' && !S.batchController && $('#modal')._dismissable !== false) closeModal();
 });
@@ -254,7 +338,10 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Tab' || e.defaultPrevented) return;
   let box = null;
-  if (!$('#modalMask').hidden) {
+  if ($('#confirmMask')) {
+    // 确认框在最上层，焦点只在它的两个按钮里转
+    box = $('#confirmMask');
+  } else if (!$('#modalMask').hidden) {
     box = $('#modal');
   } else if ($('#readerMask')) {
     // 目录面板开着时有自己的焦点循环，别叠两层
@@ -628,9 +715,14 @@ function markSettingsDirty() {
   if (msg && !msg.textContent) msg.textContent = '有未保存的修改';
 }
 
-function setView(v) {
+async function setView(v) {
   if (S.view === 'settings' && v !== 'settings' && settingsDirty) {
-    const go = confirm('设置里有还没保存的修改（服务商 / 生成参数 / 提示词模板）。\n确定离开并丢弃这些修改吗？');
+    const go = await confirmDialog({
+      title: '离开设置？',
+      message: '设置里有还没保存的修改（服务商 / 生成参数 / 提示词模板）。\n确定离开并丢弃这些修改吗？',
+      okLabel: '离开并丢弃',
+      danger: true,
+    });
     if (!go) return;
     settingsDirty = false;
   }
@@ -909,7 +1001,12 @@ function renderShelf() {
     }
     div.querySelector('.bk-del').addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (!confirm(`将《${n.title}》移入回收站？\n之后可以在书架「回收站」里恢复。`)) return;
+      if (!(await confirmDialog({
+      title: '移入回收站',
+      message: `将《${n.title}》移入回收站？\n之后可以在书架「回收站」里恢复。`,
+      okLabel: '移入回收站',
+      danger: true,
+    }))) return;
       try {
         await api.del(`/api/novels/${n.id}`);
         if (S.novel?.id === n.id) {
@@ -1118,7 +1215,12 @@ function openTrash() {
     };
 
     const doPurge = async (item, btn) => {
-      if (!confirm(`彻底删除《${item.title}》？\n正文、设定和版本备份都会被清理，无法恢复。`)) return;
+      if (!(await confirmDialog({
+      title: '彻底删除作品',
+      message: `彻底删除《${item.title}》？\n正文、设定和版本备份都会被清理，无法恢复。`,
+      okLabel: '彻底删除',
+      danger: true,
+    }))) return;
       btn.disabled = true;
       try {
         await api.del(`/api/trash/${encodeURIComponent(item.trashId)}`);
@@ -1152,7 +1254,12 @@ function openTrash() {
 
     clearBtn.onclick = async () => {
       if (!items.length) return;
-      if (!confirm(`清空回收站？\n将彻底删除 ${items.length} 部作品及其版本备份，无法恢复。`)) return;
+      if (!(await confirmDialog({
+      title: '清空回收站',
+      message: `清空回收站？\n将彻底删除 ${items.length} 部作品及其版本备份，无法恢复。`,
+      okLabel: '清空回收站',
+      danger: true,
+    }))) return;
       clearBtn.disabled = true;
       try {
         await api.del('/api/trash');
@@ -3163,14 +3270,24 @@ async function openNovel(id, opts = {}) {
   const partsOk = await saveNovelPart.flush();
   if (!partsOk) {
     if (same) { toast('设定或大纲没能保存，先处理一下吧', 'err'); return false; }
-    const go = confirm(`《${S.novel.title}》的设定或大纲还有改动没能保存。\n继续打开别的作品会丢掉这些改动。仍要继续吗？`);
+    const go = await confirmDialog({
+      title: '设定或大纲未保存',
+      message: `《${S.novel.title}》的设定或大纲还有改动没能保存。\n继续打开别的作品会丢掉这些改动。仍要继续吗？`,
+      okLabel: '仍要打开',
+      danger: true,
+    });
     if (!go) return false;
   }
   if (S.unsaved.size) {
     const ok = await flushSave();
     if (!ok) {
       if (same) { toast('正文还没能保存，先别换过去', 'err'); return false; }
-      const go = confirm(`《${S.novel.title}》还有 ${S.unsaved.size} 章没能保存（${S.saveErr || '未知原因'}）。\n继续打开别的作品会丢掉这些改动。仍要继续吗？`);
+      const go = await confirmDialog({
+        title: '正文未保存',
+        message: `《${S.novel.title}》还有 ${S.unsaved.size} 章没能保存（${S.saveErr || '未知原因'}）。\n继续打开别的作品会丢掉这些改动。仍要继续吗？`,
+        okLabel: '仍要打开',
+        danger: true,
+      });
       if (!go) return false;
       S.unsaved.clear();
       S.dirty = false;
@@ -4672,7 +4789,12 @@ async function deleteVolume(vid) {
   const first = eff.indexOf(vid);
   const count = eff.filter((x) => x === vid).length;
   const outlineCount = (v.chapters || []).length;
-  if (!confirm(`删除「${v.name || '未命名'}」这一卷？\n\n该卷 ${count} 章正文会完整保留，归入上一卷（没有上一卷就变成未分卷）。\n${outlineCount ? `卷里的 ${outlineCount} 条章纲会一起删除。` : ''}`)) return;
+  if (!(await confirmDialog({
+      title: '删除分卷',
+      message: `删除「${v.name || '未命名'}」这一卷？\n\n该卷 ${count} 章正文会完整保留，归入上一卷（没有上一卷就变成未分卷）。\n${outlineCount ? `卷里的 ${outlineCount} 条章纲会一起删除。` : ''}`,
+      okLabel: '删除分卷',
+      danger: true,
+    }))) return;
   // 这一卷的章节整段并进上一卷
   let target = '';
   for (let i = first - 1; i >= 0; i -= 1) { if (eff[i] !== vid) { target = eff[i]; break; } }
@@ -5265,7 +5387,12 @@ function openChapterBoard() {
       box.querySelector('#kbBulkDelete').addEventListener('click', async () => {
         const ids = [...selected];
         if (!ids.length) return;
-        if (!confirm(`删除选中的 ${ids.length} 章？\n正文、章纲关联会一起清理，版本备份保留。`)) return;
+        if (!(await confirmDialog({
+      title: '删除章节',
+      message: `删除选中的 ${ids.length} 章？\n正文、章纲关联会一起清理，版本备份保留。`,
+      okLabel: '删除章节',
+      danger: true,
+    }))) return;
         for (const id of ids) {
           try {
             const { novel } = await api.del(`/api/novels/${S.novel.id}/chapters/${id}`);
@@ -5523,7 +5650,12 @@ function makeChapterItem(c, i, { filtered = false, group = null } = {}) {
     if (act === 'menu') return openChapterMenu(e.target.closest('.mini-act'), i);
     if (act === 'del') {
       (async () => {
-        if (!confirm(`删除第 ${i + 1} 章「${c.title}」？\n\n删除前会自动在「版本历史」里留一份快照，删错了可以从那里恢复。`)) return;
+        if (!(await confirmDialog({
+          title: '删除章节',
+          message: `删除第 ${i + 1} 章「${c.title}」？\n\n删除前会自动在「版本历史」里留一份快照，删错了可以从那里恢复。`,
+          okLabel: '删除章节',
+          danger: true,
+        }))) return;
         const hadVol = typeof c.volumeId === 'string' ? c.volumeId : '';
         const nextCh = S.novel.chapters[i + 1];
         const { novel } = await api.del(`/api/novels/${S.novel.id}/chapters/${c.id}`);
@@ -7702,8 +7834,8 @@ function renderAnnotationSidebar() {
     const id = item.dataset.id;
     item.querySelector('[data-act="jump"]').onclick = () => jumpToAnnotation(ch, id);
     item.querySelector('[data-act="edit"]').onclick = () => editAnnotation(ch, id);
-    item.querySelector('[data-act="delete"]').onclick = () => {
-      if (confirm('删除这条批注？')) deleteAnnotation(ch, id);
+    item.querySelector('[data-act="delete"]').onclick = async () => {
+      if (await confirmDialog({ title: '删除批注', message: '删除这条批注？', okLabel: '删除', danger: true })) deleteAnnotation(ch, id);
     };
   });
   sidebar.querySelector('#annoFixPlanBtn')?.addEventListener('click', () => annoFixPlan());
@@ -8465,7 +8597,12 @@ function insertIntoContent(text, mode) {
 $('#applyAppend').addEventListener('click', () => { if (S.out) { insertIntoContent(S.out, 'append'); toast('已追加到正文 · 按 Ctrl+Z 可撤销', 'ok'); } });
 $('#applyReplace').addEventListener('click', async () => {
   if (!S.out) return;
-  if (!confirm('用输出内容替换本章正文？原有内容会被覆盖。')) return;
+  if (!(await confirmDialog({
+    title: '替换正文',
+    message: '用输出内容替换本章正文？原有内容会被覆盖。\n替换前会自动留一份版本历史。',
+    okLabel: '替换正文',
+    danger: true,
+  }))) return;
   await snapshotNow('AI 替换前');   // 覆盖前留一份，替换错了能从版本历史里捞回来
   insertIntoContent(S.out, 'replace');
   toast('已替换 · Ctrl+Z 可撤销，原稿也在「版本历史」里', 'ok');
@@ -8899,8 +9036,8 @@ function openMemoryModal(ch) {
     box.querySelector('#memEdit').onclick = () => openMemoryEditor(ch);
     box.querySelector('#memClose').onclick = () => closeModal();
     box.querySelector('#memX').onclick = () => closeModal();
-    box.querySelector('#memRegen').onclick = () => {
-      if (!confirm('重新生成会覆盖当前章节记忆，继续？')) return;
+    box.querySelector('#memRegen').onclick = async () => {
+      if (!(await confirmDialog({ title: '重新生成记忆', message: '重新生成会覆盖当前章节记忆，继续？', okLabel: '重新生成', danger: true }))) return;
       const chapterId = ch.id;
       closeModal();
       if (S.view !== 'studio') setView('studio');
@@ -10028,8 +10165,8 @@ function openSceneEditor(ch, index) {
   });
 }
 
-function deleteScene(ch, index) {
-  if (!confirm('删除这个场景？')) return;
+async function deleteScene(ch, index) {
+  if (!(await confirmDialog({ title: '删除场景', message: '删除这个场景？', okLabel: '删除', danger: true }))) return;
   const scenes = getScenes(ch);
   scenes.splice(index, 1);
   markChapterDirty(ch);
@@ -10155,10 +10292,10 @@ $('#addSceneBtn').addEventListener('click', () => {
   const ch = currentChapter();
   if (ch) openSceneEditor(ch, getScenes(ch).length);
 });
-$('#scenesClear').addEventListener('click', () => {
+$('#scenesClear').addEventListener('click', async () => {
   const ch = currentChapter();
   if (!ch) return;
-  if (!confirm('清空所有场景卡片？')) return;
+  if (!(await confirmDialog({ title: '清空场景', message: '清空所有场景卡片？', okLabel: '清空', danger: true }))) return;
   ch.scenes = [];
   markChapterDirty(ch);
   renderCorkboard();
@@ -10234,7 +10371,11 @@ $('#compileScenesBtn').addEventListener('click', async () => {
   if (!ch) return;
   const scenes = getScenes(ch);
   if (!scenes.length) return toast('没有场景卡片可编译', 'err');
-  if (!confirm('将按场景顺序把梗概拼接为章节正文。这会追加到现有正文之后（不会覆盖），继续？')) return;
+  if (!(await confirmDialog({
+    title: '编译场景到正文',
+    message: '将按场景顺序把梗概拼接为章节正文。这会追加到现有正文之后（不会覆盖），继续？',
+    okLabel: '开始编译',
+  }))) return;
 
   // 先备份当前正文
   await snapshotNow('编译场景前备份');
@@ -11078,9 +11219,9 @@ function openBibleTrash() {
 
     box.querySelector('#bibleTrashClose').onclick = closeModal;
     search.addEventListener('input', render);
-    clearBtn.onclick = () => {
+    clearBtn.onclick = async () => {
       if (!readBibleTrash().length) return;
-      if (!confirm('清空最近删除记录？清空后无法再从历史恢复。')) return;
+      if (!(await confirmDialog({ title: '清空最近删除', message: '清空最近删除记录？清空后无法再从历史恢复。', okLabel: '清空', danger: true }))) return;
       writeBibleTrash([]);
       render();
       toast('已清空最近删除记录');
@@ -11452,8 +11593,8 @@ function renderOutlineTab(host, n) {
       };
       block.querySelector('[data-act="up"]').onclick = () => { if (vi > 0) swap(vi, vi - 1); };
       block.querySelector('[data-act="down"]').onclick = () => { if (vi < n.outline.volumes.length - 1) swap(vi, vi + 1); };
-      block.querySelector('[data-act="del"]').onclick = () => {
-        if (!confirm('删除本卷及其全部章纲？')) return;
+      block.querySelector('[data-act="del"]').onclick = async () => {
+        if (!(await confirmDialog({ title: '删除分卷', message: '删除本卷及其全部章纲？', okLabel: '删除', danger: true }))) return;
         const vid = v.id;
         n.outline.volumes.splice(vi, 1);
         renderBible();
@@ -11489,8 +11630,8 @@ function renderOutlineTab(host, n) {
           c[el.dataset.ck] = el.value;
           saveNovelPart({ outline: n.outline });
         }));
-        row.querySelector('span').addEventListener('dblclick', () => {
-          if (!confirm('删除这条章纲？')) return;
+        row.querySelector('span').addEventListener('dblclick', async () => {
+          if (!(await confirmDialog({ title: '删除章纲', message: '删除这条章纲？', okLabel: '删除', danger: true }))) return;
           v.chapters.splice(ci, 1);
           renderBible();
           saveNovelPart({ outline: n.outline });
@@ -11737,7 +11878,11 @@ function renderOutlineTab(host, n) {
     const existing = new Set(n.chapters.map((c) => c.outlineId).filter(Boolean));
     const todo = flat.filter((c) => !existing.has(c.id));
     if (!todo.length) return toast('章节列表已经和大纲一致了');
-    if (!confirm(`将按大纲新增 ${todo.length} 章（不覆盖已有章节）。继续？`)) return;
+    if (!(await confirmDialog({
+    title: '按大纲新增章节',
+    message: `将按大纲新增 ${todo.length} 章（不覆盖已有章节）。继续？`,
+    okLabel: '新增章节',
+  }))) return;
     for (const c of todo) {
       const r = await api.send(`/api/novels/${n.id}/chapters`, {
         title: c.title || '未命名',
@@ -12395,8 +12540,8 @@ function renderCharacterEntry(c, i, charIndex, n, mentionIndex, stateCache) {
   div.querySelector('[data-key="name"]').addEventListener('change', paintIndex);
   kw.addEventListener('change', paintIndex);
   aliasesEl.addEventListener('change', paintIndex);
-  div.querySelector('.del').onclick = () => {
-    if (!confirm(`删除人物「${c.name || i + 1}」？`)) return;
+  div.querySelector('.del').onclick = async () => {
+    if (!(await confirmDialog({ title: '删除人物', message: `删除人物「${c.name || i + 1}」？`, okLabel: '删除', danger: true }))) return;
     removeBibleEntry('characters', i, '人物');
   };
   return div;
@@ -12574,8 +12719,8 @@ function renderWorldEntry(w, i, n, mentionIndex, mentionCache, stateCache) {
   };
   div.querySelector('[data-key="name"]').addEventListener('change', paintMention);
   kw.addEventListener('change', paintMention);
-  div.querySelector('.del').onclick = () => {
-    if (!confirm(`删除设定「${w.name || i + 1}」？`)) return;
+  div.querySelector('.del').onclick = async () => {
+    if (!(await confirmDialog({ title: '删除设定', message: `删除设定「${w.name || i + 1}」？`, okLabel: '删除', danger: true }))) return;
     removeBibleEntry('world', i, '设定');
   };
   return div;
@@ -13431,8 +13576,8 @@ function renderGenLogTab(host, n) {
         : '<p class="thread-empty">还没有记录。任何 AI 生成都会记一条，这里就是它的家。</p>'}
     </div>`;
   host.querySelectorAll('.genlog-chapter').forEach((btn) => btn.addEventListener('click', () => { setView('studio'); selectChapter(btn.dataset.chapter); }));
-  host.querySelector('#genlogClear')?.addEventListener('click', () => {
-    if (!confirm('清空这本书的生成记录？不影响正文和设定。')) return;
+  host.querySelector('#genlogClear')?.addEventListener('click', async () => {
+    if (!(await confirmDialog({ title: '清空生成记录', message: '清空这本书的生成记录？不影响正文和设定。', okLabel: '清空', danger: true }))) return;
     const meta = { ...(n.meta || {}) };
     delete meta.genLog;
     n.meta = meta;
@@ -14404,8 +14549,8 @@ function renderSettings() {
         }
       } catch (err) { msg.textContent = err.message; }
     };
-    div.querySelector('[data-act="del"]').onclick = () => {
-      if (!confirm(`删除服务商「${p.name || p.baseUrl}」？`)) return;
+    div.querySelector('[data-act="del"]').onclick = async () => {
+      if (!(await confirmDialog({ title: '删除服务商', message: `删除服务商「${p.name || p.baseUrl}」？`, okLabel: '删除', danger: true }))) return;
       cfg.providers.splice(i, 1);
       if (cfg.activeProviderId === p.id) cfg.activeProviderId = cfg.providers[0]?.id || '';
       renderSettings();
@@ -15832,7 +15977,12 @@ async function openSnapshotDiff(snap, query = '') {
 
   restoreBtn.onclick = async () => {
     const when = `${fmtDate(snap.ts)} · ${SNAP_KINDS[snap.kind] || '快照'}`;
-    if (!confirm(`恢复本章正文到 ${when} 的版本？\n\n只会替换「${ch.title || '未命名'}」这一章的正文；标题、写作阶段、目标、章纲、记忆、场景和批注都不会变，其他章节也不受影响。\n恢复前会先把当前版本存一份，恢复错了还能再撤回。`)) return;
+    if (!(await confirmDialog({
+      title: '恢复本章正文',
+      message: `恢复本章正文到 ${when} 的版本？\n\n只会替换「${ch.title || '未命名'}」这一章的正文；标题、写作阶段、目标、章纲、记忆、场景和批注都不会变，其他章节也不受影响。\n恢复前会先把当前版本存一份，恢复错了还能再撤回。`,
+      okLabel: '恢复正文',
+      danger: true,
+    }))) return;
     restoreBtn.disabled = true;
     try {
       // 先把还没落盘的正文写进去，服务端备份的才是「恢复前」真实的样子
@@ -15942,7 +16092,12 @@ async function openHistory(presetWord = '') {
       listEl.querySelectorAll('.hist-restore').forEach((btn) => {
         btn.onclick = async () => {
           const ts = Number(btn.dataset.ts);
-          if (!confirm(`恢复到 ${fmtDate(ts)} 的版本？\n当前内容会先自动备份一份，可以再撤回。`)) return;
+          if (!(await confirmDialog({
+        title: '恢复版本',
+        message: `恢复到 ${fmtDate(ts)} 的版本？\n当前内容会先自动备份一份，可以再撤回。`,
+        okLabel: '恢复此版本',
+        danger: true,
+      }))) return;
           btn.disabled = true;
           try {
             await api.send(`/api/novels/${novelId}/restore`, { ts });
@@ -16342,7 +16497,12 @@ async function openFind(presetWord = '') {
       if (!q) return toast('先填写要替换的文字', 'err');
       const inTitle = box.querySelector('#findTitle').checked;
       const to = rEl.value;
-      if (!confirm(`把全书中的「${q}」全部替换为「${to || '（空）'}」？\n${inTitle ? '章节标题也会一起替换。\n' : ''}替换前会自动备份，可在版本历史里撤回。`)) return;
+      if (!(await confirmDialog({
+      title: '全书替换',
+      message: `把全书中的「${q}」全部替换为「${to || '（空）'}」？\n${inTitle ? '章节标题也会一起替换。\n' : ''}替换前会自动备份，可在版本历史里撤回。`,
+      okLabel: '全部替换',
+      danger: true,
+    }))) return;
       const btn = box.querySelector('#findAll');
       btn.disabled = true;
       try {

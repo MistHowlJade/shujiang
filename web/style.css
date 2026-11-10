@@ -2506,6 +2506,13 @@ body[data-theme="light"] .dock-main .assist-pane > .card {
 .modal .co-form textarea { min-height: 0; resize: vertical; }
 .modal .co-form .field-label { margin-top: 12px; }
 
+/* 自绘确认框：叠在普通弹窗之上，样式与弹窗一致 */
+.confirm-mask { z-index: 1100; }
+.confirm-box { width: min(440px, 100%); }
+.confirm-msg { margin: 0 0 6px; color: var(--text-2); font-size: 13.5px; line-height: 1.8; white-space: pre-wrap; }
+.confirm-ok.danger { background: var(--danger-solid); border-color: var(--danger-solid); color: #fff; }
+.confirm-ok.danger:hover { filter: brightness(.96); }
+
 /* ---------------- 一键开书 ---------------- */
 .qs-error { margin: 1px 0 0; color: var(--danger); font-size: 12.5px; line-height: 1.6; }
 .qs-error[hidden] { display: none; }
