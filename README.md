@@ -6,7 +6,7 @@
 - **运行时零依赖**：不使用 npm 包，服务端仅依赖 Node 内置模块。
 - **数据可迁移**：一部作品一个 JSON 文件，复制 `data/` 即完成备份或迁移。
 
-当前版本 **v1.0.26**。更新记录见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
+当前版本 **v1.0.27**。更新记录见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
 界面截图位于 [docs/screenshots](docs/screenshots)。
 
@@ -16,8 +16,8 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| ShuJiang-Portable-1.0.26.exe | 单文件便携版，无需安装 |
-| ShuJiang-1.0.26-win-x64.zip | 绿色版，解压后运行 `书匠.exe` |
+| ShuJiang-Portable-1.0.27.exe | 单文件便携版，无需安装 |
+| ShuJiang-1.0.27-win-x64.zip | 绿色版，解压后运行 `书匠.exe` |
 
 发布包未签名。首次运行时 Windows SmartScreen 会提示，选择「更多信息 → 仍要运行」即可。
 
@@ -199,7 +199,7 @@ data/
 | `npm start` | 启动浏览器版，`http://127.0.0.1:8848` |
 | `npm run desktop` | 启动 Electron 桌面版 |
 | `npm run mock` | 启动假模型服务，默认 8890 |
-| `npm run regress` | 回归测试，318 项；假模型未启动时 311 项 |
+| `npm run regress` | 回归测试，322 项；假模型未启动时 315 项 |
 | `npm test` | lib 层单元测试，640 项 |
 | `npm run check-refs` | 模块引用检查 |
 | `npm run perf` | 性能测试 |
