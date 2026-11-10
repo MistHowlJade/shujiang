@@ -796,9 +796,7 @@
               <button class="popmenu-item editor-more-item" id="formatBtn" type="button" role="menuitem" title="一键排版：段落首行缩进两格"><svg class="ico"><use href="#i-indent" /></svg>一键排版</button>
               <div class="popmenu-sep" role="separator"></div>
               <button class="popmenu-item editor-more-item" id="sprintBtn" type="button" role="menuitemcheckbox" aria-checked="false" title="写作冲刺计时器（Ctrl+Alt+S）"><svg class="ico"><use href="#i-clock" /></svg>写作冲刺计时器</button>
-              <button class="popmenu-item editor-more-item" id="healthBtn" type="button" role="menuitem" title="全书体检：本地统计，不花 token"><svg class="ico"><use href="#i-pulse" /></svg>全书体检</button>
-              <div class="popmenu-sep" role="separator"></div>
-              <button class="popmenu-item editor-more-item" id="editorExportBtn" type="button" role="menuitem" title="导出 / 备份（TXT / Markdown / Word / EPUB / JSON）"><svg class="ico"><use href="#i-download" /></svg>导出 / 备份…</button>
+              <button class="popmenu-item editor-more-item" id="healthBtn" type="button" role="menuitem" title="全书体检：本地统计，不花 token（跳到「检查」页签）"><svg class="ico"><use href="#i-pulse" /></svg>全书体检</button>
             </div>
             <div class="editor-wrap">
               <textarea id="chContent" class="editor" spellcheck="false" aria-label="正文" placeholder="在这里写正文，或者用右侧助手生成……&#10;&#10;选中任意段落后会弹出快捷菜单：润色 / 扩写 / 精简 / 改写。"></textarea>
@@ -874,11 +872,7 @@
                       <option value="sweet">轻松明快</option>
                     </select></label>
                   </div>
-                  <div class="btn-row">
-                    <button class="btn btn-primary btn-block" id="genChapterBtn" title="按章纲写初稿；不会覆盖原文，满意后再采用"><svg class="ico"><use href="#i-spark" /></svg>生成本章</button>
-                  </div>
-                  <div class="btn-row">
-                    <button class="btn" id="contBtn" title="从当前正文接着写；没有正文时等同于「生成本章」"><svg class="ico"><use href="#i-pen" /></svg>续写</button>
+                  <div class="btn-row stop-row">
                     <button class="btn btn-danger-ghost" id="stopBtn" hidden title="停止本次生成，已生成的内容会保留"><svg class="ico"><use href="#i-stop" /></svg>停止</button>
                   </div>
                   <button type="button" class="btn btn-sm btn-text quick-toggle" id="quickToggle" aria-expanded="false" aria-controls="quickRow"><svg class="ico"><use href="#i-more" /></svg>更多 AI 操作</button>

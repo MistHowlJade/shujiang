@@ -942,7 +942,7 @@ function renderShelf() {
     const readPct = hasProgress ? readerBookPercent(prog, n.chapterCount) : null;
     const readName = hasProgress ? readerChapterLabel(prog) : '';
     const readTitle = hasProgress
-      ? `继续阅读：${readName}${readPct === null ? '' : ` · 全书约 ${readPct}%`}${prog.updatedAt ? ` · ${fmtAgo(prog.updatedAt)}` : ''}`
+      ? `阅读：${readName}${readPct === null ? '' : ` · 全书约 ${readPct}%`}${prog.updatedAt ? ` · ${fmtAgo(prog.updatedAt)}` : ''}`
       : '';
     const div = document.createElement('div');
     div.className = 'book';
@@ -953,7 +953,7 @@ function renderShelf() {
       <div class="bk-genre"><span class="bk-genre-name">${esc(n.genre || '未分类')}</span>${tagHtml}${moreHtml}</div>
       <div class="bk-desc">${esc(n.logline || '还没有写简介')}</div>
       ${hasProgress ? `<button type="button" class="bk-reading" title="${esc(readTitle)}" aria-label="${esc(readTitle)}">
-        <span class="bk-reading-label">${ico('book-open')}继续阅读</span>
+        <span class="bk-reading-label">${ico('book-open')}阅读</span>
         <span class="bk-reading-meta">第 ${prog.chapterNo} 章${readPct === null ? '' : ` · ${readPct}%`}</span>
         ${readPct === null ? '' : `<span class="bk-reading-bar" aria-hidden="true"><i style="width:${readPct}%"></i></span>`}
       </button>` : `<button type="button" class="bk-reading bk-read" title="进入阅读模式（不影响写作页的编辑位置）" aria-label="阅读《${esc(n.title)}》">
@@ -3836,7 +3836,8 @@ function openHealthReport() {
   }, { wide: true });
 }
 
-$('#healthBtn')?.addEventListener('click', openHealthReport);
+// 「更多」菜单进来的体检统一跳到「检查」页签，体检本身由检查中心发起（#27）
+$('#healthBtn')?.addEventListener('click', () => { setView('studio'); showAssistTab('check'); });
 
 async function openProof() {
   if (!S.novel) return toast('先打开作品', 'err');
@@ -4866,10 +4867,6 @@ $('#editorMoreBtn')?.addEventListener('click', (e) => {
 });
 editorMoreMenu?.addEventListener('click', (e) => {
   if (e.target.closest('button.popmenu-item')) closeEditorMore();
-});
-$('#editorExportBtn')?.addEventListener('click', () => {
-  closeEditorMore();
-  exportBook();
 });
 document.addEventListener('mousedown', (e) => {
   if (!editorMoreMenu || editorMoreMenu.hidden) return;
@@ -8077,9 +8074,6 @@ function revealOutput({ toActions = false } = {}) {
 function setBusy(busy) {
   $('#stopBtn').hidden = !busy;
   $('#stopBtn2').hidden = !busy;
-  $('#genChapterBtn').disabled = busy;
-  $('#contBtn').disabled = busy;
-  // 正文顶部工具条上的两个 AI 按钮也要跟着禁用，别让人以为还能再点一次
   $('#aiGenBtn').disabled = busy;
   $('#aiContBtn').disabled = busy;
   $('#cmpBtn').disabled = busy;
@@ -8251,7 +8245,6 @@ async function generateChapter() {
     },
   });
 }
-$('#genChapterBtn').addEventListener('click', generateChapter);
 $('#aiGenBtn')?.addEventListener('click', () => { showAssistTab('write'); generateChapter(); });
 
 /** 有监督批量生成：连续生成 N 章草稿，每章停一下等作者看完再继续；全程不覆盖已有正文 */
@@ -8340,7 +8333,6 @@ async function continueWriting() {
     },
   });
 }
-$('#contBtn').addEventListener('click', continueWriting);
 $('#aiContBtn')?.addEventListener('click', () => { showAssistTab('write'); continueWriting(); });
 $('#stopBtn').addEventListener('click', () => S.controller?.abort());
 $('#stopBtn2').addEventListener('click', () => S.controller?.abort());
