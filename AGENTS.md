@@ -19,10 +19,10 @@
 
 | 项 | 值 |
 | --- | --- |
-| 版本 | v1.0.34 |
+| 版本 | v1.0.35 |
 | 语言 | JavaScript（ES modules，`"type": "module"`）|
 | 运行时 Node | 18+，但当前用 `tools/node/node.exe` (22.0.0) |
-| 平台 | Windows 为主（`win-unpacked`、`ShuJiang-Portable-1.0.34.exe`、`win-x64.zip`）|
+| 平台 | Windows 为主（`win-unpacked`、`ShuJiang-Portable-1.0.35.exe`、`win-x64.zip`）|
 | 测试 | `npm run regress`（322 项检查）、`npm test` (`lib-test.mjs` 641 项) |
 | 代码量 | ~3.5 万行（server+web+electron+build ≈ 3.3 万，含 dev/ 约 0.4 万）|
 | 前端 | 原生 JS + 自研设计系统，无 React/Vue/Svelte |
@@ -117,10 +117,10 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
 
 > 数据污染自检过用 `SHU_DATA_DIR=.tmp-regress-data` 隔离。永远不要往 `data/` 里写测试数据——那是用户的真作品。
 
-## 发布流程（从 v1.0.2 到 v1.0.34 实测）
+## 发布流程（从 v1.0.2 到 v1.0.35 实测）
 
 1. 本地 `npm run regress` + `npm test` 必须全绿
-2. `npm run dist`（只生成 `dist\ShuJiang-Portable-1.0.34.exe`），随后用 `Compress-Archive -Path 'dist\win-unpacked\*' -DestinationPath 'dist\ShuJiang-1.0.34-win-x64.zip'` 手工打绿色版 zip
+2. `npm run dist`（只生成 `dist\ShuJiang-Portable-1.0.35.exe`），随后用 `Compress-Archive -Path 'dist\win-unpacked\*' -DestinationPath 'dist\ShuJiang-1.0.35-win-x64.zip'` 手工打绿色版 zip
 
    这台机器直接跑 npm 会挂——AppData\Local 写不进、TLS 证书链也不通（v1.0.2 实测踩过两次 EPERM 和 unable to verify the first certificate）。用这个包一层环境变量（不改全局 PATH/系统环境）：
 
@@ -135,7 +135,7 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
 
    zip 用 win-unpacked 打（内容在 zip 根目录，不是整个文件夹）：`Compress-Archive -Path 'dist\win-unpacked\*' -DestinationPath 'dist\ShuJiang-x.y.z-win-x64.zip' -CompressionLevel Optimal -Force`
 3. 更新 `README.md` / `RELEASE_NOTES.md` 资产名和 tag 到本次版本
-4. `git push` + `git tag v1.0.34` + `git push origin v1.0.34`
+4. `git push` + `git tag v1.0.35` + `git push origin v1.0.35`
 5. 用 Windows Credential Manager 存的 token 上传，替换/新建 GitHub Releases 资产（POST /repos/{owner}/{repo}/releases → uploads.github.com 传两个资产；token 只从 `git credential fill` 读到、仅在内存使用）。**冒烟必须用 GitHub 下载版**（本机新打包 exe 很可能被本机拦截，包括 Portable 和 zip 里的书匠.exe）
 6. 若说 setup="……"，不要自己去买新的证书；发布页上是未签名的，用户自行「更多信息→仍要运行」
 7. 便携版是唯一发布形态；绿色版 zip 备用；Setup 包已删除
@@ -164,9 +164,9 @@ sys(BASE_SYSTEM, antiAi(novel), head(novel, pack))
 
 ## 关于便携版
 
-唯一形态就是 **ShuJiang-Portable-1.0.34.exe**（单进程嵌在 Electron 里）+ **win-x64.zip**（免安装）。`dist/` 不进 git；`tools/node/` 也不进 git（源码模式自带便携 Node）。`.gitignore` 已经处理。
+唯一形态就是 **ShuJiang-Portable-1.0.35.exe**（单进程嵌在 Electron 里）+ **win-x64.zip**（免安装）。`dist/` 不进 git；`tools/node/` 也不进 git（源码模式自带便携 Node）。`.gitignore` 已经处理。
 
-构建命令：`npm run dist`，再手工 Compress-Archive 打绿色 zip。产出 `dist/ShuJiang-Portable-1.0.34.exe` + `dist/ShuJiang-1.0.34-win-x64.zip`，约 110 MB 与 150 MB 大小，发布时上传到 GitHub Releases 并同步 tag。
+构建命令：`npm run dist`，再手工 Compress-Archive 打绿色 zip。产出 `dist/ShuJiang-Portable-1.0.35.exe` + `dist/ShuJiang-1.0.35-win-x64.zip`，约 110 MB 与 150 MB 大小，发布时上传到 GitHub Releases 并同步 tag。
 
 ## 维护者
 
