@@ -5542,6 +5542,10 @@ function makeChapterItem(c, i, { filtered = false, group = null } = {}) {
         if (S.chapterId === c.id) S.chapterId = novel.chapters[Math.min(i, novel.chapters.length - 1)]?.id || null;
         renderStudio();
         loadNovels().catch(() => {});
+        toast(`已删除第 ${i + 1} 章`, 'ok', {
+          label: '去版本历史',
+          onClick: () => { setView('studio'); openHistory(); },
+        });
       })();
     }
   });
@@ -6368,10 +6372,14 @@ function editorSnap() {
 function updateUndoButtons() {
   const ch = currentChapter();
   const st = ch ? histState(ch.id) : { undo: [], redo: [] };
-  const u = $('#undoBtn');
-  const r = $('#redoBtn');
-  if (u) u.disabled = !st.undo.length;
-  if (r) r.disabled = !st.redo.length;
+  for (const sel of ['#undoBtn', '#undoBtn2']) {
+    const el = $(sel);
+    if (el) el.disabled = !st.undo.length;
+  }
+  for (const sel of ['#redoBtn', '#redoBtn2']) {
+    const el = $(sel);
+    if (el) el.disabled = !st.redo.length;
+  }
 }
 
 /** 编辑器内容被外部改动（切章、查找替换、重新渲染）后同步基准 */
@@ -6465,6 +6473,8 @@ function doRedo() {
 
 $('#undoBtn').addEventListener('click', () => { doUndo(); $('#chContent').focus(); });
 $('#redoBtn').addEventListener('click', () => { doRedo(); $('#chContent').focus(); });
+$('#undoBtn2')?.addEventListener('click', () => { doUndo(); $('#chContent').focus(); });
+$('#redoBtn2')?.addEventListener('click', () => { doRedo(); $('#chContent').focus(); });
 
 $('#chContent').addEventListener('input', (e) => {
   // 中文输入法组字过程中不要记点，等 compositionend 一次性记
