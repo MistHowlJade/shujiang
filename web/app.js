@@ -188,6 +188,10 @@ function showModal(html, onMount, opts = {}) {
   }
   // 关掉弹窗时能回调一次（模型对比要用它停掉还在跑的流）
   box._onClose = opts.onClose || null;
+  // 有些弹窗里填的是 Key / 书名 / 粘贴的正文：点遮罩或按 Esc 直接关会静默丢输入，
+  // 这类弹窗标 dismissable:false，只能点「取消 / 关闭」明确离开。
+  box._dismissable = opts.dismissable !== false;
+  box._dismissHinted = false;
   mask.hidden = false;
   onMount?.(box);
   // 焦点进到弹窗里：屏幕阅读器和键盘用户都不用再从头找开头
@@ -216,7 +220,7 @@ function closeIfCurrent(box, gen) {
   if (box?._gen === gen && !$('#modalMask').hidden) closeModal();
 }
 $('#modalMask').addEventListener('mousedown', (e) => {
-  if (e.target.id === 'modalMask' && !S.batchController) closeModal();
+  if (e.target.id === 'modalMask' && !S.batchController && $('#modal')._dismissable !== false) closeModal();
 });
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
@@ -224,7 +228,19 @@ document.addEventListener('keydown', (e) => {
   if (e.isComposing) return;
   if (e.defaultPrevented) return;   // 输入框里的 Esc 已经处理过（例如关命令面板），别再往下退专注
   // 弹窗、命令面板、阅读器、浮层和选中工具条优先处理 Esc，避免误退出专注模式
-  if (!$('#modalMask').hidden && !S.batchController) { closeModal(); return; }
+  if (!$('#modalMask').hidden && !S.batchController) {
+    const box = $('#modal');
+    if (box._dismissable === false) {
+      // 表单类弹窗不能一键关：提示一次，让用户走明确的「取消」
+      if (!box._dismissHinted) {
+        box._dismissHinted = true;
+        toast('这个弹窗里有要填的内容，点「取消」再关闭', '');
+      }
+      return;
+    }
+    closeModal();
+    return;
+  }
   if (S.batchController) return;
   if (studioPane) { closeStudioPane({ returnFocus: true }); return; }
   if ($('#cmdkMask') && !$('#cmdkMask').hidden) return;
@@ -604,7 +620,20 @@ $('#narrowAssistBtn')?.addEventListener('click', () => toggleStudioPane('assist'
 $('#studioBackdrop')?.addEventListener('click', () => closeStudioPane({ returnFocus: true }));
 NARROW_QUERY.addEventListener?.('change', (e) => { if (!e.matches) closeStudioPane(); });
 
+/** 设置页有没有没点「保存」的改动（服务商 / 生成参数 / 提示词模板） */
+let settingsDirty = false;
+function markSettingsDirty() {
+  settingsDirty = true;
+  const msg = $('#cfgMsg');
+  if (msg && !msg.textContent) msg.textContent = '有未保存的修改';
+}
+
 function setView(v) {
+  if (S.view === 'settings' && v !== 'settings' && settingsDirty) {
+    const go = confirm('设置里有还没保存的修改（服务商 / 生成参数 / 提示词模板）。\n确定离开并丢弃这些修改吗？');
+    if (!go) return;
+    settingsDirty = false;
+  }
   if (v !== 'studio' && S.focusMode) exitFocus();
   closeStudioPane();
   S.view = v;
@@ -1413,7 +1442,7 @@ function openNewNovelModal() {
         toast(`《${novel.title}》已建好；第一章没建成，点「新建第一章」可以补上`, 'err');
       }
     };
-  });
+  }, { dismissable: false });
 }
 $('#newNovelBtn').addEventListener('click', openNewNovelModal);
 $('#emptyNewBtn').addEventListener('click', openNewNovelModal);
@@ -1636,6 +1665,8 @@ function openQuickStartModal() {
     };
     startBtn.onclick = start;
   }, {
+    // 开书弹窗里有想法 / 类型等内容，误点遮罩或按 Esc 会中止生成
+    dismissable: false,
     // 生成中直接关掉弹窗：停掉请求，已写盘的内容保留
     onClose: () => {
       if (!activeRun) return;
@@ -2019,6 +2050,8 @@ async function openModelSetup(opts = {}) {
   let closed = false;
   let finished = false;
   const box = showModal('', null, {
+    // 这里要填 Base URL / API Key，误点遮罩就前功尽弃
+    dismissable: false,
     onClose: () => {
       closed = true;
       // 用户主动关掉弹窗时，让原操作知道这次没继续
@@ -14260,6 +14293,7 @@ $$('#paperFont button').forEach((b) => b.addEventListener('click', () => setPape
 $('#paperReset').addEventListener('click', paperReset);
 
 function renderSettings() {
+  settingsDirty = false;
   renderAppearance();
   syncStyleApplyButton();   // 换过作品后，「写入当前作品」要跟着出现 / 隐藏
   const cfg = S.config;
@@ -14826,6 +14860,9 @@ async function saveConfig() {
   try {
     await api.send('/api/config', configForSave(cfg));
     S.config = await api.get('/api/config');
+    settingsDirty = false;
+    const msg = $('#cfgMsg');
+    if (msg) msg.textContent = '';
     refreshGenModelHint();
     return true;
   } catch (err) {
@@ -14839,6 +14876,18 @@ $('#saveCfgBtn').addEventListener('click', async () => {
   $('#cfgMsg').textContent = '已保存';
   setTimeout(() => { $('#cfgMsg').textContent = ''; }, 2000);
   toast('设置已保存', 'ok');
+});
+
+/* 设置页的未保存改动：切走时给一次确认，别让人以为改完就自动生效了 */
+const SETTINGS_DIRTY_SELECTOR = '#providerList input, #providerList select, #cfgModel, #cfgMaxTokens, #cfgBudget, #cfgTemp, #roleWrite, #roleSummary, #roleReview, #promptSystem, #promptUser';
+$('#view-settings')?.addEventListener('input', (e) => {
+  if (e.target.matches?.(SETTINGS_DIRTY_SELECTOR)) markSettingsDirty();
+});
+$('#view-settings')?.addEventListener('change', (e) => {
+  if (e.target.matches?.(SETTINGS_DIRTY_SELECTOR)) markSettingsDirty();
+});
+$('#view-settings')?.addEventListener('click', (e) => {
+  if (e.target.closest('#addProviderBtn, #presetRow button, [data-act="del"]')) markSettingsDirty();
 });
 
 /**
@@ -15096,7 +15145,7 @@ function openImportModal(file, opts = {}) {
       };
 
       if (file) loadFile(file);
-    });
+    }, { dismissable: false });
 }
 
 $('#importBtn').addEventListener('click', () => openImportModal());
