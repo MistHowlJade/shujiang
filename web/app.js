@@ -3260,9 +3260,9 @@ async function openNovel(id, opts = {}) {
   // 换作品前先把当前作品的改动落盘 —— 一旦换过去，旧作品的内存内容就被替换了，
   // 没落盘的部分谁也救不回来。落不下去时明确问一句，别默默丢。
   const same = !!S.novel && S.novel.id === id;
-  // 生成中换作品：流的目标还是旧书，继续切会把结果和草稿弄乱
-  if (!same && S.controller) {
-    toast('正在生成——先等它写完，或点「停止」再换作品', 'err');
+  // 生成中换作品：流的目标还是旧书，继续切会把结果和草稿弄乱（批量生成也一样，顺序会乱）
+  if (!same && (S.controller || batchGen.running)) {
+    toast('有任务在跑——先等它完成，或点「停止」再换作品', 'err');
     return false;
   }
   // 设定库 / 大纲的防抖保存也要先落盘：它记的是旧作品的对象，不能等切完再发
@@ -3294,6 +3294,7 @@ async function openNovel(id, opts = {}) {
     }
   }
   if (same) { setView('studio'); renderStudio(); return true; }
+  // 换作品前先把当前作品的检查结果交出去（已经持久化在各自 meta 里了）
   // 旧作品的输出区草稿先收起来；切回来还能接着用
   stashOutDraft(S.novel?.id, S.chapterId);
   const seq = ++openNovelSeq;
@@ -3309,6 +3310,9 @@ async function openNovel(id, opts = {}) {
   const want = opts.chapterId && novel.chapters.some((c) => c.id === opts.chapterId) ? opts.chapterId : null;
   S.chapterId = want || novel.chapters[0]?.id || null;
   loadOutDraft(novel.id, S.chapterId);
+  ccHydrate();   // 换到这本书自己的检查结果
+  renderBookAnnotations();   // 换到这本书自己的全书批注清单
+  ccRender();
   volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   S.stageFilter = '';          // 筛选也一样，换作品先看全貌
   S.chapterSearch = '';        // 章节搜索属于上一本书，别带过去
@@ -6208,6 +6212,7 @@ function renderStudio({ list = true } = {}) {
   $('#chTitle').value = ch?.title || '';
   const taEl = $('#chContent');
   const nextContent = ch?.content || '';
+  if (ch) prevChContent.set(ch.id, nextContent);
   if (taEl.value !== nextContent) { taEl.value = nextContent; resetCounted(ch); }   // 值没变就别赋值，免得光标被弹到末尾
   if (chapterSwitched && nextChapterId) restoreEditorPosition(nextNovelId, nextChapterId, taEl);
   EDITOR_TRACK.novelId = nextNovelId;
@@ -6221,6 +6226,7 @@ function renderStudio({ list = true } = {}) {
   renderChapterOutlineCard();
   renderRevisionCard();
   renderTopbarActions();
+  renderAnnotationSidebar();   // 章节切换后批注列表也要跟着换成这一章的
 }
 
 // 章节落盘的字段集合：自动保存 / 兜底保存 / 立即保存共用
@@ -6618,10 +6624,72 @@ $('#chContent').addEventListener('compositionend', () => {
   editorChanged();
 });
 
+/** 把「本章上一份正文」存下来用于批注偏移平移；切换 / 进入章节时由调用方重置 */
+const prevChContent = new Map();
+
+/** 计算 before→after 的编辑区间，并把所有批注的 start/end 平移到新位置
+ *  目标：正文在光标前后的改动不让批注漂移到错误的文字上 */
+function shiftAnnotationsForEdit(ch, before, after) {
+  const list = Array.isArray(ch?.annotations) ? ch.annotations : [];
+  if (!list.length) return;
+  const nBefore = before.length;
+  const nAfter = after.length;
+  let lo = 0;
+  while (lo < nBefore && lo < nAfter && before[lo] === after[lo]) lo += 1;
+  let hiBefore = nBefore;
+  let hiAfter = nAfter;
+  while (hiBefore > lo && hiAfter > lo && before[hiBefore - 1] === after[hiAfter - 1]) {
+    hiBefore -= 1;
+    hiAfter -= 1;
+  }
+  const deleted = hiBefore - lo;
+  const inserted = hiAfter - lo;
+  if (deleted === 0 && inserted === 0) return;
+  const delta = inserted - deleted;
+  for (const ann of list) {
+    const start = Number(ann?.start);
+    const end = Number(ann?.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+    if (end <= lo) continue;                  // 全部落在改动区域之前：不动
+    if (start >= hiBefore) {                  // 全部落在之后：平移
+      ann.start = start + delta;
+      ann.end = end + delta;
+      continue;
+    }
+    // 覆盖区间：完全包含则重建到 lo，部分覆盖则尝试用原文找回
+    const overlapText = before.slice(start, end);
+    // 完全包含：整段被改了/删了，按新文写入边缘
+    if (start >= lo && end <= hiBefore) {
+      ann.start = lo;
+      ann.end = Math.max(lo, Math.min(hiAfter, lo + inserted));
+      if (inserted > 0) ann.note = (ann.note || '') + '（定位已重设）';
+      continue;
+    }
+    // 部分覆盖：先找原文；找不到就标注「原文已改动」
+    const found = after.indexOf(overlapText);
+    if (found >= 0) {
+      ann.start = found;
+      ann.end = found + overlapText.length;
+    } else {
+      ann.start = lo;
+      ann.end = lo;
+      ann.note = (ann.note || '') + ' ⚠ 原文已改动，定位失效';
+    }
+  }
+}
+
 function editorChanged() {
   const ch = currentChapter();
   if (!ch) return;
-  ch.content = $('#chContent').value;
+  const before = prevChContent.get(ch.id);
+  const after = $('#chContent').value;
+  // 多端保存（含 AI 写入）会走 input 事件；这里做批注平移，不能直接崩掉
+  if (before != null && before !== after) {
+    try { shiftAnnotationsForEdit(ch, before, after); }
+    catch (err) { console.warn('批注平移失败', err); }
+  }
+  prevChContent.set(ch.id, after);
+  ch.content = after;
   const w = wordsOf(ch);
   renderWordChip();
   const li = chapterRow(ch.id);
@@ -6805,7 +6873,8 @@ function clearFiltersHidingChapter(id) {
 
 function selectChapter(id) {
   // 生成中切章会让「追加到正文」写错章，也容易把草稿弄丢：先停下或等它写完
-  if (S.controller) return toast('正在生成——先等它写完，或点「停止」再切章', 'err');
+  // 批量生成（#35）例外：它自己按章分别暂存草稿，作者可以随意翻章阅读
+  if (S.controller && !batchGen.running) return toast('正在生成——先等它写完，或点「停止」再切章', 'err');
   const prevId = S.chapterId;
   // 从看板 / 全局检索 / 命令面板跳过来时，目标章可能被搜索或筛选藏起来，先恢复完整列表
   const hidden = clearFiltersHidingChapter(id);
@@ -7728,6 +7797,7 @@ function addAnnotation(ch, start, end, text, color, note) {
     text: text.slice(0, 200), // 存片段用于定位和显示
     color,
     note,
+    status: 'todo',   // #39：待处理 / 已解决
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -7777,18 +7847,30 @@ function jumpToAnnotation(ch, annotationId) {
   const annotations = getChapterAnnotations(ch);
   const anno = annotations.find(a => a.id === annotationId);
   if (!anno || !ta) return;
-  // 优先用存储的 start/end，兜底用文本搜索
-  let start = anno.start, end = anno.end;
-  if (typeof start !== 'number' || typeof end !== 'number' || start < 0 || end > ta.value.length) {
-    const idx = ta.value.indexOf(anno.text);
-    if (idx >= 0) { start = idx; end = idx + anno.text.length; }
+  // 先用存储的 start/end 检验是否还匹配文字本身；编辑后正文段落改了就要重找
+  let start = Number(anno?.start);
+  let end = Number(anno?.end);
+  const text = String(anno?.text || '');
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end > ta.value.length || ta.value.slice(start, end) !== text) {
+    // 原文不在这个位置了——从 start 附近找；找不到再退回全局查
+    let found = -1;
+    if (text) {
+      const head = Math.max(0, (start || 0) - 200);
+      const tail = Math.min(ta.value.length, (end || 0) + 200);
+      found = ta.value.slice(head, tail).indexOf(text);
+      if (found >= 0) found += head;
+      else found = ta.value.indexOf(text);
+    }
+    if (found < 0) return toast('批注的原句已被改动，无法定位（其余批注仍可跳）', 'err');
+    start = found;
+    end = found + text.length;
+    anno.start = start;
+    anno.end = end;
+    markChapterDirty(ch);
   }
-  if (typeof start === 'number' && typeof end === 'number') {
-    ta.setSelectionRange(start, end);
-    ta.focus({ preventScroll: true });
-    // 滚到视线里，别让批注跳过去却停在半屏之外
-    ta.scrollTop = Math.max(0, editorCaretTop(ta, start) - ta.clientHeight * 0.32);
-  }
+  ta.setSelectionRange(start, end);
+  ta.focus({ preventScroll: true });
+  ta.scrollTop = Math.max(0, editorCaretTop(ta, start) - ta.clientHeight * 0.32);
 }
 
 function renderAnnotationSidebar() {
@@ -7819,6 +7901,7 @@ function renderAnnotationSidebar() {
         return `<div class="annotation-item" data-id="${a.id}" style="border-left-color:${color.border}">
           <div class="annotation-header">
             <span class="annotation-color-dot" style="background:${color.bg};border-color:${color.border}"></span>
+            ${bookAnnotationStatus(a) === 'done' ? '<span class="annotation-done">已解决</span>' : ''}
             <span class="annotation-position">第 ${a.start}–${a.end} 字</span>
             <span class="annotation-time">${fmtDate(a.createdAt)}</span>
           </div>
@@ -7841,7 +7924,188 @@ function renderAnnotationSidebar() {
     };
   });
   sidebar.querySelector('#annoFixPlanBtn')?.addEventListener('click', () => annoFixPlan());
+  renderBookAnnotations();
 }
+
+/* ------------------------------------------------------------
+ * 全书批注清单（#39）：不切章也能看到所有批注，可按章节/颜色/状态筛选，可导出
+ * ---------------------------------------------------------- */
+const bookAnnoFilter = { chapter: '', color: '', status: '' };
+
+function bookAnnotationsAll() {
+  const out = [];
+  for (const ch of S.novel?.chapters || []) {
+    for (const a of getChapterAnnotations(ch)) out.push({ ch, a });
+  }
+  return out;
+}
+
+function bookAnnotationStatus(a) {
+  return String(a?.status || 'todo') === 'done' ? 'done' : 'todo';
+}
+
+function setAnnotationStatus(ch, annotationId, status) {
+  const anno = getChapterAnnotations(ch).find((a) => a.id === annotationId);
+  if (!anno) return;
+  anno.status = status === 'done' ? 'done' : 'todo';
+  anno.updatedAt = Date.now();
+  markChapterDirty(ch);
+  renderAnnotationSidebar();
+  renderBookAnnotations();
+}
+
+/** 从全书清单跳到某条批注：先切章（目标章可能不在当前视图），再选中引文 */
+function jumpToBookAnnotation(chId, annotationId) {
+  const ch = S.novel?.chapters.find((c) => c.id === chId);
+  if (!ch) return toast('这一章已经不存在了', 'err');
+  if (S.chapterId !== ch.id) openChapterFromIndex(ch.id);
+  const target = S.novel?.chapters.find((c) => c.id === chId);
+  if (target) jumpToAnnotation(target, annotationId);
+}
+
+function renderBookAnnotations() {
+  const panel = $('#bookAnnoPanel');
+  const toggle = $('#bookAnnoToggle');
+  const countEl = $('#bookAnnoCount');
+  const listEl = $('#bookAnnoList');
+  if (!panel || !listEl) return;
+  const all = bookAnnotationsAll();
+  if (countEl) countEl.textContent = String(all.length);
+  // 章节下拉：只保留仍然有批注的章节（+ 保留已选项，防止选择器选项消失）
+  const chapterSel = $('#bookAnnoChapter');
+  if (chapterSel) {
+    const keep = new Set(all.map(({ ch }) => ch.id));
+    const cur = bookAnnoFilter.chapter;
+    const options = all.length
+      ? (S.novel?.chapters || []).filter((ch) => keep.has(ch.id)).map((ch) => `<option value="${esc(ch.id)}">第 ${ch.no} 章 · ${esc(ch.title || '未命名')}</option>`)
+      : [];
+    if (cur && !keep.has(cur)) bookAnnoFilter.chapter = '';
+    chapterSel.innerHTML = ['<option value="">全部章节</option>'].concat(options).join('');
+    chapterSel.value = bookAnnoFilter.chapter;
+  }
+  // 颜色下拉：按实际出现过的颜色填
+  const colorSel = $('#bookAnnoColor');
+  if (colorSel) {
+    const used = new Set(all.map(({ a }) => a.color));
+    colorSel.innerHTML = ['<option value="">全部颜色</option>']
+      .concat(ANNOTATION_COLORS.filter((c) => used.has(c.id)).map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`))
+      .join('');
+    colorSel.value = bookAnnoFilter.color;
+  }
+  const statusSel = $('#bookAnnoStatus');
+  if (statusSel) statusSel.value = bookAnnoFilter.status;
+  const visible = all.filter(({ ch, a }) => {
+    if (bookAnnoFilter.chapter && ch.id !== bookAnnoFilter.chapter) return false;
+    if (bookAnnoFilter.color && a.color !== bookAnnoFilter.color) return false;
+    if (bookAnnoFilter.status && bookAnnotationStatus(a) !== bookAnnoFilter.status) return false;
+    return true;
+  });
+  const emptyEl = $('#bookAnnoEmpty');
+  if (emptyEl) emptyEl.hidden = visible.length > 0;
+  listEl.innerHTML = visible.map(({ ch, a }) => {
+    const color = ANNOTATION_COLORS.find((c) => c.id === a.color) || ANNOTATION_COLORS[0];
+    const status = bookAnnotationStatus(a);
+    const quote = String(a.text || '');
+    return `<li class="book-anno-item status-${status}" data-ch="${esc(ch.id)}" data-id="${esc(a.id)}">
+      <span class="anno-color-dot" style="background:${color.bg};border-color:${color.border}" title="${esc(color.name)}"></span>
+      <div class="book-anno-main">
+        <div class="book-anno-meta">第 ${ch.no} 章《${esc(ch.title || '未命名')}》<span class="book-anno-time">${esc(fmtDate(a.createdAt))}</span><span class="anno-status-tag ${status}">${status === 'done' ? '已解决' : '待处理'}</span></div>
+        <div class="book-anno-quote">「${esc(quote.slice(0, 80))}${quote.length > 80 ? '…' : ''}」</div>
+        ${a.note ? `<div class="book-anno-note">${esc(a.note)}</div>` : '<div class="book-anno-note dim">（只有高亮，没有批注文字）</div>'}
+      </div>
+      <div class="book-anno-actions">
+        <button type="button" class="btn btn-sm btn-text" data-act="jump">${ico('arrow-right')}跳转</button>
+        <button type="button" class="btn btn-sm btn-text" data-act="toggle">${status === 'done' ? '恢复待处理' : '标记已解决'}</button>
+      </div>
+    </li>`;
+  }).join('');
+  listEl.querySelectorAll('.book-anno-item').forEach((item) => {
+    const chId = item.dataset.ch;
+    const id = item.dataset.id;
+    const target = (S.novel?.chapters || []).find((c) => c.id === chId);
+    item.querySelector('[data-act="jump"]')?.addEventListener('click', () => jumpToBookAnnotation(chId, id));
+    item.querySelector('[data-act="toggle"]')?.addEventListener('click', () => {
+      const anno = target && getChapterAnnotations(target).find((x) => x.id === id);
+      if (target && anno) setAnnotationStatus(target, id, bookAnnotationStatus(anno) === 'done' ? 'todo' : 'done');
+    });
+  });
+}
+
+/** 面向作者的批注清单：Markdown 或 CSV，按章节分组 */
+function exportBookAnnotations(format) {
+  const all = bookAnnotationsAll();
+  if (!all.length) return toast('还没有批注可以导出', 'err');
+  const title = S.novel?.title || '作品';
+  const date = new Date().toISOString().slice(0, 10);
+  const colorName = (id) => (ANNOTATION_COLORS.find((c) => c.id === id) || ANNOTATION_COLORS[0]).name;
+  const statusName = (a) => (bookAnnotationStatus(a) === 'done' ? '已解决' : '待处理');
+  const byChapter = new Map();
+  for (const item of all) {
+    if (!byChapter.has(item.ch.id)) byChapter.set(item.ch.id, []);
+    byChapter.get(item.ch.id).push(item);
+  }
+  let content = '';
+  let mime = 'text/plain';
+  let ext = 'txt';
+  if (format === 'csv') {
+    const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = [['章节', '章标题', '颜色', '状态', '引文', '批注', '创建时间'].join(',')];
+    const fmtTs = (ts) => {
+      const d = new Date(Number(ts) || Date.now());
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    for (const [, items] of byChapter) {
+      for (const { ch, a } of items) {
+        rows.push([cell(`第 ${ch.no} 章`), cell(ch.title || '未命名'), cell(colorName(a.color)), cell(statusName(a)), cell(a.text || ''), cell(a.note || ''), cell(fmtTs(a.createdAt))].join(','));
+      }
+    }
+    content = '﻿' + rows.join('\r\n'); // BOM，Excel 打开中文不乱码
+    mime = 'text/csv;charset=utf-8';
+    ext = 'csv';
+  } else {
+    const todo = all.filter(({ a }) => bookAnnotationStatus(a) !== 'done').length;
+    const done = all.length - todo;
+    const lines = [`# 《${title}》批注清单`, '', `共 ${all.length} 条（待处理 ${todo} · 已解决 ${done}） · ${date}`, ''];
+    for (const [, items] of byChapter) {
+      for (const { ch, a } of items) {
+        // 同一章只写一次标题
+        if (lines[lines.length - 1] !== undefined) { /* noop */ }
+        const head = `## 第 ${ch.no} 章《${ch.title || '未命名'}》`;
+        if (!lines.includes(head)) lines.push(head, '');
+        const quote = String(a.text || '').replace(/\s+/g, ' ').slice(0, 100);
+        lines.push(`- [${bookAnnotationStatus(a) === 'done' ? 'x' : ' '}] （${colorName(a.color)}）${quote}${a.note ? ` —— ${String(a.note).replace(/\s+/g, ' ').slice(0, 200)}` : ''}`);
+      }
+      lines.push('');
+    }
+    content = lines.join('\n');
+    mime = 'text/markdown;charset=utf-8';
+    ext = 'md';
+  }
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `《${title.replace(/[\\/:*?"<>|]/g, '_')}》批注清单_${date}.${ext}`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast(`已导出批注清单（${all.length} 条）`, 'ok');
+}
+
+/* 全书批注清单的展开 / 筛选 / 导出 */
+$('#bookAnnoToggle')?.addEventListener('click', () => {
+  const panel = $('#bookAnnoPanel');
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+  const expanded = !panel.hidden;
+  $('#bookAnnoToggle')?.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  if (expanded) renderBookAnnotations();
+});
+$('#bookAnnoChapter')?.addEventListener('change', (e) => { bookAnnoFilter.chapter = e.target.value; renderBookAnnotations(); });
+$('#bookAnnoColor')?.addEventListener('change', (e) => { bookAnnoFilter.color = e.target.value; renderBookAnnotations(); });
+$('#bookAnnoStatus')?.addEventListener('change', (e) => { bookAnnoFilter.status = e.target.value; renderBookAnnotations(); });
+$('#bookAnnoExportMd')?.addEventListener('click', () => exportBookAnnotations('md'));
+$('#bookAnnoExportCsv')?.addEventListener('click', () => exportBookAnnotations('csv'));
 
 /** ---- 按批注改稿：AI 给最小修改方案，逐条确认写回 ---- */
 function replaceQuoteOnce(full, quote, newText) {
@@ -8125,8 +8389,9 @@ function isModelSetupError(err) {
   return /还没有配置模型服务商|还没有填写 API Key|还没有选择模型/.test(String(err?.message || err || ''));
 }
 
-async function runStream(body, { target = 'out', retried = false } = {}) {
-  if (S.controller || S.batchController) { toast('已有任务在跑，先停止', 'err'); return ''; }
+async function runStream(body, { target = 'out', retried = false, allowBatch = false } = {}) {
+  // 批量任务自己一条条跑：放行，别把自己的队列又拦在门外
+  if (!allowBatch && (S.controller || S.batchController)) { toast('已有任务在跑，先停止', 'err'); return ''; }
   if (!retried && !aiModelReady(body.task || 'chapter', body.model)) {
     openGenerateModelSetup(body, () => runStream(body, { target, retried: true }));
     return '';
@@ -8265,67 +8530,305 @@ async function generateChapter() {
 }
 $('#aiGenBtn')?.addEventListener('click', () => { showAssistTab('write'); generateChapter(); });
 
-/** 有监督批量生成：连续生成 N 章草稿，每章停一下等作者看完再继续；全程不覆盖已有正文 */
-function askBatchNext(message, primary) {
-  return new Promise((resolve) => {
-    // 先记下用户点了什么，再由 onClose 统一 resolve：closeModal 会同步触发 onClose，
-    // 在按钮里先 closeModal 再 resolve 的话，onClose 已经把结果锁成「停在这里」了。
-    let picked = 'stop';
-    showModal(`<h3>已生成</h3>
-      <p class="modal-sub">${esc(message)}<br>输出区里是这章的初稿——满意就点「追加到正文」落到本章；不满意就直接进下一章。</p>
-      <div class="modal-foot"><button class="btn btn-text" id="batchStop">停在这里</button><button class="btn btn-primary" id="batchNext">${esc(primary)}</button></div>`, (box) => {
-      box.querySelector('#batchStop').onclick = () => { picked = 'stop'; closeModal(); };
-      box.querySelector('#batchNext').onclick = () => { picked = 'next'; closeModal(); };
-    }, { onClose: () => resolve(picked) });
-  });
-}
+/** 批量生成：可暂停 / 继续 / 停止的章节草稿队列（#35）
+ *  草稿按「作品 + 章节」暂存（outDrafts），作者可以随时切章阅读、也可以关掉面板；
+ *  到对应章后点「追加到正文」落稿——全程不覆盖正文。 */
+const BG_STATUS = { pending: '排队', running: '生成中', done: '完成', error: '失败' };
+const batchGen = {
+  running: false,
+  paused: false,
+  stopped: false,
+  novel: null,
+  queue: [],        // [{ id, no, title, status, error }]
+  calls: 0,         // 已实际调用模型的次数
+  cardBox: null,    // 任务卡弹窗的根节点（仅面板开着时非空）
+};
+
+const bgItemHtml = (q) => `<li class="bg-item status-${q.status}" data-id="${esc(q.id)}">
+  <span class="bg-badge">${BG_STATUS[q.status] || '排队'}</span>
+  <span class="bg-title">第 ${q.no} 章 · ${esc(String(q.title || '未命名'))}</span>
+  <span class="bg-note"></span>
+  <button type="button" class="btn btn-sm btn-text bg-retry" data-id="${esc(q.id)}" hidden>重试</button>
+</li>`;
 
 async function batchGenerateChapters() {
-  const ch = currentChapter();
-  if (!ch) return toast('先建一章', 'err');
-  const idx = S.novel.chapters.findIndex((c) => c.id === ch.id);
-  if (idx < 0) return toast('先选一章当前章', 'err');
+  if (!S.novel) return toast('先打开作品', 'err');
+  const novel = S.novel;
+  if (!novel.chapters.length) return toast('这部作品还没有章节', 'err');
+  // 已经在跑：别再开一个任务，直接把任务卡打开
+  if (batchGen.running) return openBatchGenCard();
+  if (S.controller || S.batchController) return toast('已有任务在跑，先停止', 'err');
+  if (!aiModelReady('chapter')) {
+    return openModelSetup({
+      introTitle: '批量生成前还差一步：接入模型',
+      introText: '批量生成要逐章调用模型。先把模型接好，再回来选章节范围。',
+      modelTitle: '选一个模型，开始批量生成',
+      saveLabel: '保存，开始批量生成',
+      isReady: () => aiModelReady('chapter'),
+      onReady: batchGenerateChapters,
+      onCancel: () => toast('还没接入模型，这次没有开始批量生成'),
+    });
+  }
+  const chapters = novel.chapters;
+  const curIdx = Math.max(0, chapters.findIndex((c) => c.id === S.chapterId));
+  const lastNo = chapters[chapters.length - 1]?.no || chapters.length;
   let picked = 0;
-  const count = await new Promise((resolve) => {
-    showModal(`<h3>批量生成（逐章确认）</h3>
-      <p class="modal-sub">从当前章（第 ${ch.no} 章）开始，连续生成多章草稿。每章跑完一遍你就看输出区；满意点「追加到正文」落到那章，不满意就点「下一章」进下一章。<br>全程不覆盖已有正文——落到本章的是草稿建议，你定。</p>
-      <div class="field-row"><label class="field-label">连续几章<input id="batchCount" type="number" min="1" max="10" value="3" class="input" style="width:80px" /></label></div>
-      <div class="modal-foot"><button class="btn btn-text" id="batchCancel">关闭</button><button class="btn btn-primary" id="batchStart">开始生成</button></div>`, (box) => {
-      // 同上：先记选择再关弹窗，别让 onClose 把用户填的章数覆盖成 0
-      box.querySelector('#batchCancel').onclick = () => { picked = 0; closeModal(); };
-      box.querySelector('#batchStart').onclick = () => {
-        picked = Math.max(1, Math.min(10, Number(box.querySelector('#batchCount')?.value) || 1));
-        closeModal();
-      };
-    }, { onClose: () => resolve(picked) });
+  await new Promise((resolve) => {
+    showModal(`<h3>批量生成章节草稿</h3>
+      <p class="modal-sub">逐章调用模型生成草稿。每章 1 次调用；草稿按章节分别暂存，不覆盖正文——到对应章后点「追加到正文」即可落稿。</p>
+      <div class="segmented" id="bgModeSeg" role="group" aria-label="选择范围方式">
+        <button data-bgmode="range" class="on" aria-pressed="true">按范围</button>
+        <button data-bgmode="pick" aria-pressed="false">勾选章节</button>
+      </div>
+      <div id="bgRangeWrap">
+        <div class="grid2">
+          <label class="field-label">起始章<select id="bgFrom" class="select">${chapters.map((c, i) => `<option value="${i}"${i === curIdx ? ' selected' : ''}>第 ${c.no} 章 · ${esc((c.title || '未命名').slice(0, 30))}</option>`).join('')}</select></label>
+          <label class="field-label">连续几章<input id="bgCount" class="input" type="number" min="1" max="200" value="3" /></label>
+        </div>
+      </div>
+      <div id="bgPickWrap" hidden>
+        <div class="bg-pick-list" id="bgPickList">${chapters.map((c) => {
+          const w = wordsOf(c);
+          return `<label class="find-check bg-pick-row"><input type="checkbox" value="${esc(c.id)}" />第 ${c.no} 章 · ${esc((c.title || '未命名').slice(0, 40))}<span class="dim small">${fmtWords(w)} 字</span></label>`;
+        }).join('')}</div>
+      </div>
+      <div class="dim small" id="bgEstimate"></div>
+      <div class="modal-foot"><button class="btn btn-text" id="bgCancel">关闭</button><button class="btn btn-primary" id="bgStart">开始生成</button></div>`, (box) => {
+        const segBtns = [...box.querySelectorAll('#bgModeSeg button')];
+        const rangeWrap = box.querySelector('#bgRangeWrap');
+        const pickWrap = box.querySelector('#bgPickWrap');
+        const fromEl = box.querySelector('#bgFrom');
+        const countEl = box.querySelector('#bgCount');
+        const estimateEl = box.querySelector('#bgEstimate');
+        const startBtn = box.querySelector('#bgStart');
+        const checkedIds = () => [...box.querySelectorAll('#bgPickList input:checked')].map((el) => el.value);
+        let mode = 'range';
+        const estimate = () => {
+          let n = 0;
+          if (mode === 'range') {
+            const from = Number(fromEl.value) || 0;
+            const count = Math.max(1, Math.min(200, Number(countEl.value) || 1));
+            n = Math.max(0, Math.min(count, chapters.length - from));
+          } else {
+            n = checkedIds().length;
+          }
+          estimateEl.textContent = n > 0
+            ? `将生成 ${n} 章 · 约 ${n} 次模型调用（按你接入的模型计费收费）`
+            : '还没选章节——先选一个范围，或勾几章。';
+          startBtn.disabled = n === 0;
+          return n;
+        };
+        segBtns.forEach((btn) => {
+          btn.onclick = () => {
+            mode = btn.dataset.bgmode;
+            segBtns.forEach((b) => {
+              b.classList.toggle('on', b === btn);
+              b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+            });
+            rangeWrap.hidden = mode !== 'range';
+            pickWrap.hidden = mode !== 'pick';
+            estimate();
+          };
+        });
+        fromEl.onchange = () => { estimate(); };
+        countEl.oninput = () => { estimate(); };
+        box.querySelector('#bgPickList').addEventListener('change', estimate);
+        box.querySelector('#bgCancel').onclick = () => closeModal();
+        startBtn.onclick = () => {
+          if (!estimate()) return;
+          let queue;
+          if (mode === 'range') {
+            const from = Math.max(0, Math.min(chapters.length - 1, Number(fromEl.value) || 0));
+            const count = Math.max(1, Math.min(200, Number(countEl.value) || 1));
+            queue = [];
+            for (let i = 0; i < count && from + i < chapters.length; i += 1) {
+              const c = chapters[from + i];
+              queue.push({ id: c.id, no: c.no, title: c.title || '未命名', status: 'pending', error: '' });
+            }
+          } else {
+            const wanted = new Set(checkedIds());
+            queue = chapters.filter((c) => wanted.has(c.id))
+              .map((c) => ({ id: c.id, no: c.no, title: c.title || '未命名', status: 'pending', error: '' }));
+          }
+          if (!queue.length) return toast('没选中任何章节', 'err');
+          closeModal();
+          startBatchGen(novel, queue);
+        };
+        estimate();
+      });
   });
-  if (!count) return;
-  const lastNo = S.novel.chapters[idx + count - 1]?.no || S.novel.chapters[S.novel.chapters.length - 1]?.no;
-  for (let k = 0; k < count && idx + k < S.novel.chapters.length; k += 1) {
-    const target = S.novel.chapters[idx + k];
-    selectChapter(target.id);
-    // 列表选中即可，不需要额外等待——真卡住先去掉试试
-    await runStream({
+}
+$('#batchHintBtn').addEventListener('click', batchGenerateChapters);
+
+/** 真正启动 / 恢复批量生成队列（复试失败章节时复用同一条队列）
+ *  onlyId：单条重试时只重跑这一章，其余条目原地不动 */
+function resumeBatchGen(novel, onlyId = '') {
+  if (batchGen.running) return;
+  batchGen.running = true;
+  batchGen.stopped = false;
+  batchGen.paused = false;
+  S.batchController = new AbortController();
+  runBatchGenLoop(novel, onlyId);
+}
+
+function startBatchGen(novel, queue) {
+  batchGen.novel = novel;
+  batchGen.queue = queue;
+  batchGen.calls = 0;
+  openBatchGenCard();          // 先把任务卡开着，再跑
+  resumeBatchGen(novel);
+}
+
+async function runBatchGenLoop(novel, onlyId = '') {
+  for (const item of batchGen.queue) {
+    if (onlyId && item.id !== onlyId) continue;   // 只重试这一章，其余条目不动
+    if (item.status !== 'done') await genBatchItem(novel, item);
+  }
+  S.batchController = null;
+  batchGen.running = false;
+  paintBatchGenCard();
+  const done = batchGen.queue.filter((q) => q.status === 'done').length;
+  const failed = batchGen.queue.filter((q) => q.status === 'error').length;
+  if (done || failed) {
+    toast(`批量生成结束：完成 ${done} 章${failed ? `，失败 ${failed} 章（可点「重试」）` : ''}。草稿都在各章输出区里。`, failed ? 'err' : 'ok');
+  }
+}
+
+/** 生成一章并存进该章的输出区暂存；失败 / 停止会回到排队或标失败 */
+async function genBatchItem(novel, item) {
+  const ac = S.batchController;
+  if (batchGen.stopped || ac?.signal.aborted) { item.status = 'pending'; paintBatchGenCard(); return; }
+  // 暂停：等在这里，不发新请求
+  while (batchGen.paused && !batchGen.stopped && !ac?.signal.aborted) {
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  if (batchGen.stopped || ac?.signal.aborted) { item.status = 'pending'; paintBatchGenCard(); return; }
+  item.status = 'running';
+  batchGen.calls += 1;
+  paintBatchGenCard();
+  try {
+    const acc = await runStream({
       task: 'chapter',
-      novelId: S.novel.id,
-      chapterId: target.id,
+      novelId: novel.id,
+      chapterId: item.id,
       model: $('#genModel').value.trim() || undefined,
       payload: {
         instruction: $('#genReq').value.trim() || undefined,
         targetWords: Number($('#genWords').value) || undefined,
         extraQuery: $('#genReq').value.trim() || undefined,
       },
-    });
-    if (k < count - 1 && S.novel.chapters[idx + k + 1]) {
-      const nextNo = S.novel.chapters[idx + k + 1].no;
-      const go = await askBatchNext(`第 ${target.no} 章「${target.title || '未命名'}」已生成。`, `继续第 ${nextNo} 章 →`);
-      if (go !== 'next') break;
+    }, { target: 'diag', allowBatch: true });
+    if (batchGen.stopped || ac?.signal.aborted) { item.status = 'pending'; paintBatchGenCard(); return; }
+    if (acc && acc.trim()) {
+      const key = outDraftKey(novel.id, item.id);
+      outDrafts.set(key, { out: acc, outTask: 'chapter', outModel: '', outMd: false, reasoning: '' });
+      item.status = 'done';
+      item.error = '';
+      // 作者正停在这一章时，草稿完成了就直接亮在输出区里，不用切走再切回来
+      if (S.chapterId === item.id) {
+        loadOutDraft(novel.id, item.id);
+        renderOut();
+      }
     } else {
-      toast(`已生成，逐章点「追加到正文」落稿。`, 'ok');
+      item.status = 'error';
+      item.error = '模型这一回没写出内容（可能是 Key / 额度 / 模型名问题）';
     }
+  } catch (err) {
+    if (batchGen.stopped || ac?.signal.aborted || err?.name === 'AbortError') { item.status = 'pending'; paintBatchGenCard(); return; }
+    item.status = 'error';
+    item.error = err?.message || '失败';
   }
+  paintBatchGenCard();
 }
-$('#batchHintBtn').addEventListener('click', batchGenerateChapters);
+
+/** 批量生成任务卡 */
+function openBatchGenCard() {
+  const novel = batchGen.novel;
+  if (!novel) return;
+  const queue = batchGen.queue;
+  const total = queue.length;
+  showModal(`<h3>批量生成 · 《${esc(novel.title)}》</h3>
+    <p class="modal-sub">每章 1 次模型调用；草稿按章节分别暂存，不覆盖正文。关掉面板也能继续跑——到对应章后点「追加到正文」落稿。</p>
+    <div class="batch-progress">
+      <div class="batch-bar"><i id="bgBar"></i></div>
+      <div class="batch-line"><span id="bgNow">准备中…</span><span id="bgNums">0 / ${total}</span></div>
+      <div class="dim small" id="bgMeta"></div>
+    </div>
+    <ul class="bg-list" id="bgItems">${queue.map(bgItemHtml).join('')}</ul>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="bgPause">暂停</button>
+      <button class="btn btn-danger-ghost" id="bgStop">停止</button>
+      <span style="flex:1 1 auto"></span>
+      <button class="btn btn-primary" id="bgHide">关闭面板</button>
+    </div>`, (box) => {
+      batchGen.cardBox = box;
+      box.querySelector('#bgPause').onclick = () => {
+        batchGen.paused = !batchGen.paused;
+        paintBatchGenCard();
+      };
+      box.querySelector('#bgStop').onclick = () => {
+        batchGen.stopped = true;
+        batchGen.paused = false;
+        try { S.controller?.abort(); } catch { /* 该停的停 */ }
+        paintBatchGenCard();
+      };
+      box.querySelector('#bgHide').onclick = closeModal;
+      box.querySelector('#bgItems').addEventListener('click', (e) => {
+        const btn = e.target.closest('.bg-retry');
+        if (!btn) return;
+        const item = batchGen.queue.find((q) => q.id === btn.dataset.id);
+        if (!item) return;
+        item.status = 'pending';
+        item.error = '';
+        paintBatchGenCard();
+        resumeBatchGen(novel, item.id);   // 单条重试：只重跑这一章，已完成的不会再跑一遍
+      });
+      paintBatchGenCard();
+    });
+}
+
+function paintBatchGenCard() {
+  const box = batchGen.cardBox;
+  if (!box || !box.isConnected) { batchGen.cardBox = null; return; }
+  const queue = batchGen.queue;
+  const total = queue.length;
+  const done = queue.filter((q) => q.status === 'done').length;
+  const failed = queue.filter((q) => q.status === 'error').length;
+  const settled = done + failed;
+  const runningIdx = queue.findIndex((q) => q.status === 'running');
+  const bar = box.querySelector('#bgBar');
+  if (bar) bar.style.width = `${total ? Math.round((settled / total) * 100) : 0}%`;
+  const nums = box.querySelector('#bgNums');
+  if (nums) nums.textContent = `${settled} / ${total}`;
+  const now = box.querySelector('#bgNow');
+  if (now) {
+    if (batchGen.stopped) now.textContent = runningIdx >= 0 ? '正在停止…' : '已停止';
+    else if (batchGen.paused) now.textContent = runningIdx >= 0 ? `已暂停（第 ${runningIdx + 1}/${total} 章跑完后再看）` : `已暂停（第 ${settled + 1}/${total} 章）`;
+    else if (runningIdx >= 0) now.textContent = `第 ${runningIdx + 1}/${total} 章《${queue[runningIdx].title || '未命名'}》`;
+    else if (settled === total && total > 0) now.textContent = '全部完成';
+    else now.textContent = '准备中…';
+  }
+  const meta = box.querySelector('#bgMeta');
+  if (meta) meta.textContent = `已调用模型 ${batchGen.calls} 次${failed ? ` · 失败 ${failed} 章` : ''}${done ? ` · 完成 ${done} 章` : ''}`;
+  for (const li of box.querySelectorAll('.bg-item')) {
+    const item = queue.find((q) => q.id === li.dataset.id);
+    if (!item) continue;
+    li.className = `bg-item status-${item.status}`;
+    li.querySelector('.bg-badge').textContent = BG_STATUS[item.status] || '排队';
+    const note = li.querySelector('.bg-note');
+    if (note) note.textContent = item.status === 'done' ? '草稿已存进该章输出区' : item.error || '';
+    const retry = li.querySelector('.bg-retry');
+    if (retry) retry.hidden = item.status !== 'error';
+  }
+  const allSettled = settled === total;
+  const pauseBtn = box.querySelector('#bgPause');
+  if (pauseBtn) {
+    pauseBtn.disabled = allSettled || batchGen.stopped;
+    pauseBtn.textContent = batchGen.paused ? '继续' : '暂停';
+  }
+  const stopBtn = box.querySelector('#bgStop');
+  if (stopBtn) stopBtn.disabled = allSettled || batchGen.stopped;
+}
 
 async function continueWriting() {
   const ch = currentChapter();
@@ -9661,6 +10164,51 @@ function ccAiScanItems(raw, source, chapter) {
    同一来源、同一指纹的结果只保留一条，重复执行时刷新内容，不堆积视觉重复项 */
 let ccItems = [];
 let ccSeq = 0;
+let ccLoadedNovelId = null;             // ccItems 当前属于哪本书
+const ccFilter = { source: '', severity: '', status: 'open' };
+const ccSelected = new Set();           // 勾选中的条目标 id
+
+function ccItemStatus(it) {
+  if (it?.status === 'fixed' || it?.status === 'ignored') return it.status;
+  return 'open';
+}
+
+/** 持久化检查结果：只留最近 200 条、每条裁掉超长引文/批注原文，刷新后仍在 */
+function ccPersistAll() {
+  const novel = S.novel;
+  if (!novel) return;
+  const items = ccItems.slice(-200).map((it) => ({
+    ...it,
+    detail: typeof it?.detail === 'string' ? it.detail.slice(0, 1500) : it?.detail,
+    quote: typeof it?.quote === 'string' ? it.quote.slice(0, 300) : it?.quote,
+  }));
+  novel.meta = { ...(novel.meta || {}), checkResults: items };
+  saveNovelPart({ meta: novel.meta });
+}
+
+/** 切换作品 / 启动时从作品 meta 里恢复检查结果 */
+function ccHydrate() {
+  const novel = S.novel;
+  ccItems = [];
+  ccSelected.clear();
+  ccFilter.source = '';
+  ccFilter.severity = '';
+  ccFilter.status = 'open';
+  if (novel) {
+    const raw = Array.isArray(novel.meta?.checkResults) ? novel.meta.checkResults : [];
+    ccItems = raw.filter((x) => x && typeof x === 'object').slice(-200);
+  }
+  ccHydrateSeq(ccItems);
+}
+
+function ccHydrateSeq(list) {
+  let maxSeq = 0;
+  for (const it of list) {
+    const m = /^cc-([0-9a-z]+)-(\d+)$/.exec(String(it?.id || ''));
+    if (m) maxSeq = Math.max(maxSeq, Number(m[2]) || 0);
+  }
+  ccSeq = maxSeq;
+}
 
 function ccItemKey(it) {
   return it.fingerprint
@@ -9672,16 +10220,48 @@ function ccAdd(items) {
   for (const raw of items) {
     const key = ccItemKey(raw);
     if (!key) continue;
-    const entry = { id: `cc-${Date.now().toString(36)}-${++ccSeq}`, ignored: false, ...raw };
+    const entry = { id: `cc-${Date.now().toString(36)}-${++ccSeq}`, status: 'open', ...raw };
     const idx = ccItems.findIndex((it) => ccItemKey(it) === key);
     if (idx >= 0) {
+      // 同键再次命中：刷新内容，但保留它原本的状态（已忽略 / 已修），别把用户的标记冲掉
       entry.id = ccItems[idx].id;
+      entry.status = ccItemStatus(ccItems[idx]);
       ccItems[idx] = entry;
     } else {
       ccItems.push(entry);
     }
   }
+  ccPersistAll();
   ccRender();
+}
+
+const CC_STATUS_LABEL = { open: '待修', fixed: '已修', ignored: '已忽略' };
+
+/** 应用当前筛选，得到列表里可见的条目 */
+function ccVisibleItems() {
+  return ccItems.filter((it) => {
+    const status = ccItemStatus(it);
+    if (ccFilter.status !== 'all' && status !== ccFilter.status) return false;
+    if (ccFilter.source && it.source !== ccFilter.source) return false;
+    if (ccFilter.severity) {
+      const sev = it.severity || 'hint';
+      if (ccFilter.severity === 'warn' ? (sev !== 'warn' && sev !== 'high') : sev !== ccFilter.severity) return false;
+    }
+    return true;
+  });
+}
+
+/** 把「来源」下拉填上当前列表里实际出现过的来源（加上已知来源全集），保留已选项 */
+function ccFillSourceOptions() {
+  const sel = $('#ccFilterSource');
+  if (!sel) return;
+  const present = new Set(ccItems.map((it) => it.source));
+  const current = ccFilter.source;
+  const html = ['<option value="">全部来源</option>']
+    .concat(Object.keys(CC_SOURCES).filter((s) => present.has(s)).map((s) => `<option value="${esc(s)}">${esc(CC_SOURCES[s])}</option>`))
+    .join('');
+  sel.innerHTML = html;
+  sel.value = [...sel.options].some((o) => o.value === current) ? current : '';
 }
 
 function ccRender() {
@@ -9690,6 +10270,7 @@ function ccRender() {
   const ch = currentChapter();
   const revs = ch ? revisionsOf(ch) : [];
   const revCountEl = $('#revCount');
+  const openCount = ccItems.filter((it) => ccItemStatus(it) === 'open').length;
   if (revCountEl) {
     const open = revs.filter((r) => !r.done).length;
     const done = revs.length - open;
@@ -9697,9 +10278,7 @@ function ccRender() {
     revCountEl.classList.toggle('done', revs.length > 0 && open === 0);
     const hintEl = $('#checkFoldHint');
     if (hintEl) {
-      const openCount = revs.filter((r) => !r.done).length;
-      const checkCount = ccItems.filter((it) => !it.ignored).length;
-      hintEl.textContent = (openCount || checkCount) ? `${openCount + checkCount} 项待修` : '';
+      hintEl.textContent = (open || openCount) ? `${open + openCount} 项待修` : '';
     }
   }
   const revHtml = revs
@@ -9707,7 +10286,17 @@ function ccRender() {
     .sort((a, b) => Number(!!a.done) - Number(!!b.done) || (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))
     .map((rev) => revisionItemHtml(rev, ch?.no))
     .join('');
-  const visible = ccItems.filter((it) => !it.ignored);
+  // 筛选条：列表空时不显示；有结果时随时可筛
+  const filterRow = $('#ccFilterRow');
+  if (filterRow) filterRow.hidden = ccItems.length === 0;
+  ccFillSourceOptions();
+  const srcSel = $('#ccFilterSource');
+  const sevSel = $('#ccFilterSev');
+  const statusSel = $('#ccFilterStatus');
+  if (srcSel) srcSel.value = ccFilter.source;
+  if (sevSel) sevSel.value = ccFilter.severity;
+  if (statusSel) statusSel.value = ccFilter.status;
+  const visible = ccVisibleItems();
   const checkHtml = visible.map(ccItemHtml).join('');
   listEl.innerHTML = `${revHtml}${revHtml && checkHtml ? '<li class="cc-group-title">检查结果</li>' : ''}${checkHtml}`;
   const emptyEl = $('#checkEmpty');
@@ -9716,10 +10305,29 @@ function ccRender() {
   if (foot) {
     foot.hidden = visible.length === 0;
     const info = $('#checkFootInfo');
-    if (info) info.textContent = `${visible.length} 条检查结果`;
+    if (info) info.textContent = ccFilter.status === 'open'
+      ? `${visible.length} 条待修${openCount > visible.length ? `（共 ${ccItems.length} 条）` : ''}`
+      : `${visible.length} 条${ccFilter.status === 'all' ? '' : CC_STATUS_LABEL[ccFilter.status] || ''}`;
   }
   const restoreBtn = $('#ccRestoreAll');
   if (restoreBtn) restoreBtn.hidden = ignoredCount() === 0;
+  // 勾选状态 → 批量条
+  for (const id of [...ccSelected]) {
+    if (!ccItems.some((it) => it.id === id)) ccSelected.delete(id);
+  }
+  const batchBar = $('#ccBatchBar');
+  const info = $('#ccBatchInfo');
+  const selectAll = $('#ccSelectAll');
+  const selectWrap = $('#ccSelectAllWrap');
+  const visibleIds = new Set(visible.map((it) => it.id));
+  const checkedVisible = visible.filter((it) => ccSelected.has(it.id)).length;
+  if (batchBar) batchBar.hidden = ccSelected.size === 0;
+  if (info) info.textContent = `已选 ${ccSelected.size} 条`;
+  if (selectAll && selectWrap) {
+    selectWrap.hidden = visible.length === 0;
+    selectAll.checked = visible.length > 0 && checkedVisible === visible.length;
+    selectAll.indeterminate = checkedVisible > 0 && checkedVisible < visible.length;
+  }
 }
 
 function ignoredCount() {
@@ -9734,6 +10342,8 @@ function ccItemHtml(it) {
   const chNo = Number(it.chapterNo);
   const chapter = Number.isFinite(chNo) && chNo > 0 ? `第 ${chNo} 章` : '全书';
   const sev = it.severity || 'hint';
+  const status = ccItemStatus(it);
+  const checked = ccSelected.has(it.id) ? ' checked' : '';
   const locateBtn = it.chId
     ? `<button class="btn btn-sm btn-text cc-locate" data-cc-locate="${it.id}">定位</button>`
     : '';
@@ -9746,33 +10356,40 @@ function ccItemHtml(it) {
   const detail = it.detail
     ? `<div class="cc-detail">${esc(it.detail)}</div>`
     : '';
-  return `<li class="cc-item sev-${esc(sev)}" data-cc-id="${it.id}">
-    <div class="cc-item-head">
-      <span class="cc-source">${esc(src)}</span>
-      <span class="cc-chapter">${esc(chapter)}</span>
-      <span class="cc-message">${esc(it.message || '')}</span>
-    </div>
-    ${quote}
-    ${detail}
-    <div class="cc-actions">
-      ${locateBtn}
+  const actions = status === 'open'
+    ? `${locateBtn}
       <button class="btn btn-sm btn-text cc-ignore" data-cc-ignore="${it.id}">忽略</button>
-      ${fixBtn}
+      ${fixBtn}`
+    : `${locateBtn}
+      <button class="btn btn-sm btn-text cc-reopen" data-cc-reopen="${it.id}">恢复待修</button>`;
+  return `<li class="cc-item sev-${esc(sev)} status-${status}" data-cc-id="${it.id}">
+    <label class="cc-check" title="勾选以进行批量处理"><input type="checkbox" data-cc-check="${it.id}"${checked} aria-label="选择这条" /></label>
+    <div class="cc-item-body">
+      <div class="cc-item-head">
+        <span class="cc-source">${esc(src)}</span>
+        <span class="cc-chapter">${esc(chapter)}</span>
+        <span class="cc-status cc-status-${status}">${CC_STATUS_LABEL[status]}</span>
+        <span class="cc-message">${esc(it.message || '')}</span>
+      </div>
+      ${quote}
+      ${detail}
+      <div class="cc-actions">
+        ${actions}
+      </div>
     </div>
   </li>`;
 }
 
 function ccLocateItem(it) {
   const chId = it.chId;
-  if (!chId) return;
+  if (!chId) return toast('这条问题没有对应的章节，可能已经被删了', 'err');
+  const ch = S.novel?.chapters.find((c) => c.id === chId);
+  if (!ch) return toast('这章已经不存在了，请重新检查', 'err');
   if (Number.isFinite(Number(it.start)) && Number.isFinite(Number(it.end))) {
     return jumpToHit(chId, Number(it.start), Math.max(1, Number(it.end) - Number(it.start)));
   }
-  const ch = S.novel?.chapters.find((c) => c.id === chId);
-  if (ch) {
-    setView('studio');
-    openChapterFromIndex(ch.id);
-  }
+  setView('studio');
+  openChapterFromIndex(ch.id);
 }
 
 function ccPersistIgnore(it) {
@@ -9806,16 +10423,30 @@ function ccPersistIgnore(it) {
   return false;
 }
 
-function ccIgnoreItem(it) {
-  ccPersistIgnore(it);
-  ccItems = ccItems.filter((x) => x !== it);
+/** 批量改状态；ignored 会同步进「忽略记忆」，下次检查不再重复列出 */
+function ccSetStatus(ids, status) {
+  const set = new Set(ids);
+  let changed = false;
+  for (const it of ccItems) {
+    if (!set.has(it.id)) continue;
+    if (status === 'ignored') ccPersistIgnore(it);
+    if (ccItemStatus(it) !== status) { it.status = status; changed = true; }
+  }
+  if (set.size) ccPersistAll();
   ccRender();
 }
 
+function ccIgnoreItem(it) {
+  ccSetStatus([it.id], 'ignored');
+}
+
 function ccFixedItem(it) {
-  // 标记已修：立即出列但不进忽略清单——下次检查如果还在就会再出现
-  ccItems = ccItems.filter((x) => x !== it);
-  ccRender();
+  // 标记已修：保留在列表里（切到「已修」可见），不进忽略清单——下次检查如果还在就会再出现
+  ccSetStatus([it.id], 'fixed');
+}
+
+function ccReopenItem(it) {
+  ccSetStatus([it.id], 'open');
 }
 
 function saveProofIgnoreList(list) {
@@ -9831,11 +10462,12 @@ function saveHealthIgnoreList(list) {
   saveNovelPart({ meta: S.novel.meta });
 }
 
-/* 列表里的动作统一委托：定位 / 忽略 / 标记已修 */
+/* 列表里的动作统一委托：定位 / 忽略 / 标记已修 / 恢复待修 */
 $('#checkList')?.addEventListener('click', (e) => {
   const locate = e.target.closest('[data-cc-locate]');
   const ignore = e.target.closest('[data-cc-ignore]');
   const fixed = e.target.closest('[data-cc-fixed]');
+  const reopen = e.target.closest('[data-cc-reopen]');
   if (locate) {
     const it = ccItems.find((x) => x.id === locate.dataset.ccLocate);
     if (it) ccLocateItem(it);
@@ -9849,12 +10481,52 @@ $('#checkList')?.addEventListener('click', (e) => {
   if (fixed) {
     const it = ccItems.find((x) => x.id === fixed.dataset.ccFixed);
     if (it) ccFixedItem(it);
+    return;
+  }
+  if (reopen) {
+    const it = ccItems.find((x) => x.id === reopen.dataset.ccReopen);
+    if (it) ccReopenItem(it);
   }
 });
 
-$('#ccClearAll')?.addEventListener('click', () => {
-  ccItems = [];
+/* 勾选框 → 批量选择 */
+$('#checkList')?.addEventListener('change', (e) => {
+  const box = e.target.closest('[data-cc-check]');
+  if (!box) return;
+  if (box.checked) ccSelected.add(box.dataset.ccCheck);
+  else ccSelected.delete(box.dataset.ccCheck);
   ccRender();
+});
+
+$('#ccSelectAll')?.addEventListener('change', (e) => {
+  const visible = ccVisibleItems();
+  if (e.target.checked) for (const it of visible) ccSelected.add(it.id);
+  else for (const it of visible) ccSelected.delete(it.id);
+  ccRender();
+});
+
+$('#ccFilterSource')?.addEventListener('change', (e) => { ccFilter.source = e.target.value; ccRender(); });
+$('#ccFilterSev')?.addEventListener('change', (e) => { ccFilter.severity = e.target.value; ccRender(); });
+$('#ccFilterStatus')?.addEventListener('change', (e) => { ccFilter.status = e.target.value; ccRender(); });
+
+$('#ccBatchFixed')?.addEventListener('click', () => { ccSetStatus([...ccSelected], 'fixed'); toast('已标记为已修', 'ok'); });
+$('#ccBatchIgnore')?.addEventListener('click', () => { ccSetStatus([...ccSelected], 'ignored'); toast('已忽略', 'ok'); });
+$('#ccBatchRestore')?.addEventListener('click', () => { ccSetStatus([...ccSelected], 'open'); });
+$('#ccBatchClearSel')?.addEventListener('click', () => { ccSelected.clear(); ccRender(); });
+
+$('#ccClearAll')?.addEventListener('click', async () => {
+  const ok = await confirmDialog({
+    title: '清空检查结果',
+    message: '清空当前作品所有检查结果（含已修 / 已忽略的记录）？\n作品正文、「我的修订」和忽略记忆（下次检查不再重复报）都不受影响。',
+    okLabel: '清空',
+    danger: true,
+  });
+  if (!ok) return;
+  ccItems = [];
+  ccSelected.clear();
+  ccPersistAll();
+  ccRender();
+  toast('检查结果已清空', 'ok');
 });
 $('#ccRestoreAll')?.addEventListener('click', () => {
   try {
@@ -15419,8 +16091,8 @@ function openImportModal(file, opts = {}) {
   const newBook = !!opts.newBook;
   if (!newBook && !S.novel) return toast('先打开作品', 'err');
   const more = newBook
-    ? '确认后创建作品并导入，书名可以随时改'
-    : (S.novel.chapters.length ? '追加到现有章节末尾' : '作为这本书的第一批章节');
+    ? '先建作品再导入，书名可以随时改'
+    : '先预览章节清单，再决定怎么落到这本书里';
   showModal(`<h3>${newBook ? '导入已有稿子' : '导入已有文稿'}</h3>
     <p class="modal-sub">${newBook
       ? '选一份旧稿（.txt / .md / .docx），也可以直接粘贴。选好文件后书名默认取文件名，确认后才建作品。'
@@ -15439,6 +16111,31 @@ function openImportModal(file, opts = {}) {
     </label>
     <div class="import-note dim small" id="impNote" hidden></div>
     <label class="find-check" id="impFrontWrap" style="margin-top:8px" hidden><input type="checkbox" id="impFront" /> 连开头的前置内容一起导入（书名页 / 创作说明）</label>
+    <div class="imp-preview" id="impPreview" hidden>
+      <div class="imp-preview-head">
+        <span class="dim small" id="impSummary">正在解析…</span>
+        <span style="flex:1 1 auto"></span>
+        <label class="find-check imp-check-all"><input type="checkbox" id="impCheckAll" checked /> 全选</label>
+      </div>
+      <div class="imp-chapter-list" id="impChapterList"></div>
+      <div class="imp-mode" id="impModeWrap" ${newBook ? 'hidden' : ''}>
+        <label class="field-label">导入到</label>
+        <div class="segmented" id="impModeSeg" role="group" aria-label="导入落点">
+          <button data-mode="append" class="on" aria-pressed="true">追加到末尾</button>
+          <button data-mode="merge" aria-pressed="false">合并同名章</button>
+          <button data-mode="newVolume" aria-pressed="false">导入为新卷</button>
+          <button data-mode="overwrite" aria-pressed="false">覆盖现有章</button>
+        </div>
+      </div>
+      <div class="imp-mode-extra" id="impVolumeWrap" hidden>
+        <label class="field-label">新卷名<input class="input" id="impVolumeName" placeholder="例如：第二卷 · 风雪夜归人" autocomplete="off" /></label>
+      </div>
+      <div class="imp-conflicts" id="impConflicts" hidden>
+        <div class="dim small">同名章逐条确认——「覆盖」= 文件内容替换原章正文，「跳过」= 保留原章不动：</div>
+        <div class="imp-conflict-list" id="impConflictList"></div>
+      </div>
+      <p class="imp-overwrite-warn" id="impOverwriteWarn" hidden></p>
+    </div>
     <div class="modal-foot"><button class="btn btn-text" id="impCancel">取消</button><button class="btn btn-primary" id="impOk">${newBook ? '创建并导入' : '导入'}</button></div>`,
     (box) => {
       const drop = box.querySelector('#impDrop');
@@ -15475,6 +16172,154 @@ function openImportModal(file, opts = {}) {
         note.innerHTML = esc(bits.join(' · '));
       };
 
+      const impState = {
+        seq: 0,
+        total: 0,
+        selected: new Set(),
+        mode: 'append',
+        conflicts: [],
+        conflictChoice: {},
+        timer: 0,
+      };
+      const previewWrap = box.querySelector('#impPreview');
+      const summaryEl = box.querySelector('#impSummary');
+      const listEl = box.querySelector('#impChapterList');
+      const checkAll = box.querySelector('#impCheckAll');
+      const modeWrap = box.querySelector('#impModeWrap');
+      const modeSeg = box.querySelector('#impModeSeg');
+      const volumeWrap = box.querySelector('#impVolumeWrap');
+      const volumeName = box.querySelector('#impVolumeName');
+      const conflictsWrap = box.querySelector('#impConflicts');
+      const conflictList = box.querySelector('#impConflictList');
+      const overwriteWarn = box.querySelector('#impOverwriteWarn');
+      const okBtn = box.querySelector('#impOk');
+      const normTitle = (t) => String(t || '').replace(/\s+/g, '').toLowerCase();
+
+      // 同名章清单（merge 模式用）：按规范化标题配对
+      const findConflicts = (plan) => {
+        const existing = new Map();
+        for (const ch of S.novel?.chapters || []) {
+          const key = normTitle(ch.title);
+          if (key && !existing.has(key)) existing.set(key, ch);
+        }
+        return plan.filter((c) => existing.has(normTitle(c.title)))
+          .map((c) => ({ item: c, existing: existing.get(normTitle(c.title)) }));
+      };
+
+      const renderConflicts = (plan) => {
+        if (newBook) { conflictsWrap.hidden = true; return; }
+        if (impState.mode !== 'merge') { conflictsWrap.hidden = true; return; }
+        impState.conflicts = findConflicts(plan);
+        impState.conflictChoice = {};
+        conflictsWrap.hidden = impState.conflicts.length === 0;
+        if (!impState.conflicts.length) return;
+        conflictList.innerHTML = impState.conflicts.map(({ item, existing }) => `
+          <div class="imp-conflict-row">
+            <span class="imp-conflict-title">第 ${item.index + 1} 章《${esc(item.title)}》 ↔ 已有「${esc(existing.title || '未命名')}」（${fmtWords(countWords(existing.content || ''))} 字）</span>
+            <label class="find-check"><input type="radio" name="imp-conflict-${item.index}" value="overwrite" checked /> 覆盖</label>
+            <label class="find-check"><input type="radio" name="imp-conflict-${item.index}" value="skip" /> 跳过</label>
+          </div>`).join('');
+        for (const { item } of impState.conflicts) impState.conflictChoice[item.index] = 'overwrite';
+      };
+
+      const updateOkLabel = () => {
+        if (newBook) { okBtn.textContent = '创建并导入'; return; }
+        const n = impState.selected.size;
+        if (impState.mode === 'append') okBtn.textContent = `导入（${n} 章 → 末尾）`;
+        else if (impState.mode === 'merge') okBtn.textContent = `合并导入（${impState.conflicts.length} 处同名）`;
+        else if (impState.mode === 'newVolume') okBtn.textContent = `导入为新卷（${n} 章）`;
+        else if (impState.mode === 'overwrite') okBtn.textContent = `覆盖 ${S.novel?.chapters.length || 0} 章并导入`;
+      };
+
+      const updateModeUI = () => {
+        volumeWrap.hidden = impState.mode !== 'newVolume';
+        overwriteWarn.hidden = impState.mode !== 'overwrite';
+        if (impState.mode === 'overwrite') {
+          overwriteWarn.textContent = `覆盖后现有 ${S.novel?.chapters.length || 0} 章（含正文、记忆、批注、场景）全部替换为文件内容；导入前会自动备份一份。`;
+        }
+        modeSeg?.querySelectorAll('button').forEach((b) => {
+          b.classList.toggle('on', b.dataset.mode === impState.mode);
+          b.setAttribute('aria-pressed', b.dataset.mode === impState.mode ? 'true' : 'false');
+        });
+        renderConflicts(impState.plan || []);
+        updateOkLabel();
+      };
+
+      const renderPreview = async () => {
+        const text = ta.value;
+        if (!text.trim()) {
+          previewWrap.hidden = true;
+          impState.plan = null;
+          impState.total = 0;
+          impState.selected = new Set();
+          return;
+        }
+        impState.seq += 1;
+        const seq = impState.seq;
+        previewWrap.hidden = false;
+        summaryEl.textContent = '正在解析…';
+        try {
+          const j = await api.send('/api/import/preview', { text });
+          if (seq !== impState.seq) return;
+          const plan = j.chapters || [];
+          impState.plan = plan;
+          impState.total = plan.length;
+          impState.selected = new Set(plan.map((c) => c.index));
+          const frontCount = plan.filter((c) => c.front).length;
+          const volCount = (j.volumes || []).length;
+          summaryEl.textContent = `识别到 ${j.total} 章${volCount ? ` · ${volCount} 卷` : ''} · ${fmtWords(j.totalWords)} 字${frontCount ? ' · 疑似前言标在首章' : ''}`;
+          listEl.innerHTML = plan.map((c) => `
+            <label class="imp-chapter-row">
+              <input type="checkbox" data-idx="${c.index}" checked />
+              <span class="imp-chapter-no">${c.index + 1}</span>
+              <span class="imp-chapter-title">${esc(c.title || '未命名')}${c.front ? ' <em class="imp-front">疑似前言</em>' : ''}</span>
+              <span class="imp-chapter-words">${fmtWords(c.words)} 字</span>
+            </label>`).join('');
+          checkAll.checked = true;
+          checkAll.indeterminate = false;
+          updateModeUI();
+        } catch (err) {
+          if (seq !== impState.seq) return;
+          summaryEl.textContent = `解析失败：${err.message}`;
+          listEl.innerHTML = '';
+        }
+      };
+
+      const schedulePreview = () => {
+        clearTimeout(impState.timer);
+        impState.timer = setTimeout(renderPreview, 400);
+      };
+
+      checkAll?.addEventListener('change', () => {
+        const on = checkAll.checked;
+        listEl.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = on; });
+        impState.selected = new Set(on ? (impState.plan || []).map((c) => c.index) : []);
+        updateOkLabel();
+      });
+      listEl?.addEventListener('change', (e) => {
+        const cb = e.target.closest('input[type="checkbox"]');
+        if (!cb) return;
+        const idx = Number(cb.dataset.idx);
+        if (cb.checked) impState.selected.add(idx);
+        else impState.selected.delete(idx);
+        checkAll.checked = impState.selected.size === impState.total;
+        checkAll.indeterminate = impState.selected.size > 0 && impState.selected.size < impState.total;
+        updateOkLabel();
+      });
+      modeSeg?.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-mode]');
+        if (!btn) return;
+        impState.mode = btn.dataset.mode;
+        updateModeUI();
+      });
+      conflictList?.addEventListener('change', (e) => {
+        const el = e.target.closest('input[type="radio"]');
+        if (!el) return;
+        const m = /imp-conflict-(\d+)/.exec(el.name);
+        if (m) impState.conflictChoice[Number(m[1])] = el.value;
+        updateOkLabel();
+      });
+
       const loadFile = async (f) => {
         if (!f) return;
         if (!isImportFile(f)) return toast('只支持 .txt / .md / .docx 文件', 'err');
@@ -15497,6 +16342,7 @@ function openImportModal(file, opts = {}) {
             frontWrap.hidden = !front;
             info.textContent = `${f.name} · ${fmtSize(f.size)}`;
             updateDocxNote();
+            renderPreview();
             return;
           }
           resetDocx();
@@ -15505,6 +16351,7 @@ function openImportModal(file, opts = {}) {
           info.textContent = `${f.name} · ${fmtSize(f.size)}`;
           note.hidden = false;
           note.innerHTML = `识别为 <b>${esc(r.enc)}</b> · ${fmtWords(countWords(r.text))} 字 · ${r.text.split('\n').length} 行`;
+          renderPreview();
         } catch (err) {
           resetDocx();
           info.textContent = '.txt / .md / .docx · 最大 20 MB';
@@ -15517,8 +16364,9 @@ function openImportModal(file, opts = {}) {
         if (!docxState) return;
         ta.value = frontBox.checked ? docxState.full : docxState.body;
         updateDocxNote();
+        renderPreview();
       };
-      ta.addEventListener('input', updateDocxNote);
+      ta.addEventListener('input', () => { updateDocxNote(); schedulePreview(); });
 
       drop.onclick = () => input.click();
       drop.addEventListener('keydown', (e) => {
@@ -15548,12 +16396,23 @@ function openImportModal(file, opts = {}) {
       });
 
       box.querySelector('#impCancel').onclick = closeModal;
-      box.querySelector('#impOk').onclick = async () => {
+      okBtn.onclick = async () => {
         const text = ta.value;
         if (!text.trim()) return toast('还没有可导入的正文', 'err');
-        const btn = box.querySelector('#impOk');
-        btn.disabled = true;
-        btn.textContent = '导入中…';
+        if (impState.plan && impState.selected.size === 0) return toast('至少勾选一章再导入', 'err');
+        // 覆盖 = 删掉现有章节，必须二次确认
+        if (!newBook && impState.mode === 'overwrite') {
+          const ok = await confirmDialog({
+            title: '覆盖现有章节',
+            message: `将删除《${S.novel.title}》现有 ${S.novel.chapters.length} 章（正文、记忆、批注、场景全部替换），分卷结构也会清空。\n导入前会自动备份一份，可以再撤回。`,
+            okLabel: '覆盖并导入',
+            danger: true,
+          });
+          if (!ok) return;
+        }
+        const label = okBtn.textContent;
+        okBtn.disabled = true;
+        okBtn.textContent = '导入中…';
         try {
           // 空书架模式：先按书名建作品，再导入；选错文件也不会白建一本
           let novelId = S.novel?.id;
@@ -15567,14 +16426,39 @@ function openImportModal(file, opts = {}) {
             }
             novelId = newBookId;
           }
-          const r = await api.send(`/api/novels/${novelId}/import`, { text });
+          const body = { text, mode: newBook ? 'append' : impState.mode };
+          if (impState.plan && impState.selected.size !== impState.total) {
+            body.selected = [...impState.selected];
+          }
+          if (impState.mode === 'merge') body.merge = impState.conflictChoice;
+          if (impState.mode === 'newVolume') body.newVolumeName = volumeName?.value?.trim() || '';
+          const r = await api.send(`/api/novels/${novelId}/import`, body);
           closeModal();
-          await openNovel(novelId, { chapterId: r.firstChapterId });
-          toast(`导入 ${r.imported} 章${r.volumes ? ` · ${r.volumes} 卷` : ''}`, 'ok');
+          await openNovel(novelId, { chapterId: r.firstChapterId || undefined });
+          const bits = [`导入 ${r.imported} 章`];
+          if (r.replaced) bits.push(`合并 ${r.replaced} 章`);
+          if (r.skipped) bits.push(`跳过 ${r.skipped} 章`);
+          if (r.volumes) bits.push(`${r.volumes} 卷`);
+          const snapTs = r.snapTs;
+          const openId = novelId;
+          toast(bits.join(' · '), 'ok', {
+            label: '撤销本次导入',
+            onClick: async () => {
+              if (!snapTs) return toast('这次导入没留下备份点，撤不了了', 'err');
+              try {
+                await api.send(`/api/novels/${openId}/restore`, { ts: snapTs });
+                await loadNovels();
+                await openNovel(openId);
+                toast('已撤销本次导入，恢复到导入前', 'ok');
+              } catch (err) {
+                toast(`撤销失败：${err.message}`, 'err');
+              }
+            },
+          });
         } catch (err) {
           toast(`导入失败：${err.message}`, 'err');
-          btn.disabled = false;
-          btn.textContent = newBook ? '创建并导入' : '导入';
+          okBtn.disabled = false;
+          okBtn.textContent = label;
         }
       };
 
@@ -16198,6 +17082,15 @@ function diffParagraphs(oldText, newText) {
   return ops;
 }
 
+/** 段落对比 → HTML（版本对比弹窗与全书变更摘要共用） */
+function paragraphDiffHtml(ops) {
+  return ops.map((o) => `
+    <div class="diff-line ${o.type}">
+      <span class="diff-sign">${o.type === 'add' ? '+' : o.type === 'del' ? '−' : '·'}</span>
+      <p>${esc(o.text)}</p>
+    </div>`).join('');
+}
+
 async function openSnapshotDiff(snap, query = '') {
   const ch = currentChapter();
   if (!ch) return toast('先选择一章', 'err');
@@ -16283,14 +17176,98 @@ async function openSnapshotDiff(snap, query = '') {
     }
   };
 
-  listEl.innerHTML = `${titleNote}${ops.map((o) => `
-    <div class="diff-line ${o.type}">
-      <span class="diff-sign">${o.type === 'add' ? '+' : o.type === 'del' ? '−' : '·'}</span>
-      <p>${esc(o.text)}</p>
-    </div>`).join('')}`;
+  listEl.innerHTML = `${titleNote}${paragraphDiffHtml(ops)}`;
   const apply = () => listEl.classList.toggle('only-changes', !showSame.checked);
   showSame.onchange = apply;
   apply();
+}
+
+/* ============================================================
+ * 全书变更摘要（#37）：快照 ↔ 当前版本
+ * ============================================================ */
+const BOOK_DIFF_AREA = { meta: '文风与基本设定', characters: '人物卡', world: '世界观', timeline: '事件时间线', outline: '大纲' };
+
+async function openSnapshotBookDiff(snap, query = '') {
+  if (!S.novel || !snap) return;
+  const novelId = S.novel.id;
+  const label = `${fmtDate(snap.ts)} · ${SNAP_KINDS[snap.kind] || '快照'}`;
+  const box = showModal(`<h3>全书变更摘要 · ${esc(fmtDate(snap.ts))}</h3>
+    <p class="modal-sub">快照 ↔ 当前版本：哪些章新增 / 删除 / 改了多少字，以及设定库、大纲、人物卡、文风规则的变化。点章节行可展开看段落对比。</p>
+    <div class="diff-sum" id="bkSum">读取中…</div>
+    <div class="book-diff-chapters" id="bkChapters"></div>
+    <div class="book-diff-sections" id="bkChanges"></div>
+    <div class="diff-list only-changes" id="bkChapterDiff" hidden></div>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="bkBack">返回版本历史</button>
+      <button class="btn" id="bkClose">关闭</button>
+    </div>`, (b) => {
+      b.querySelector('#bkBack').onclick = () => openHistory(query);
+      b.querySelector('#bkClose').onclick = closeModal;
+    }, { wide: true });
+  const sumEl = box.querySelector('#bkSum');
+  const chaptersEl = box.querySelector('#bkChapters');
+  const changesEl = box.querySelector('#bkChanges');
+  const chapterDiffEl = box.querySelector('#bkChapterDiff');
+  try {
+    const j = await api.get(`/api/novels/${novelId}/snapshots/${snap.ts}/summary`);
+    const s = j.summary || {};
+    sumEl.innerHTML = `<span class="d-add">+${s.chaptersAdded} 章新增</span><span class="d-del">−${s.chaptersRemoved} 章删除</span><span>${s.chaptersModified} 章修改</span><span>${fmtWords(s.wordsBefore)} 字 → ${fmtWords(s.wordsAfter)} 字（${s.wordsDelta >= 0 ? '+' : '−'}${fmtWords(Math.abs(s.wordsDelta))}）</span>`;
+    const items = j.chapters || [];
+    if (!items.length) {
+      chaptersEl.innerHTML = '<div class="diff-empty">章节没有变化。</div>';
+    } else {
+      chaptersEl.innerHTML = items.map((it) => {
+        const badge = it.change === 'added' ? '新增' : it.change === 'removed' ? '删除' : '修改';
+        const delta = it.deltaWords >= 0 ? `+${fmtWords(it.deltaWords)} 字` : `−${fmtWords(Math.abs(it.deltaWords))} 字`;
+        return `<button type="button" class="book-diff-row" data-id="${esc(it.id)}" data-change="${it.change}">
+          <span class="book-diff-badge ${it.change}">${badge}</span>
+          <span class="book-diff-title">第 ${it.no} 章 · ${esc(it.title || '未命名')}</span>
+          <span class="book-diff-words">${delta}</span>
+        </button>`;
+      }).join('');
+      chaptersEl.querySelectorAll('.book-diff-row').forEach((row) => {
+        row.onclick = async () => {
+          const id = row.dataset.id;
+          const change = row.dataset.change;
+          chapterDiffEl.hidden = false;
+          if (change === 'added') {
+            chapterDiffEl.innerHTML = '<div class="diff-empty">这一章是后来新增的——快照里没有它，无法做段落对比。</div>';
+            return;
+          }
+          if (change === 'removed') {
+            chapterDiffEl.innerHTML = '<div class="diff-empty">这一章在快照里有、现在已删——无法做段落对比。「恢复此版本」会把它找回来。</div>';
+            return;
+          }
+          chapterDiffEl.innerHTML = '<div class="diff-empty">读取备份中…</div>';
+          try {
+            const jj = await api.get(`/api/novels/${novelId}/snapshots/${snap.ts}/chapter/${id}`);
+            if (!jj.chapter) throw new Error(jj.error || '这一版里找不到这一章');
+            const cur = S.novel?.chapters.find((c) => c.id === id);
+            const idx = (S.novel?.chapters || []).findIndex((c) => c.id === id);
+            chapterDiffEl.innerHTML = `<div class="book-diff-chapter-head">第 ${idx + 1} 章 · 段落对比（只显示改动）</div>${paragraphDiffHtml(diffParagraphs(jj.chapter.content, cur?.content || ''))}`;
+          } catch (err) {
+            chapterDiffEl.innerHTML = `<div class="diff-empty">读取失败：${esc(err.message)}</div>`;
+          }
+        };
+      });
+    }
+    const changes = j.changes || [];
+    if (!changes.length) {
+      changesEl.innerHTML = '<div class="diff-empty">设定库、大纲、人物卡、文风规则没有变化。</div>';
+    } else {
+      changesEl.innerHTML = `<div class="book-diff-changes-head">设定库 / 大纲 / 文风（${changes.length} 处变化）</div>${changes.map((c) => `<details class="book-diff-change">
+        <summary><span class="book-diff-area">${esc(BOOK_DIFF_AREA[c.area] || '变化')}</span><span class="book-diff-label">${esc(c.label || '')}</span></summary>
+        <div class="book-diff-cols">
+          <div class="book-diff-col"><div class="book-diff-col-head">快照</div><pre>${esc(c.before || '')}</pre></div>
+          <div class="book-diff-col"><div class="book-diff-col-head">现在</div><pre>${esc(c.after || '')}</pre></div>
+        </div>
+      </details>`).join('')}`;
+    }
+  } catch (err) {
+    sumEl.textContent = '';
+    chaptersEl.innerHTML = '';
+    changesEl.innerHTML = `<div class="diff-empty">读取摘要失败：${esc(err.message)}</div>`;
+  }
 }
 
 async function openHistory(presetWord = '') {
@@ -16359,6 +17336,7 @@ async function openHistory(presetWord = '') {
           </div>
           <div class="hist-actions">
             <button class="btn btn-sm btn-text hist-diff" data-ts="${s.ts}" title="对比当前章与这一版的正文">${ico('eye')}对比</button>
+            <button class="btn btn-sm btn-text hist-bookdiff" data-ts="${s.ts}" title="全书变更摘要：哪些章新增 / 删除 / 修改了多少字、设定库 / 大纲 / 人物卡的变化">${ico('activity')}全书</button>
             <button class="btn btn-sm hist-restore" data-ts="${s.ts}">${ico('rotate')}恢复</button>
           </div>
         </div>`).join(''));
@@ -16368,15 +17346,42 @@ async function openHistory(presetWord = '') {
           if (snap) openSnapshotDiff(snap, qEl.value.trim());
         };
       });
+      listEl.querySelectorAll('.hist-bookdiff').forEach((btn) => {
+        btn.onclick = () => {
+          const snap = byTs.get(btn.dataset.ts);
+          if (snap) openSnapshotBookDiff(snap, qEl.value.trim());
+        };
+      });
       listEl.querySelectorAll('.hist-restore').forEach((btn) => {
         btn.onclick = async () => {
           const ts = Number(btn.dataset.ts);
+          // 恢复前先拉一遍全书摘要，把「会动哪些章 / 哪些设定」写进确认框
+          let impact = '';
+          const label = btn.innerHTML;
+          btn.disabled = true;
+          btn.textContent = '读取影响范围…';
+          try {
+            const j = await api.get(`/api/novels/${novelId}/snapshots/${ts}/summary`);
+            const s = j.summary || {};
+            const bits = [];
+            if (s.chaptersAdded) bits.push(`· 快照之后新增的 ${s.chaptersAdded} 章会被删除`);
+            if (s.chaptersRemoved) bits.push(`· 快照里存在、现在已删的 ${s.chaptersRemoved} 章会被找回`);
+            if (s.chaptersModified) bits.push(`· ${s.chaptersModified} 章正文会被替换`);
+            if (s.metaChanges) bits.push(`· 设定库 / 大纲 / 文风 ${s.metaChanges} 处会变`);
+            bits.push(`· 恢复后正文会从 ${fmtWords(s.wordsAfter)} 字变为 ${fmtWords(s.wordsBefore)} 字`);
+            impact = '\n\n' + bits.join('\n');
+          } catch {
+            impact = '';
+          } finally {
+            btn.disabled = false;
+            btn.innerHTML = label;
+          }
           if (!(await confirmDialog({
-        title: '恢复版本',
-        message: `恢复到 ${fmtDate(ts)} 的版本？\n当前内容会先自动备份一份，可以再撤回。`,
-        okLabel: '恢复此版本',
-        danger: true,
-      }))) return;
+         title: '恢复版本',
+         message: `恢复到 ${fmtDate(ts)} 的版本？${impact}\n当前内容会先自动备份一份，可以再撤回。`,
+         okLabel: '恢复此版本',
+         danger: true,
+       }))) return;
           btn.disabled = true;
           try {
             await api.send(`/api/novels/${novelId}/restore`, { ts });

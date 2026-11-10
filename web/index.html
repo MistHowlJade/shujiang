@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow" />
 <meta name="theme-color" content="#f3f1ea" />
 <title>书匠 · AI 长篇小说创作台</title>
-<link rel="stylesheet" href="/style.css?v=1.0.36" />
+<link rel="stylesheet" href="/style.css?v=1.0.37" />
 <style id="designv1011">
   /* 书匠 · v1.0.11「东方典籍」视觉重写 —— 暖墨：衬线 + 赭金 + 朱砂 */
   @font-face { font-family: '思源宋体 VF'; src: local('Noto Serif SC'), local('Noto Serif SC VF'), local('NotoSerifSC-VF'); font-display: swap; }
@@ -944,7 +944,7 @@
                   <div class="quick-group">
                     <span class="quick-group-label">批量</span>
                     <div class="btn-row wrap">
-                      <button class="btn btn-sm btn-text" id="batchHintBtn" title="从当前章开始，连续生成多章草稿；每章你确认后继续，不会覆盖已有正文"><svg class="ico"><use href="#i-spark" /></svg>批量生成（逐章确认）</button>
+                      <button class="btn btn-sm btn-text" id="batchHintBtn" title="选范围或勾选章节，逐章生成草稿；可暂停 / 停止，失败可重试；草稿按章节暂存，不覆盖正文"><svg class="ico"><use href="#i-spark" /></svg>批量生成…</button>
                       <button class="btn btn-sm btn-text" data-quick="batchMemory" title="把还没存记忆的章节批量补上；会逐章调用模型">批量补记忆</button>
                       <button class="btn btn-sm btn-text" id="cmpBtn" title="同一段上下文跑两个模型，并排看，选一个采用"><svg class="ico"><use href="#i-columns" /></svg>对比模型</button>
                     </div>
@@ -1055,6 +1055,21 @@
                     <button class="btn btn-sm btn-primary" id="revAdd"><svg class="ico"><use href="#i-plus" /></svg>添加</button>
                   </div>
                   <p class="rev-hint">先在正文里选中要改的句子，再添加；之后点引文就能跳回原处。</p>
+                  <div class="cc-filter-row" id="ccFilterRow" hidden>
+                    <select class="select" id="ccFilterSource" aria-label="按来源筛选"><option value="">全部来源</option></select>
+                    <select class="select" id="ccFilterSev" aria-label="按严重程度筛选"><option value="">全部级别</option><option value="error">错误</option><option value="warn">警告</option><option value="hint">提示</option></select>
+                    <select class="select" id="ccFilterStatus" aria-label="按状态筛选"><option value="open">待修</option><option value="all">全部状态</option><option value="fixed">已修</option><option value="ignored">已忽略</option></select>
+                    <span style="flex:1 1 auto"></span>
+                    <label class="find-check cc-select-all" id="ccSelectAllWrap"><input type="checkbox" id="ccSelectAll" /> 全选</label>
+                  </div>
+                  <div class="cc-batch-bar" id="ccBatchBar" hidden>
+                    <span class="dim small" id="ccBatchInfo">已选 0 条</span>
+                    <span style="flex:1 1 auto"></span>
+                    <button type="button" class="btn btn-sm btn-text" id="ccBatchFixed">标记已修</button>
+                    <button type="button" class="btn btn-sm btn-text" id="ccBatchIgnore">忽略</button>
+                    <button type="button" class="btn btn-sm btn-text" id="ccBatchRestore">恢复待修</button>
+                    <button type="button" class="btn btn-sm btn-text" id="ccBatchClearSel">取消选择</button>
+                  </div>
                   <ul class="cc-list" id="checkList"></ul>
                   <div class="cc-empty dim small" id="checkEmpty">点上面的检查，结果会聚合到这里；忽略只作用于本机。</div>
                   <div class="cc-foot" id="checkFoot" hidden>
@@ -1077,6 +1092,21 @@
                 <div class="dock-fold-body">
                   <p class="dim small" style="margin:0 0 8px">提醒操作：在正文选中文字，点工具栏的高亮图标添加批注。点列表项可跳转到对应位置。</p>
                   <div id="annotationSidebar"></div>
+                  <div class="book-anno" id="bookAnnoWrap">
+                    <button type="button" class="btn btn-sm btn-text book-anno-toggle" id="bookAnnoToggle" aria-expanded="false" aria-controls="bookAnnoPanel"><svg class="ico"><use href="#i-columns" /></svg>全书批注清单（<span id="bookAnnoCount">0</span>）</button>
+                    <div class="book-anno-panel" id="bookAnnoPanel" hidden>
+                      <div class="book-anno-filters">
+                        <select class="select" id="bookAnnoChapter" aria-label="按章节筛选"><option value="">全部章节</option></select>
+                        <select class="select" id="bookAnnoColor" aria-label="按颜色筛选"><option value="">全部颜色</option></select>
+                        <select class="select" id="bookAnnoStatus" aria-label="按状态筛选"><option value="">全部状态</option><option value="todo">待处理</option><option value="done">已解决</option></select>
+                        <span style="flex:1 1 auto"></span>
+                        <button type="button" class="btn btn-sm btn-text" id="bookAnnoExportMd" title="导出为 Markdown 清单，可粘贴到文档里追踪"><svg class="ico"><use href="#i-download" /></svg>导出 Markdown</button>
+                        <button type="button" class="btn btn-sm btn-text" id="bookAnnoExportCsv" title="导出为 CSV，可用 Excel 打开"><svg class="ico"><use href="#i-download" /></svg>导出 CSV</button>
+                      </div>
+                      <ul class="book-anno-list" id="bookAnnoList"></ul>
+                      <div class="book-anno-empty dim small" id="bookAnnoEmpty" hidden>还没有符合筛选条件的批注。</div>
+                    </div>
+                  </div>
                 </div>
               </details>
             </div>

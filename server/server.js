@@ -655,6 +655,31 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, statsDay(url.searchParams.get('date')));
   }
 
+  /* --- 导入预览（#34）：解析 .txt / .md，返回章节清单，不写盘 --- */
+  if (seg[1] === 'import' && seg[2] === 'preview' && seg.length === 3 && method === 'POST') {
+    const body = await readBody(req);
+    const text = String(body.text || '');
+    if (text.length > 40 * 1024 * 1024) return sendJson(res, 413, { error: '文件太大，建议拆成几份导入' });
+    try {
+      const parsed = parseManuscript(text);
+      const chapters = parsed.chapters.map((p, i) => ({
+        index: i,
+        title: p.title,
+        words: countWords(p.content),
+        volume: p.volume,
+        front: i === 0 && p.title === '前言',
+      }));
+      return sendJson(res, 200, {
+        chapters,
+        volumes: parsed.volumes.map((v) => v.name),
+        total: chapters.length,
+        totalWords: chapters.reduce((s, c) => s + c.words, 0),
+      });
+    } catch (err) {
+      return sendJson(res, 400, { error: `解析失败：${err.message}` });
+    }
+  }
+
   /* --- Word 导入：只解析，不写盘；预览确认后再走作品导入接口 --- */
   if (seg[1] === 'import' && seg[2] === 'docx' && seg.length === 3 && method === 'POST') {
     let buf;
@@ -805,6 +830,17 @@ async function handleApi(req, res, url) {
           content: ch.content || '',
         },
       });
+    }
+    // 全书变更摘要（#37）：快照 ↔ 当前版本——哪些章新增 / 删除 / 修改了多少字，
+    // 以及设定库、大纲、人物卡、文风规则的字段级变化。整份快照只在服务端读，浏览器只拿摘要。
+    if (seg[3] === 'snapshots' && seg.length === 6 && seg[5] === 'summary' && method === 'GET') {
+      const ts = Number(seg[4]);
+      if (!Number.isInteger(ts) || ts <= 0) return sendJson(res, 400, { error: '快照时间无效' });
+      const snap = readSnapshot(id, ts);
+      if (!snap) return sendJson(res, 404, { error: '快照不存在或已被清理' });
+      const cur = getNovel(id);
+      if (!cur) return sendJson(res, 404, { error: '作品不存在' });
+      return sendJson(res, 200, buildSnapshotSummary(snap, cur, ts));
     }
     if (seg[3] === 'restore' && seg.length === 4 && method === 'POST') {
       const body = await readBody(req);
@@ -1208,21 +1244,64 @@ async function handleApi(req, res, url) {
       }
     }
 
-    // 导入已有文稿：按「第X章」切分，按「第X卷」分组。
+    // 导入已有文稿（#34）：先按「第X章」切分、按「第X卷」分组，
+    // 落点由客户端决定——追加（默认）/ 合并同名章 / 导入为新卷 / 覆盖现有章节。
     // 文件读取与编码识别在前端完成（浏览器才有 GBK 解码器），这里只认文本。
     if (seg[3] === 'import' && method === 'POST') {
       const body = await readBody(req);
       const n = getNovel(id);
       if (!n) return sendJson(res, 404, { error: '作品不存在' });
-      const parsed = parseManuscript(body.text || '');
+      const mode = ['append', 'merge', 'newVolume', 'overwrite'].includes(body.mode) ? body.mode : 'append';
+      const selected = Array.isArray(body.selected) ? new Set(body.selected.map(Number)) : null;
+      const parsed = parseManuscript(String(body.text || ''));
       if (!parsed.chapters.length) return sendJson(res, 400, { error: '没有识别到正文，检查一下文件是不是空的' });
-      const volumes = parsed.volumes.map((v) => ({
-        id: newId('v'),
-        name: v.name,
-        desc: '',
-        chapters: [],
-      }));
-      const created = parsed.chapters.map((p) => {
+      const now = Date.now();
+      // 覆盖现有章节：先把旧章节和旧卷清掉，再照文件重建
+      if (mode === 'overwrite') {
+        n.chapters = [];
+        n.outline.volumes = [];
+      }
+      // 只导入勾选的章节
+      const plan = parsed.chapters.map((p, i) => ({ p, i })).filter(({ i }) => !selected || selected.has(i));
+      if (!plan.length) return sendJson(res, 400, { error: '至少勾选一章再导入' });
+      // 导入前自动存一份快照，「撤销本次导入」靠它。
+      // 内容没变时 createSnapshot 会去重返回 null——此时最新的一份快照就是撤销点，别留空
+      let snapTs = null;
+      try {
+        const snap = createSnapshot(n, { kind: 'before-import', label: '导入前', force: true });
+        snapTs = snap?.ts ?? listSnapshots(n.id)[0]?.ts ?? null;
+      } catch { /* 快照存不上不该挡住导入 */ }
+      const normTitle = (t) => String(t || '').replace(/\s+/g, '').toLowerCase();
+      const mergeChoice = body.merge && typeof body.merge === 'object' ? body.merge : {};
+      // 文件自带的分卷：除了「导入为新卷」，其余模式都照常建起来（覆盖模式在上面已清空旧卷）
+      const volumes = mode === 'newVolume'
+        ? []
+        : parsed.volumes.map((v) => ({ id: newId('v'), name: v.name, desc: '', chapters: [] }));
+      const importVolume = mode === 'newVolume'
+        ? { id: newId('v'), name: String(body.newVolumeName || '').trim().slice(0, 40) || '导入卷', desc: '', chapters: [] }
+        : null;
+      const existingByTitle = new Map();
+      for (const ch of n.chapters) {
+        const key = normTitle(ch.title);
+        if (key && !existingByTitle.has(key)) existingByTitle.set(key, ch);
+      }
+      const created = [];
+      let replaced = 0;
+      let skipped = 0;
+      for (const { p, i } of plan) {
+        if (mode === 'merge') {
+          const key = normTitle(p.title);
+          const target = key ? existingByTitle.get(key) : null;
+          if (target) {
+            const action = mergeChoice[i] === 'skip' || mergeChoice[String(i)] === 'skip' ? 'skip' : 'overwrite';
+            if (action === 'skip') { skipped += 1; continue; }
+            // 合并：覆盖正文与标题，保留原章节的阶段 / 记忆 / 批注 / 卷归属
+            target.content = p.content;
+            target.title = p.title;
+            replaced += 1;
+            continue;
+          }
+        }
         const ch = {
           id: newId('c'),
           title: p.title,
@@ -1231,22 +1310,26 @@ async function handleApi(req, res, url) {
           status: 'draft',
           stage: 'draft',
           memory: null,
-          createdAt: Date.now(),
+          createdAt: now,
         };
-        // 卷标题下面的章节写死归属；文件有分卷时，卷前的序言明确标成「未分卷」，
-        // 免得追加到一本已有分卷的书里时，前言被上一卷吸走。
-        if (p.volume != null && volumes[p.volume]) ch.volumeId = volumes[p.volume].id;
+        // 卷归属：新卷模式全进新卷；否则按文件里的卷分组；文件没有卷、但书里有卷 → 明确标成「未分卷」
+        if (importVolume) ch.volumeId = importVolume.id;
+        else if (p.volume != null && volumes[p.volume]) ch.volumeId = volumes[p.volume].id;
         else if (parsed.volumes.length) ch.volumeId = '';
-        return ch;
-      });
+        created.push(ch);
+      }
       if (volumes.length) n.outline.volumes.push(...volumes);
+      if (importVolume) n.outline.volumes.push(importVolume);
       n.chapters.push(...created);
       saveNovel(n);
       return sendJson(res, 200, {
         imported: created.length,
-        volumes: volumes.length,
-        volumeNames: volumes.map((v) => v.name),
-        firstChapterId: created[0].id,
+        replaced,
+        skipped,
+        volumes: volumes.length + (importVolume ? 1 : 0),
+        volumeNames: [...volumes.map((v) => v.name), ...(importVolume ? [importVolume.name] : [])],
+        firstChapterId: created[0]?.id || n.chapters[n.chapters.length - 1]?.id || '',
+        snapTs,
         novel: n,
       });
     }
@@ -1833,6 +1916,215 @@ function parseManuscript(text) {
     if (c.volume != null) c.volume = remap.get(c.volume) ?? null;
   }
   return { chapters, volumes: kept };
+}
+
+/* ------------------------------------------------------------------
+ * 全书变更摘要（#37）：快照 ↔ 当前版本
+ * ------------------------------------------------------------------ */
+
+/** 截短字段值，保证摘要弹窗里不会塞进几千字 */
+function clipField(v, max = 400) {
+  const s = v == null ? '' : String(v);
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+/** 两个纯对象的字段级 diff：返回人类可读的「key：旧 → 新」行（只记真正变了的键） */
+function fieldDiffLines(a, b, { skip = ['id'], max = 5 } = {}) {
+  const out = [];
+  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  for (const k of keys) {
+    if (skip.includes(k)) continue;
+    const av = typeof a?.[k] === 'object' && a?.[k] !== null ? JSON.stringify(a[k]) : String(a?.[k] ?? '');
+    const bv = typeof b?.[k] === 'object' && b?.[k] !== null ? JSON.stringify(b[k]) : String(b?.[k] ?? '');
+    if (av === bv) continue;
+    out.push(`${k}：「${clipField(av, 120)}」→「${clipField(bv, 120)}」`);
+    if (out.length >= max) { out.push('…（还有未显示的字段变化）'); break; }
+  }
+  return out;
+}
+
+/** 设定/大纲/人物/文风的字段级变化，返回 [{ area, label, before, after }] */
+function diffAnnotatedParts(snap, cur) {
+  const changes = [];
+  const metaSnap = snap?.meta || {};
+  const metaCur = cur?.meta || {};
+  const META_FIELDS = [
+    ['logline', 'logline（作品简介）'],
+    ['genre', '类型（genre）'],
+    ['pov', '视角（pov）'],
+    ['tense', '时态（tense）'],
+    ['tone', '基调（tone）'],
+    ['platform', '平台（platform）'],
+    ['styleNotes', '文风Notes'],
+    ['antiAiNotes', '反 AI 味 Notes'],
+    ['taboos', '禁忌/雷区'],
+    ['extraRules', '附加规则'],
+    ['targetWords', '目标字数（targetWords）'],
+    ['targetWordsPerChapter', '单章字数（targetWordsPerChapter）'],
+  ];
+  for (const [key, label] of META_FIELDS) {
+    const before = clipField(metaSnap[key], 300);
+    const after = clipField(metaCur[key], 300);
+    if (before !== after) changes.push({ area: 'meta', label, before, after });
+  }
+  const beforeRefs = JSON.stringify(metaSnap.styleRefs || []);
+  const afterRefs = JSON.stringify(metaCur.styleRefs || []);
+  if (beforeRefs !== afterRefs) changes.push({ area: 'meta', label: '文风参考（styleRefs）', before: clipField(beforeRefs, 300), after: clipField(afterRefs, 300) });
+
+  const matchList = (listA, listB, nameOf) => {
+    const mapB = new Map();
+    for (const item of listB || []) {
+      if (!item) continue;
+      const key = item.id || nameOf(item);
+      if (key && !mapB.has(key)) mapB.set(key, item);
+    }
+    const matched = new Set();
+    const rows = [];
+    for (const a of listA || []) {
+      if (!a) continue;
+      const key = a.id || nameOf(a);
+      const b = key ? mapB.get(key) : null;
+      if (!b) {
+        rows.push({ change: 'removed', item: a });
+        continue;
+      }
+      matched.add(key);
+      const diff = fieldDiffLines(a, b, { skip: ['id'] });
+      if (diff.length) rows.push({ change: 'modified', item: b, prev: a, diff });
+    }
+    for (const b of listB || []) {
+      if (!b) continue;
+      const key = b.id || nameOf(b);
+      if (key && !matched.has(key) && !(listA || []).some((a) => a && ((a.id || nameOf(a)) === key))) {
+        rows.push({ change: 'added', item: b });
+      }
+    }
+    return rows;
+  };
+
+  const nameOfChar = (c) => c?.name || '（未命名）';
+  for (const row of matchList(snap?.bible?.characters, cur?.bible?.characters, nameOfChar)) {
+    const name = nameOfChar(row.item);
+    if (row.change === 'added') changes.push({ area: 'characters', label: `人物「${clipField(name, 40)}」`, before: '（快照里没有此人物）', after: `已新增：${clipField(name, 200)}` });
+    else if (row.change === 'removed') changes.push({ area: 'characters', label: `人物「${clipField(name, 40)}」`, before: `人物卡：${clipField(JSON.stringify(row.item), 300)}`, after: '（当前版本已删除此人物）' });
+    else changes.push({ area: 'characters', label: `人物「${clipField(name, 40)}」`, before: row.diff.map((l) => `旧 ${l}`).join('\n'), after: row.diff.map((l) => `新 ${l}`).join('\n') });
+  }
+
+  const nameOfWorld = (w) => w?.name || w?.title || '（未命名）';
+  for (const row of matchList(snap?.bible?.world, cur?.bible?.world, nameOfWorld)) {
+    const name = clipField(nameOfWorld(row.item), 40);
+    if (row.change === 'added') changes.push({ area: 'world', label: `设定「${name}」`, before: '（快照里没有此条目）', after: `已新增：${clipField(JSON.stringify(row.item), 300)}` });
+    else if (row.change === 'removed') changes.push({ area: 'world', label: `设定「${name}」`, before: clipField(JSON.stringify(row.item), 300), after: '（当前版本已删除此条目）' });
+    else changes.push({ area: 'world', label: `设定「${name}」`, before: row.diff.map((l) => `旧 ${l}`).join('\n'), after: row.diff.map((l) => `新 ${l}`).join('\n') });
+  }
+
+  const nameOfEvent = (e2) => e2?.title || e2?.event || e2?.name || '（未命名事件）';
+  for (const row of matchList(snap?.bible?.timeline, cur?.bible?.timeline, nameOfEvent)) {
+    const name = clipField(nameOfEvent(row.item), 40);
+    if (row.change === 'added') changes.push({ area: 'timeline', label: `事件「${name}」`, before: '（快照里没有此事件）', after: `已新增：${clipField(JSON.stringify(row.item), 300)}` });
+    else if (row.change === 'removed') changes.push({ area: 'timeline', label: `事件「${name}」`, before: clipField(JSON.stringify(row.item), 300), after: '（当前版本已删除此事件）' });
+    else changes.push({ area: 'timeline', label: `事件「${name}」`, before: row.diff.map((l) => `旧 ${l}`).join('\n'), after: row.diff.map((l) => `新 ${l}`).join('\n') });
+  }
+
+  const outlineNotesBefore = clipField(snap?.outline?.notes, 400);
+  const outlineNotesAfter = clipField(cur?.outline?.notes, 400);
+  if (outlineNotesBefore !== outlineNotesAfter) changes.push({ area: 'outline', label: '大纲说明（notes）', before: outlineNotesBefore, after: outlineNotesAfter });
+
+  // 卷：先按 id 配对，配不上就按名字配（快照是整本复制，id 通常能对上）
+  const matchVolumes = (aVols, bVols) => {
+    const keysB = new Map();
+    for (const v of bVols || []) {
+      if (!v) continue;
+      const key = v.id || `name:${v.name || ''}`;
+      if (!keysB.has(key)) keysB.set(key, v);
+    }
+    const rows = [];
+    const used = new Set();
+    for (const a of aVols || []) {
+      if (!a) continue;
+      const key = a.id || `name:${a.name || ''}`;
+      let b = keysB.get(key);
+      // 名字改了 id 也可能配不上，退一步按同位置配对
+      if (!b) b = (bVols || []).find((v, i2) => v && !used.has(i2));
+      if (!b) { rows.push({ change: 'removed', item: a }); continue; }
+      used.add((bVols || []).indexOf(b));
+      const diff = fieldDiffLines(a, b, { skip: ['id'] });
+      if (diff.length) rows.push({ change: 'modified', item: b, prev: a, diff });
+    }
+    for (const b of bVols || []) {
+      if (!b) continue;
+      const idx = (bVols || []).indexOf(b);
+      if (used.has(idx)) continue;
+      const matched = (aVols || []).some((a) => a && ((a.id || `name:${a.name || ''}`) === (b.id || `name:${b.name || ''}`)));
+      if (!matched) rows.push({ change: 'added', item: b });
+    }
+    return rows;
+  };
+  for (const row of matchVolumes(snap?.outline?.volumes, cur?.outline?.volumes)) {
+    const name = clipField(row.item?.name || '（未命名卷）', 40);
+    if (row.change === 'added') changes.push({ area: 'outline', label: `卷「${name}」`, before: '（快照里没有此卷）', after: `已新增：${clipField(JSON.stringify(row.item), 300)}` });
+    else if (row.change === 'removed') changes.push({ area: 'outline', label: `卷「${name}」`, before: clipField(JSON.stringify(row.item), 300), after: '（当前版本已删除此卷）' });
+    else changes.push({ area: 'outline', label: `卷「${name}」`, before: row.diff.map((l) => `旧 ${l}`).join('\n'), after: row.diff.map((l) => `新 ${l}`).join('\n') });
+  }
+
+  const snapChapterEntries = (snap?.outline?.volumes || []).reduce((n, v) => n + (Array.isArray(v?.chapters) ? v.chapters.length : 0), 0);
+  const curChapterEntries = (cur?.outline?.volumes || []).reduce((n, v) => n + (Array.isArray(v?.chapters) ? v.chapters.length : 0), 0);
+  if (snapChapterEntries !== curChapterEntries) {
+    changes.push({ area: 'outline', label: '章纲条目数', before: String(snapChapterEntries), after: String(curChapterEntries) });
+  }
+  return changes.slice(0, 40);
+}
+
+/** 组装「快照 ↔ 当前」的全书摘要（供版本历史弹窗与恢复前确认使用） */
+function buildSnapshotSummary(snap, cur, ts) {
+  const snapChs = snap?.chapters || [];
+  const curChs = cur?.chapters || [];
+  const snapMap = new Map(snapChs.map((c, i) => [c.id, { ch: c, no: i + 1 }]));
+  const curMap = new Map(curChs.map((c, i) => [c.id, { ch: c, no: i + 1 }]));
+  const wordsOfCh = (c) => countWords(c?.content || '');
+  const chapters = [];
+  for (let i = 0; i < curChs.length; i += 1) {
+    const c = curChs[i];
+    const old = snapMap.get(c.id);
+    const wA = wordsOfCh(c);
+    if (!old) {
+      chapters.push({ id: c.id, no: i + 1, title: c.title || '', change: 'added', wordsBefore: 0, wordsAfter: wA, deltaWords: wA });
+      continue;
+    }
+    const wB = wordsOfCh(old.ch);
+    const contentChanged = (old.ch?.content || '') !== (c?.content || '');
+    const titleChanged = (old.ch?.title || '') !== (c?.title || '');
+    if (contentChanged || titleChanged) {
+      chapters.push({ id: c.id, no: i + 1, title: c.title || '', change: 'modified', wordsBefore: wB, wordsAfter: wA, deltaWords: wA - wB });
+    }
+  }
+  for (const c of snapChs) {
+    if (!curMap.has(c.id)) {
+      const wB = wordsOfCh(c);
+      chapters.push({ id: c.id, no: snapMap.get(c.id)?.no || 0, title: c.title || '', change: 'removed', wordsBefore: wB, wordsAfter: 0, deltaWords: -wB });
+    }
+  }
+  chapters.sort((a, b) => (a.no - b.no) || (a.change === 'removed' ? -1 : 0));
+  const wordsBefore = snapChs.reduce((s, c) => s + wordsOfCh(c), 0);
+  const wordsAfter = curChs.reduce((s, c) => s + wordsOfCh(c), 0);
+  const changes = diffAnnotatedParts(snap, cur);
+  const added = chapters.filter((c) => c.change === 'added').length;
+  const removed = chapters.filter((c) => c.change === 'removed').length;
+  const modified = chapters.filter((c) => c.change === 'modified').length;
+  return {
+    ts,
+    chapters,
+    changes,
+    summary: {
+      chaptersAdded: added,
+      chaptersRemoved: removed,
+      chaptersModified: modified,
+      wordsBefore,
+      wordsAfter,
+      wordsDelta: wordsAfter - wordsBefore,
+      metaChanges: changes.length,
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ */
