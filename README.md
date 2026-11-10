@@ -4,7 +4,7 @@
 
 **本地优先 · 运行时零依赖 · 数据可迁移**
 
-当前版本 **v1.0.35**，[更新记录](RELEASE_NOTES.md) · [下载](https://github.com/MistHowlJade/shujiang/releases/latest)
+当前版本 **v1.0.36**，[更新记录](RELEASE_NOTES.md) · [下载](https://github.com/MistHowlJade/shujiang/releases/latest)
 
 ## 界面
 
@@ -23,8 +23,8 @@
 
 | 文件 | 大小 | 说明 |
 | --- | --- | --- |
-| [ShuJiang-Portable-1.0.35.exe](https://github.com/MistHowlJade/shujiang/releases/download/v1.0.35/ShuJiang-Portable-1.0.35.exe) | 105 MB | 单文件便携版，无需安装 |
-| [ShuJiang-1.0.35-win-x64.zip](https://github.com/MistHowlJade/shujiang/releases/download/v1.0.35/ShuJiang-1.0.35-win-x64.zip) | 155 MB | 绿色版，解压后运行 `书匠.exe` |
+| [ShuJiang-Portable-1.0.36.exe](https://github.com/MistHowlJade/shujiang/releases/download/v1.0.36/ShuJiang-Portable-1.0.36.exe) | 105 MB | 单文件便携版，无需安装 |
+| [ShuJiang-1.0.36-win-x64.zip](https://github.com/MistHowlJade/shujiang/releases/download/v1.0.36/ShuJiang-1.0.36-win-x64.zip) | 155 MB | 绿色版，解压后运行 `书匠.exe` |
 
 系统要求：Windows 10 / 11；源码模式需要 Node.js 18+。发布包未签名，首次运行时 Windows SmartScreen 会提示，选择「更多信息 → 仍要运行」即可。便携版不写入系统安装目录，作品数据位于 exe 同级的 `data/`。
 
