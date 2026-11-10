@@ -8043,9 +8043,17 @@ function renderOutActions() {
 
 function renderOut() {
   const box = $('#outBox');
-  box.innerHTML = (S.reasoning ? `<div class="reasoning">${esc(S.reasoning)}</div>` : '')
-    + (S.outMd ? mdLite(S.out) : esc(S.out))
-    + (S.controller ? '<span class="cursor"></span>' : '');
+  if (!S.out && !S.controller) {
+    box.innerHTML = `<div class="out-empty">
+      <svg class="ico"><use href="#i-spark" /></svg>
+      <div class="out-empty-title">等待生成</div>
+      <div class="out-empty-sub">点上方「生成本章」即可；<br>也可以把正文选中一段，用下方弹出的工具条做改写 / 扩写。</div>
+    </div>`;
+  } else {
+    box.innerHTML = (S.reasoning ? `<div class="reasoning">${esc(S.reasoning)}</div>` : '')
+      + (S.outMd ? mdLite(S.out) : esc(S.out))
+      + (S.controller ? '<span class="cursor"></span>' : '');
+  }
   const titleEl = $('#outTitle');
   if (titleEl) titleEl.textContent = S.out ? (GEN_TASK_LABEL[S.outTask] || '草稿') : '草稿';
   box.scrollTop = box.scrollHeight;

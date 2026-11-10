@@ -467,6 +467,16 @@
     background: var(--surface-2);
     overflow: hidden;
   }
+  .dock-fold-icon {
+    flex: 0 0 auto; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
+    color: var(--text-3); flex-shrink: 0;
+  }
+  .dock-fold-icon .ico { width: 15px; height: 15px; }
+  .dock-fold-icon.tone-check { color: #6b8fb5; }
+  .dock-fold-icon.tone-anno { color: #b5873c; }
+  .dock-fold-icon.tone-assist { color: #8a7ec4; }
+  .dock-fold-icon.tone-settings { color: #a4883c; }
+  .dock-fold-icon.tone-tool { color: #d9a25f; }
   .dock-fold > summary {
     display: flex; align-items: center; gap: 8px;
     padding: 9px 11px; cursor: pointer; list-style: none; user-select: none;
@@ -851,6 +861,7 @@
                 </div>
                 <details class="dock-fold gen-settings" id="genSettings">
                   <summary>
+                    <span class="dock-fold-icon tone-settings"><svg class="ico"><use href="#i-settings" /></svg></span>
                     <span>生成设置</span>
                     <span class="dock-fold-hint">本章要求 · 目标字数 · 模型 · 节奏</span>
                   </summary>
@@ -908,7 +919,7 @@
                   <div class="diag-list" id="diagList" hidden></div>
                   <div class="payoff-card" id="payoffCard" hidden></div>
                 </div>
-                <button type="button" class="btn btn-sm btn-text quick-toggle" id="quickToggle" aria-expanded="false" aria-controls="quickRow"><svg class="ico"><use href="#i-more" /></svg>更多 AI 操作</button>
+                <button type="button" class="btn btn-sm btn-text quick-toggle" id="quickToggle" aria-expanded="false" aria-controls="quickRow" title="展开更多 AI 操作：起名 / 对比 / 批量"><svg class="ico"><use href="#i-spark" /></svg>更多 AI 操作</button>
                 <div class="quick-groups" id="quickRow" hidden>
                   <div class="quick-group">
                     <span class="quick-group-label">写作</span>
@@ -944,6 +955,7 @@
                 <!-- 辅助面板：上下文 / 场景卡片 / AI 对话，放在一起 -->
                 <details class="dock-fold" id="foldAssist">
                   <summary>
+                    <span class="dock-fold-icon tone-assist"><svg class="ico"><use href="#i-bulb" /></svg></span>
                     <span>辅助工具</span>
                     <span class="dock-fold-hint">上下文 · 场景 · AI 对话</span>
                   </summary>
@@ -1003,6 +1015,7 @@
               <!-- 检查（原页签，现并入主线折叠） -->
               <details class="dock-fold" id="foldCheck">
                 <summary>
+                  <span class="dock-fold-icon tone-check"><svg class="ico"><use href="#i-shield" /></svg></span>
                   <span>检查</span>
                   <span class="dock-fold-hint" id="checkFoldHint"></span>
                 </summary>
@@ -1057,6 +1070,7 @@
               <!-- 批注 / 高亮（原页签，现并入主线折叠） -->
               <details class="dock-fold" id="foldAnnotations">
                 <summary>
+                  <span class="dock-fold-icon tone-anno"><svg class="ico"><use href="#i-highlighter" /></svg></span>
                   <span>批注</span>
                   <span class="dock-fold-hint" id="annoFoldHint"></span>
                 </summary>

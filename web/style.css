@@ -1478,7 +1478,11 @@ body[data-theme="light"] .main-thread > .card {
   white-space: pre-wrap; word-break: break-word;
 }
 .output-plain { font-family: var(--font-ui); font-size: 13.5px; line-height: 1.7; }
-.output:empty::before { content: "等待生成"; color: var(--text-3); font-family: var(--font-ui); font-size: 13px; }
+.output:empty::before { content: none; }
+.out-empty { display: grid; gap: 10px; justify-items: center; place-content: center; padding: 26px 12px 22px; border: 1px dashed var(--border-2); border-radius: var(--r-md); background: var(--surface-2); color: var(--text-3); text-align: center; min-height: 150px; }
+.out-empty .ico { width: 22px; height: 22px; color: var(--accent); }
+.out-empty-title { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.out-empty-sub { font-size: 11.5px; line-height: 1.6; color: var(--text-3); }
 .out-next {
   display: flex; align-items: flex-start; gap: 7px;
   margin-top: 10px; padding: 8px 10px;
@@ -4018,6 +4022,11 @@ body[data-theme="light"] .btn-primary {
 .apply-fork-item:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -1px; }
 .apply-fork-item.on { background: var(--accent-bg); color: var(--accent-hover); }
 .apply-fork-item .dim { font-size: 10.5px; color: var(--text-4); }
-.out-apply-bar { align-items: center; }
+.out-apply-bar { flex-wrap: wrap; gap: 6px; align-items: center; }
+.out-apply-bar #applyFork { flex: 1 1 100%; }
+.out-apply-bar #applyFork > .btn.btn-primary { flex: 1 1 auto; }
+.out-apply-bar #applyMenuBtn { flex: 0 0 40px; }
+.out-apply-bar > .btn { font-size: 11.5px; }
+.out-apply-bar > .btn.btn-text { flex: 0 0 auto; }
 
 
