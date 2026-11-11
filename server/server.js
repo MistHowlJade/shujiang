@@ -198,10 +198,34 @@ async function embedQueryVector(cfg, model, text) {
   }
 }
 
+/** 依赖章节上下文的任务：显式给了 chapterId 就必须能找到这一章，否则 400「找不到这一章」 */
+const CHAPTER_REQUIRED_TASKS = new Set(['memory', 'chapter', 'continue', 'summarize']);
+
 async function prepareTask(cfg, body) {
   const { task, novelId, chapterId, payload = {}, customTemplates } = body;
-  if (!task) throw new Error('缺少 task');
-  if (!TASKS[task]) throw new Error(`未知任务：${task}`);
+  // novelId 的类型先在入口验：null / 数字 / 对象一律 400，别让它流进 prompts 里炸出英文报错
+  if (novelId !== undefined && (novelId === null || typeof novelId !== 'string')) {
+    const err = new Error('novelId 无效（应该是作品 id 字符串）');
+    err.status = 400;
+    throw err;
+  }
+  if (!task) {
+    const err = new Error('缺少 task');
+    err.status = 400;
+    throw err;
+  }
+  if (!TASKS[task]) {
+    const err = new Error(`未知任务：${task}`);
+    err.status = 400;
+    throw err;
+  }
+  // 依赖章节的任务必须带 novelId——prompts 里有 novel.title，缺了就是英文 TypeError
+  if (CHAPTER_REQUIRED_TASKS.has(task) && !novelId) {
+    const err = new Error('缺少 novelId（应该是作品 id 字符串）');
+    err.status = 400;
+    throw err;
+  }
+
   let novel = null;
   let pack = [];
   let stats = {};
@@ -209,7 +233,11 @@ async function prepareTask(cfg, body) {
 
   if (novelId) {
     novel = getNovel(novelId);
-    if (!novel) throw new Error('找不到这部作品');
+    if (!novel) {
+      const err = new Error('找不到这部作品');
+      err.status = 404;
+      throw err;
+    }
     if (task !== 'style' && task !== 'custom') {
       const semantic = await buildSemanticMatches(novel, chapterId, payload.extraQuery, cfg);
       const built = buildContext(novel, { chapterId, extraQuery: payload.extraQuery, budget: novel.meta?.contextBudget, semantic });
@@ -221,9 +249,30 @@ async function prepareTask(cfg, body) {
 
   const chapter = novel && chapterId ? (novel.chapters || []).find((c) => c.id === chapterId) : null;
 
-  // 需要正文范围的任务（一致性检查 / 责编评审）
+  // 依赖章节的任务：chapterId 传了（哪怕空字符串 / 对象）就必须找得到，否则明确报 400
+  if (CHAPTER_REQUIRED_TASKS.has(task)) {
+    const provided = chapterId !== undefined && chapterId !== null;
+    const usable = typeof chapterId === 'string' && chapterId.trim().length > 0;
+    if (provided && !usable) {
+      const err = new Error('找不到这一章，可能已被删除');
+      err.status = 400;
+      throw err;
+    }
+    if (usable && !chapter) {
+      const err = new Error('找不到这一章，可能已被删除');
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  // 需要正文范围的任务（一致性检查 / 责编评审）：没给 scopeText 又没打开作品 → 400，别炸出英文报错
   let scopeText = payload.scopeText || '';
-  if ((task === 'consistency' || task === 'review') && novel && !scopeText) {
+  if ((task === 'consistency' || task === 'review') && !scopeText) {
+    if (!novel) {
+      const err = new Error('这一致性检查要先打开一部作品（或者直接给 scopeText）');
+      err.status = 400;
+      throw err;
+    }
     scopeText = collectScopeText(novel, {
       chapterIds: payload.chapterIds,
       from: payload.from,
@@ -899,8 +948,12 @@ async function handleApi(req, res, url) {
     if (method === 'GET') return sendJson(res, 200, { novels: listNovels() });
     if (method === 'POST') {
       const body = await readBody(req);
-      const n = createNovel(body);
-      return sendJson(res, 200, { novel: n });
+      try {
+        const n = createNovel(body);
+        return sendJson(res, 200, { novel: n });
+      } catch (err) {
+        return sendJson(res, Number(err?.status) || 500, { error: err.message || '创建作品失败' });
+      }
     }
   }
 
@@ -1191,6 +1244,7 @@ async function handleApi(req, res, url) {
             'Content-Type': 'image/svg+xml; charset=utf-8',
             'Content-Length': Buffer.byteLength(svg),
             'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
           });
           return res.end(svg);
         }
@@ -1200,6 +1254,7 @@ async function handleApi(req, res, url) {
             'Content-Type': custom.mime,
             'Content-Length': custom.data.length,
             'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
           });
           return res.end(custom.data);
         }
@@ -1211,6 +1266,7 @@ async function handleApi(req, res, url) {
           'Content-Type': 'image/svg+xml; charset=utf-8',
           'Content-Length': Buffer.byteLength(svg),
           'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
         });
         return res.end(svg);
       }

@@ -278,7 +278,7 @@ export const TASKS = {
         messages: [
           sys('你是小说编辑助手，负责把章节压缩成可供后续写作检索的记忆档案。只做客观提取，不做评价。'),
           user(
-            `以下是《${novel.title}》第 ${chapter.no} 章「${chapter.title}」的正文：\n"""\n${(chapter.content || '').slice(0, 24000)}\n"""\n\n` +
+            `以下是《${novel.title}》第 ${chapter?.no || '?'} 章「${chapter?.title || ''}」的正文：\n"""\n${(chapter?.content || '').slice(0, 24000)}\n"""\n\n` +
               `请提取本章记忆，只输出 JSON 对象，不要解释、不要代码块。结构：\n` +
               `{"summary":"本章剧情概要（120字以内，写清谁做了什么、结果如何）","events":["按时间顺序的关键事件，每条20字以内"],"characters":["本章出场人物名"],"stateChanges":["人物/势力/物品的状态变化，如'张三左臂受伤'"],"foreshadowing":["本章埋下或呼应的伏笔"],"unresolved":["本章结束时悬而未决的问题"]}`,
           ),

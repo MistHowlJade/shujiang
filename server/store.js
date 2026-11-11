@@ -307,13 +307,19 @@ function chapterWords(c) {
 }
 const chapterCount = (n) => (n.chapters || []).filter(isPlainObject).length;
 
+/** 字段类型归一：外部 API 直调可能传数字 / null / 对象，统一成干净字符串再落盘 */
+function cleanString(v, fallback = '', max = 160) {
+  const s = String(v ?? '').trim();
+  return (s || fallback).slice(0, max);
+}
+
 export function blankNovel({ title = '未命名作品', genre = '', author = '' } = {}) {
   const now = Date.now();
   return {
     id: newId('n'),
-    title,
-    author,
-    genre,
+    title: cleanString(title, '未命名作品', 120),
+    author: cleanString(author, '', 80),
+    genre: cleanString(genre, '', 60),
     tags: [],
     createdAt: now,
     updatedAt: now,
@@ -435,9 +441,47 @@ export function saveNovel(novel, { skipShrink = false } = {}) {
   return novel;
 }
 
+/** 外部给的章节数组：逐项校验并归一，非法项直接报错——不静默丢弃 */
+function sanitizeImportChapters(input) {
+  if (input === undefined) return [];
+  if (!Array.isArray(input)) {
+    const err = new Error('chapters 必须是数组');
+    err.status = 400;
+    throw err;
+  }
+  if (input.length > 3000) {
+    const err = new Error('chapters 一次最多 3000 章');
+    err.status = 400;
+    throw err;
+  }
+  const out = [];
+  for (const raw of input) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      const err = new Error(`chapters 第 ${out.length + 1} 项不是对象`);
+      err.status = 400;
+      throw err;
+    }
+    out.push({
+      id: newId('c'),
+      title: cleanString(raw.title ?? '', '', 160) || `第${out.length + 1}章`,
+      summary: '',
+      content: String(raw.content ?? ''),
+      stage: CHAPTER_STAGES.has(raw.stage) ? raw.stage : 'draft',
+      status: 'draft',
+      memory: raw.memory && typeof raw.memory === 'object' && !Array.isArray(raw.memory) ? raw.memory : null,
+      createdAt: Date.now(),
+    });
+  }
+  return out;
+}
+
 export function createNovel(payload) {
   const n = blankNovel(payload || {});
-  if (payload && Array.isArray(payload.tags)) n.tags = payload.tags;
+  if (payload && Array.isArray(payload.tags)) {
+    n.tags = payload.tags.map((t) => String(t ?? '').trim()).filter(Boolean).slice(0, 20);
+  }
+  const imported = sanitizeImportChapters(payload?.chapters);
+  if (imported.length) n.chapters = imported;
   ensureDirs();
   saveNovel(n);
   return n;

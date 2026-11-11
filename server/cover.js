@@ -363,6 +363,59 @@ const RASTER = {
 };
 
 const MAX_COVER_BYTES = 8 * 1024 * 1024;
+const MAX_COVER_SIDE = 8192;   // 拒绝超大图 / 0×0 图
+
+/** PNG 结构校验：首个 chunk 必须是 IHDR，读宽高并拒绝 0×0 / 超大尺寸 */
+function pngDimensions(buf) {
+  if (buf.length < 24) return null;
+  if (buf.readUInt32BE(8) !== 13) return null;                    // IHDR 固定 13 字节
+  if (buf.toString('ascii', 12, 16) !== 'IHDR') return null;
+  const width = buf.readUInt32BE(16);
+  const height = buf.readUInt32BE(20);
+  return width > 0 && height > 0 && width <= MAX_COVER_SIDE && height <= MAX_COVER_SIDE
+    ? { width, height } : null;
+}
+
+/** GIF 结构校验：版本头 + 逻辑宽高 + 末尾必须是 0x3B（trailer） */
+function gifDimensions(buf) {
+  if (buf.length < 20) return null;
+  const version = buf.toString('ascii', 0, 6);
+  if (version !== 'GIF87a' && version !== 'GIF89a') return null;
+  const width = buf.readUInt16LE(6);
+  const height = buf.readUInt16LE(8);
+  if (!width || !height || width > MAX_COVER_SIDE || height > MAX_COVER_SIDE) return null;
+  if (buf[buf.length - 1] !== 0x3b) return null;                  // GIF trailer 必须是 0x3B
+  return { width, height };
+}
+
+/** JPEG 结构校验：SOF 标记里读宽高 */
+function jpegDimensions(buf) {
+  if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
+  let offset = 2;
+  while (offset + 9 <= buf.length) {
+    if (buf[offset] !== 0xff) return null;                        // 结构错乱
+    const marker = buf[offset + 1];
+    if (marker === 0xd9) return null;                             // 还没见到 SOF 就 EOI，无效
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0xd8) { offset += 2; continue; }   // 无长度字段的标记
+    const len = buf.readUInt16BE(offset + 2);
+    if (len < 2 || offset + 2 + len > buf.length) return null;
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      if (len < 7) return null;
+      const height = buf.readUInt16BE(offset + 5);
+      const width = buf.readUInt16BE(offset + 7);
+      return width > 0 && height > 0 && width <= MAX_COVER_SIDE && height <= MAX_COVER_SIDE
+        ? { width, height } : null;
+    }
+    offset += 2 + len;
+  }
+  return null;
+}
+
+function coverDimensions(ext, buf) {
+  if (ext === 'png') return pngDimensions(buf);
+  if (ext === 'gif') return gifDimensions(buf);
+  return jpegDimensions(buf);
+}
 
 /** 只认内置白名单里的封面格式；防 coverPath 被 `ext` 里的路径穿越利用 */
 export function coverKind(ext, mime) {
@@ -389,6 +442,12 @@ export function saveCoverImage(id, buf, mime) {
   const head = buf.subarray(0, kind.magic.length);
   if (!kind.magic.every((byte, i) => head[i] === byte)) {
     throw new Error('这不像是一个有效的图片文件');
+  }
+  // 再往下验一层结构：GIF 要有 trailer，PNG 要有 IHDR，JPEG 要有 SOF——
+  // 「魔数对 + 注释/脚本体」这类文件骗不过这一步
+  const dims = coverDimensions(kind.ext, buf);
+  if (!dims) {
+    throw new Error('这不像是一个有效的图片文件（尺寸或结构不对）');
   }
   fs.mkdirSync(COVER_DIR, { recursive: true });
   // 换了格式就把旧的那张删掉，别留下两份
