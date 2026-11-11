@@ -10,10 +10,11 @@ import { buildPayoffProfile, payoffTier } from './lib/payoff.js';
 import { buildCompletionProfile, completionTier } from './lib/completion.js';
 import { buildLocalBookCheck } from './lib/bookcheck.js';
 import { scanConsistency, applyConsistencyIgnored, consistencyKey, consistencyMarkdown, CONSISTENCY_KINDS } from './lib/consistency.js';
-import { diffProse, diffHtml, diffSideHtml } from './lib/diff.js';
+import { diffProse, diffHtml, diffSideHtml, collectChangeGroups, mergeReviewedSegments } from './lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from './lib/goal.js';
 import { buildSubmitCheck, submitCheckHtml } from './lib/submit.js';
 import { PAPER_DEFAULTS, normalizePaper, nextPaperSize, paperVars, paperLabel } from './lib/paper.js';
+import { DEFAULT_MODEL_PRICES, resolveModelPrice, estimateCost, estimateTokensFromChars, costOfLogEntry, fmtCost } from './lib/prices.js';
 import { importBibleMarkdown } from './lib/markdown.js';
 
 /* 阅读进度只存在本浏览器，不写作品 JSON，也不走服务端 */
@@ -455,7 +456,7 @@ const api = {
 const mdText = (v) => String(v ?? '').replace(/\r\n?/g, '\n');
 
 /** 流式生成：逐块回调，返回完整文本 */
-async function streamAI(body, { onDelta, onReasoning, onMeta, onNotice, signal } = {}) {
+async function streamAI(body, { onDelta, onReasoning, onMeta, onNotice, onUsage, signal } = {}) {
   // 注入自定义提示词模板
   const cfg = S.config;
   if (cfg?.promptTemplates) {
@@ -496,6 +497,7 @@ async function streamAI(body, { onDelta, onReasoning, onMeta, onNotice, signal }
       try { j = JSON.parse(payload); } catch { continue; }
       if (j.shu_meta) { onMeta?.(j.shu_meta); continue; }
       if (j.shu_error) throw new Error(j.shu_error);
+      if (j.shu_usage) { onUsage?.(j.shu_usage); continue; }
       if (j.shu_notice) {
         try { toast(`⚠️ ${j.shu_notice.message || '模型输出可能被截断'}`, 'warn'); } catch {}
         onNotice?.(j.shu_notice);
@@ -8389,7 +8391,7 @@ function isModelSetupError(err) {
   return /还没有配置模型服务商|还没有填写 API Key|还没有选择模型/.test(String(err?.message || err || ''));
 }
 
-async function runStream(body, { target = 'out', retried = false, allowBatch = false } = {}) {
+async function runStream(body, { target = 'out', retried = false, allowBatch = false, onUsage } = {}) {
   // 批量任务自己一条条跑：放行，别把自己的队列又拦在门外
   if (!allowBatch && (S.controller || S.batchController)) { toast('已有任务在跑，先停止', 'err'); return ''; }
   if (!retried && !aiModelReady(body.task || 'chapter', body.model)) {
@@ -8416,6 +8418,7 @@ async function runStream(body, { target = 'out', retried = false, allowBatch = f
   let streamFailed = false;
   let auditMeta = null;   // onMeta 带回来的注入清单（供生成溯源记录）
   let lastError = null;
+  let usage = null;       // 上游回报的 usage；没有就按字数估算（#43）
   const openSettings = () => setView('settings');
   try {
     acc = await streamAI(body, {
@@ -8435,6 +8438,7 @@ async function runStream(body, { target = 'out', retried = false, allowBatch = f
         // diag: just accumulate
       },
       onReasoning: (r) => { if (target === 'out') { S.reasoning += r; renderOut(); } },
+      onUsage: (u) => { usage = u || null; onUsage?.(u); },
     });
   } catch (err) {
     streamFailed = true;
@@ -8463,7 +8467,7 @@ async function runStream(body, { target = 'out', retried = false, allowBatch = f
     if (target === 'out') $('#outInfo').textContent = '没有返回内容';
     toast(msg, 'err', { label: '打开设置', onClick: openSettings });
   }
-  recordGenAudit(body, { auditMeta, outChars: acc.length, streamFailed, lastError });
+  recordGenAudit(body, { auditMeta, outChars: acc.length, streamFailed, lastError, usage });
   return acc;
 }
 
@@ -8478,7 +8482,7 @@ const GEN_TASK_LABEL = {
 };
 const genTaskLabel = (t) => GEN_TASK_LABEL[t] || String(t || '其他');
 
-function recordGenAudit(body, { auditMeta, outChars, streamFailed, lastError }) {
+function recordGenAudit(body, { auditMeta, outChars, streamFailed, lastError, usage }) {
   try {
     const novel = S.novel;
     if (!novel) return;
@@ -8487,14 +8491,24 @@ function recordGenAudit(body, { auditMeta, outChars, streamFailed, lastError }) 
     const status = lastError?.name === 'AbortError' ? 'abort'
       : streamFailed ? 'error'
         : (outChars > 0 ? 'ok' : 'empty');
+    // #43：有 usage 就记真值；没有就按输出字数估算并标注 est（单价在读取时按最新配置算）
+    const model = String(auditMeta?.model || body?.model || usage?.model || cfgModelNameFallback());
+    const uIn = Number(usage?.input) || 0;
+    const uOut = Number(usage?.output) || 0;
+    const hasReal = uIn > 0 || uOut > 0;
+    const tkIn = hasReal ? uIn : 0;
+    const tkOut = hasReal ? uOut : estimateTokensFromChars(outChars || 0);
     const list = Array.isArray(novel.meta?.genLog) ? [...novel.meta.genLog] : [];
     list.push({
       at: Date.now(),
       task,
-      model: String(auditMeta?.model || body?.model || ''),
+      model,
       chapterId: body?.chapterId || '',
       chapterTitle: ch?.title || '',
       outChars: Math.max(0, Math.floor(outChars || 0)),
+      tkIn,
+      tkOut,
+      est: !hasReal,
       status,
       error: String(lastError?.message || '').slice(0, 160),
       injected: (Array.isArray(auditMeta?.lines) ? auditMeta.lines : []).slice(0, 24).map((s) => String(s).slice(0, 80)),
@@ -8502,9 +8516,33 @@ function recordGenAudit(body, { auditMeta, outChars, streamFailed, lastError }) 
     while (list.length > 100) list.shift();
     novel.meta = { ...(novel.meta || {}), genLog: list };
     saveNovelPart({ meta: novel.meta });
+    // 月度预算超线了就提醒一声；同一自然月最多提醒一次
+    maybeWarnUsageBudget();
   } catch {
     // 溯源记不下来也不能影响主流程，静默跳过
   }
+}
+
+function cfgModelNameFallback() {
+  const c = S.config || {};
+  return String(c.model || c.roleModels?.write || '') || '';
+}
+
+/** 月度预算提醒：超过当月预算就提醒一次，同一自然月最多一次 */
+async function maybeWarnUsageBudget() {
+  try {
+    const budget = Number(S.config?.usageBudget) || 0;
+    if (budget <= 0) return;
+    const now = new Date();
+    const monthKey = `shu.usageBudgetToast.${now.getFullYear()}-${now.getMonth() + 1}`;
+    if (localStorage.getItem(monthKey)) return;
+    const j = await api.get('/api/usage?days=31');
+    const total = Number(j?.monthTotal) || 0;
+    if (total > budget) {
+      localStorage.setItem(monthKey, '1');
+      toast(`本月估算费用已超过预算（¥${total.toFixed(2)} / ¥${budget.toFixed(2)}）。只是提醒，不影响使用——预算可以在 设置→用量与费用 里调。`, 'warn');
+    }
+  } catch { /* 提醒失败不该挡住生成 */ }
 }
 
 async function generateChapter() {
@@ -8543,6 +8581,21 @@ const batchGen = {
   calls: 0,         // 已实际调用模型的次数
   cardBox: null,    // 任务卡弹窗的根节点（仅面板开着时非空）
 };
+
+/** 批量预估费用：按输出字数估输出 token × 单价；输入打包长度未知，不掺合 */
+function estimateBatchCostText(n) {
+  try {
+    const perChapter = Math.max(500, Number($('#genWords')?.value) || 3000);
+    const outTokens = Math.round(n * perChapter * 1.5);
+    const model = (S.config?.roleModels?.write || S.config?.model || '').trim();
+    const price = resolveModelPrice(model, S.config?.modelPrices || {});
+    if (!price) return ' · 预估费用：未配置可识别的模型或单价';
+    const cost = estimateCost({ inputTokens: 0, outputTokens: outTokens, model, customPrices: S.config?.modelPrices || {} });
+    return ` · 预估输出成本 ≈ ${fmtCost(cost)}（按每章 ${fmtWords(perChapter)} 字估算，输入另计）`;
+  } catch {
+    return '';
+  }
+}
 
 const bgItemHtml = (q) => `<li class="bg-item status-${q.status}" data-id="${esc(q.id)}">
   <span class="bg-badge">${BG_STATUS[q.status] || '排队'}</span>
@@ -8613,7 +8666,7 @@ async function batchGenerateChapters() {
             n = checkedIds().length;
           }
           estimateEl.textContent = n > 0
-            ? `将生成 ${n} 章 · 约 ${n} 次模型调用（按你接入的模型计费收费）`
+            ? `将生成 ${n} 章 · 约 ${n} 次模型调用${estimateBatchCostText(n)}`
             : '还没选章节——先选一个范围，或勾几章。';
           startBtn.disabled = n === 0;
           return n;
@@ -8690,7 +8743,15 @@ async function runBatchGenLoop(novel, onlyId = '') {
   const done = batchGen.queue.filter((q) => q.status === 'done').length;
   const failed = batchGen.queue.filter((q) => q.status === 'error').length;
   if (done || failed) {
-    toast(`批量生成结束：完成 ${done} 章${failed ? `，失败 ${failed} 章（可点「重试」）` : ''}。草稿都在各章输出区里。`, failed ? 'err' : 'ok');
+    let cost = 0;
+    let priced = 0;
+    for (const item of batchGen.queue) {
+      if (!item.usage) continue;
+      const c = estimateCost({ inputTokens: item.usage.input, outputTokens: item.usage.output, model: item.usage.model || '', customPrices: S.config?.modelPrices || {} });
+      if (c !== null) { cost += c; priced += 1; }
+    }
+    const costText = priced ? ` · 估算费用 ${fmtCost(cost)}` : '';
+    toast(`批量生成结束：完成 ${done} 章${failed ? `，失败 ${failed} 章（可点「重试」）` : ''}${costText}。草稿都在各章输出区里。`, failed ? 'err' : 'ok');
   }
 }
 
@@ -8717,7 +8778,7 @@ async function genBatchItem(novel, item) {
         targetWords: Number($('#genWords').value) || undefined,
         extraQuery: $('#genReq').value.trim() || undefined,
       },
-    }, { target: 'diag', allowBatch: true });
+    }, { target: 'diag', allowBatch: true, onUsage: (u) => { item.usage = u; } });
     if (batchGen.stopped || ac?.signal.aborted) { item.status = 'pending'; paintBatchGenCard(); return; }
     if (acc && acc.trim()) {
       const key = outDraftKey(novel.id, item.id);
@@ -8809,14 +8870,27 @@ function paintBatchGenCard() {
     else now.textContent = '准备中…';
   }
   const meta = box.querySelector('#bgMeta');
-  if (meta) meta.textContent = `已调用模型 ${batchGen.calls} 次${failed ? ` · 失败 ${failed} 章` : ''}${done ? ` · 完成 ${done} 章` : ''}`;
+  if (meta) {
+    let cost = 0;
+    let priced = 0;
+    for (const item of queue) {
+      if (!item.usage) continue;
+      const c = estimateCost({ inputTokens: item.usage.input, outputTokens: item.usage.output, model: item.usage.model || '', customPrices: S.config?.modelPrices || {} });
+      if (c !== null) { cost += c; priced += 1; }
+    }
+    const costText = priced ? ` · 估算费用 ${fmtCost(cost)}` : '';
+    meta.textContent = `已调用模型 ${batchGen.calls} 次${failed ? ` · 失败 ${failed} 章` : ''}${done ? ` · 完成 ${done} 章` : ''}${costText}`;
+  }
   for (const li of box.querySelectorAll('.bg-item')) {
     const item = queue.find((q) => q.id === li.dataset.id);
     if (!item) continue;
     li.className = `bg-item status-${item.status}`;
     li.querySelector('.bg-badge').textContent = BG_STATUS[item.status] || '排队';
     const note = li.querySelector('.bg-note');
-    if (note) note.textContent = item.status === 'done' ? '草稿已存进该章输出区' : item.error || '';
+    if (note) {
+      const tok = item.usage ? fmtTokens((Number(item.usage.input) || 0) + (Number(item.usage.output) || 0)) + ' tok' : '';
+      note.textContent = item.status === 'done' ? `草稿已存进该章输出区${tok ? ` · ${tok}` : ''}` : item.error || '';
+    }
     const retry = li.querySelector('.bg-retry');
     if (retry) retry.hidden = item.status !== 'error';
   }
@@ -9973,6 +10047,100 @@ function setDraftMode(mode) {
   }
 }
 
+/* =====================================================
+ * 逐段审阅（#42）：AI 改稿结果按句分组，每组单独接受 / 拒绝
+ * 未接受的部分保留原文；应用后自动留版本快照，可 Ctrl+Z / 版本历史恢复
+ * =================================================== */
+let segmentReview = null;   // { op, label, chapterId, range, segs, groups }
+
+function openSegmentReview(oldText, newText, op, range) {
+  const names = { polish: '润色', expand: '扩写', shorten: '精简', rewrite: '改写', custom: '按指令处理' };
+  const label = names[op] || op || 'AI 改稿';
+  const segs = diffProse(oldText, newText).segs;
+  const groups = collectChangeGroups(segs);
+  if (!groups.length) return toast('没有需要审阅的改动', 'ok');
+  segmentReview = { op, label, chapterId: S.chapterId, range, segs, groups };
+  const label2 = `${label} · ${countWords(oldText)} → ${countWords(newText)} 字`;
+  $('#outTitle').textContent = label2;
+  const box = showModal(`<h3>逐段审阅 · ${esc(label)}</h3>
+    <p class="modal-sub">每处改动单独接受 / 拒绝：接受 = 用 AI 的这一处；拒绝 = 保留原文。应用所选只会写入被接受的改动，其余原样留住。</p>
+    <div class="seg-review-toolbar">
+      <button class="btn btn-sm btn-text" id="srAllAccept">全部接受</button>
+      <button class="btn btn-sm btn-text" id="srAllReject">全部拒绝</button>
+      <span style="flex:1"></span>
+      <span class="dim small" id="srCount"></span>
+    </div>
+    <div class="seg-review-list" id="srList"></div>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="srCancel">取消</button>
+      <span style="flex:1"></span>
+      <button class="btn btn-primary" id="srApply">应用所选</button>
+    </div>`, (b) => {
+      b.querySelector('#srCancel').onclick = closeModal;
+      b.querySelector('#srApply').onclick = applySegmentReview;
+      b.querySelector('#srAllAccept').onclick = () => { segmentReview.groups.forEach((g) => { g.accepted = true; }); paintSegmentReviewList(); };
+      b.querySelector('#srAllReject').onclick = () => { segmentReview.groups.forEach((g) => { g.accepted = false; }); paintSegmentReviewList(); };
+      b.querySelector('#srList').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-group]');
+        if (!btn) return;
+        const g = segmentReview.groups[Number(btn.dataset.group)];
+        if (g) { g.accepted = !g.accepted; paintSegmentReviewList(); }
+      });
+      paintSegmentReviewList();
+    }, { wide: true });
+}
+
+function paintSegmentReviewList() {
+  const state = segmentReview;
+  if (!state) return;
+  const listEl = $('#srList');
+  const countEl = $('#srCount');
+  if (!listEl) return;
+  const accepted = state.groups.filter((g) => g.accepted).length;
+  const rejected = state.groups.length - accepted;
+  if (countEl) countEl.textContent = `已接受 ${accepted} 组${rejected ? ` · 拒绝 ${rejected} 组` : ''}`;
+  listEl.innerHTML = state.groups.map((g, i) => `
+    <div class="seg-review-group ${g.accepted ? 'accepted' : 'rejected'}">
+      <div class="seg-review-head">
+        <span class="seg-review-no">#${i + 1}</span>
+        <span class="seg-review-kind">${g.dels.length && g.adds.length ? '改写' : (g.dels.length ? '删除' : '新增')}</span>
+        <button type="button" class="btn btn-sm ${g.accepted ? 'btn-primary' : 'btn-text'}" data-group="${i}">${g.accepted ? '✓ 接受' : '✕ 拒绝 · 保留原文'}</button>
+      </div>
+      ${g.delText ? `<div class="seg-review-del"><span class="seg-review-sign">−</span><span>${esc(g.delText)}</span></div>` : ''}
+      ${g.addText ? `<div class="seg-review-add"><span class="seg-review-sign">+</span><span>${esc(g.addText)}</span></div>` : ''}
+    </div>`).join('');
+  listEl.scrollTop = Math.min(listEl.scrollTop, listEl.scrollHeight - listEl.clientHeight);
+}
+
+async function applySegmentReview() {
+  const state = segmentReview;
+  if (!state) return;
+  const ch = currentChapter();
+  if (!ch || ch.id !== state.chapterId) return toast('章节已经切换，回刚才那一章再应用', 'err');
+  const merged = mergeReviewedSegments(state.segs, state.groups);
+  closeModal();
+  // 先留版本快照，应用错了版本历史可以恢复
+  try { await snapshotNow('AI 改稿前'); } catch { /* 快照只是保险 */ }
+  const ta = $('#chContent');
+  const base = ta.value;
+  const start = Math.max(0, Math.min(base.length, state.range.start));
+  const end = Math.max(start, Math.min(base.length, state.range.end));
+  ta.value = base.slice(0, start) + merged + base.slice(end);
+  ta.setSelectionRange(start, start + merged.length);
+  ta.dispatchEvent(new Event('input'));
+  setDraftMode('gen');   // 审阅完回到草稿卡主界面
+  segmentReview = null;
+  toast('已应用所选改动（Ctrl+Z 可撤销，或到版本历史恢复）', 'ok', { label: '去版本历史', onClick: () => openHistory() });
+}
+
+$('#diffReview')?.addEventListener('click', () => {
+  const state = S.segmentDiff;
+  if (!state) return;
+  const oldText = state.oldText ?? '';
+  const newText = state.newText ?? '';
+  openSegmentReview(oldText, newText, state.op, state.range);
+});
+
 function showDiff(oldText, newText, op, range) {
   const names = { polish: '润色', expand: '扩写', shorten: '精简', rewrite: '改写', custom: '按指令处理' };
   const label = names[op] || op || '草稿';
@@ -9981,7 +10149,7 @@ function showDiff(oldText, newText, op, range) {
   const d = diffProse(oldText, newText);
   $('#diffOld').innerHTML = diffSideHtml(d.segs, 'old');
   $('#diffNew').innerHTML = diffSideHtml(d.segs, 'new');
-  S.segmentDiff = { op, range, chapterId: S.chapterId };
+  S.segmentDiff = { op, range, chapterId: S.chapterId, oldText, newText };
   $('#diffRetry').hidden = !S.lastOp;
   setDraftMode('segment');
   $('#diffAccept').onclick = () => {
@@ -14508,25 +14676,59 @@ function renderGlossaryTab(host, n) {
   renderList();
 }
 
-/** ---- 生成记录：每次 AI 调用留一条 — 任务/模型/落在哪一章/注入了哪些资料/产出量/成败 ---- */
+/** ---- 生成记录 + 用量账本（#43）：每条 AI 调用带 tokens / 估算费用 ---- */
 const GEN_STATUS_LABEL = { ok: '已生成', error: '失败', abort: '已停止', empty: '空输出' };
+const fmtTokens = (t) => {
+  const n = Number(t) || 0;
+  if (n >= 100000) return `${Math.round(n / 10000)} 万`;
+  if (n >= 10000) return `${(n / 10000).toFixed(1)} 万`;
+  return String(Math.round(n));
+};
 function renderGenLogTab(host, n) {
+  const custom = S.config?.modelPrices || {};
   const list = (Array.isArray(n.meta?.genLog) ? [...n.meta.genLog] : []).reverse();
+  const rows = list.map((e) => {
+    const u = costOfLogEntry(e, custom);
+    const tk = u.tokensIn + u.tokensOut;
+    return `
+        <div class="genlog-row st-${esc(e.status)}">
+          <div class="genlog-line1"><span class="genlog-time">${esc(fmtDate(e.at))}</span><span class="genlog-task">${esc(genTaskLabel(e.task))}</span><span class="genlog-status">${esc(GEN_STATUS_LABEL[e.status] || e.status || '?')}</span>${e.chapterTitle ? `<button type="button" class="genlog-chapter" data-chapter="${esc(e.chapterId)}" title="打开《${esc(e.chapterTitle)}》">${esc(e.chapterTitle)}</button>` : ''}</div>
+          <div class="genlog-line2"><span class="genlog-model" title="${esc(e.model || '')}">${esc(String(e.model || '未知模型').slice(0, 46))}</span><span class="genlog-chars">${e.outChars} 字 · ${fmtTokens(tk)} tok${u.estimated ? '（估算）' : ''}${u.cost === null ? ' · 未估价' : ` · ${fmtCost(u.cost)}`}</span></div>
+          ${e.injected?.length ? `<div class="genlog-injected">${e.injected.map((s) => `<span class="genlog-tag">${esc(s)}</span>`).join('')}</div>` : ''}
+          ${e.error ? `<div class="genlog-error">${esc(e.error)}</div>` : ''}
+        </div>`;
+  });
+  // 本书合计（最多 100 条，重启后也能看）
+  const bookTotals = list.reduce((acc, e) => {
+    const u = costOfLogEntry(e, custom);
+    acc.calls += 1;
+    acc.tokens += u.tokensIn + u.tokensOut;
+    acc.cost += Number(u.cost) || 0;
+    return acc;
+  }, { calls: 0, tokens: 0, cost: 0 });
+  const byTask = new Map();
+  for (const e of list) {
+    const u = costOfLogEntry(e, custom);
+    const key = genTaskLabel(e.task);
+    const row = byTask.get(key) || { task: key, count: 0, cost: 0 };
+    row.count += 1;
+    row.cost += Number(u.cost) || 0;
+    byTask.set(key, row);
+  }
+  const taskRows = [...byTask.values()].sort((a, b) => b.cost - a.cost).map((r) => `<span class="genlog-tag">${esc(r.task)} · ${r.count} 次 · ${fmtCost(r.cost)}</span>`).join('');
   host.innerHTML = `
     <div class="bible-block">
       <h2>生成记录 <span style="flex:1"></span><span class="dim small">${list.length} / 100 条</span></h2>
-      <p class="dim small">每次 AI 调用留一条本地记录：哪个任务、什么模型、落在哪一章、注入了哪些资料、产出多少字、成没成功。纯本地存在 data/ 里，不上传；忘了某次让模型干了什么，翻这里。</p>
-      ${list.length ? `<div class="genlog-list">${list.map((e) => `
-        <div class="genlog-row st-${esc(e.status)}">
-          <div class="genlog-line1"><span class="genlog-time">${esc(fmtDate(e.at))}</span><span class="genlog-task">${esc(genTaskLabel(e.task))}</span><span class="genlog-status">${esc(GEN_STATUS_LABEL[e.status] || e.status || '?')}</span>${e.chapterTitle ? `<button type="button" class="genlog-chapter" data-chapter="${esc(e.chapterId)}" title="打开《${esc(e.chapterTitle)}》">${esc(e.chapterTitle)}</button>` : ''}</div>
-          <div class="genlog-line2"><span class="genlog-model" title="${esc(e.model || '')}">${esc(String(e.model || '未知模型').slice(0, 46))}</span><span class="genlog-chars">${e.outChars} 字</span></div>
-          ${e.injected?.length ? `<div class="genlog-injected">${e.injected.map((s) => `<span class="genlog-tag">${esc(s)}</span>`).join('')}</div>` : ''}
-          ${e.error ? `<div class="genlog-error">${esc(e.error)}</div>` : ''}
-        </div>`).join('')}</div>
+      <p class="dim small">每次 AI 调用留一条本地记录：哪个任务、什么模型、落在哪一章、注入了哪些资料、产出多少字、用了哪些 token、估算多少钱。纯本地存在 data/ 里，不上传。</p>
+      ${list.length ? `
+      <div class="genlog-totals"><span>本书合计 ${bookTotals.calls} 次调用 · ${fmtTokens(bookTotals.tokens)} tok · ${fmtCost(bookTotals.cost)}</span><span style="flex:1"></span><button class="btn btn-sm btn-text" id="genlogLedger" title="全库用量：按日 / 按任务 / 按模型汇总，以及本月费用">${ico('activity')}全库用量账本</button></div>
+      ${taskRows ? `<div class="genlog-task-summary">${taskRows}</div>` : ''}` : ''}
+      ${list.length ? `<div class="genlog-list">${rows.join('')}</div>
         <div class="modal-foot"><span style="flex:1"></span><button class="btn btn-text" id="genlogClear">清空记录（不可恢复）</button></div>`
         : '<p class="thread-empty">还没有记录。任何 AI 生成都会记一条，这里就是它的家。</p>'}
     </div>`;
   host.querySelectorAll('.genlog-chapter').forEach((btn) => btn.addEventListener('click', () => { setView('studio'); selectChapter(btn.dataset.chapter); }));
+  host.querySelector('#genlogLedger')?.addEventListener('click', openUsageLedger);
   host.querySelector('#genlogClear')?.addEventListener('click', async () => {
     if (!(await confirmDialog({ title: '清空生成记录', message: '清空这本书的生成记录？不影响正文和设定。', okLabel: '清空', danger: true }))) return;
     const meta = { ...(n.meta || {}) };
@@ -14536,6 +14738,46 @@ function renderGenLogTab(host, n) {
     renderBible();
     toast('生成记录已清空', 'ok');
   });
+}
+
+/** 全库用量账本（#43）：按日 / 按任务 / 按模型汇总 + 预算进度 */
+async function openUsageLedger() {
+  let j = null;
+  try {
+    j = await api.get('/api/usage?days=30');
+  } catch (err) {
+    return toast(`没能读取用量（${err.message}）`, 'err');
+  }
+  const custom = S.config?.modelPrices || {};
+  const t = j.totals || {};
+  const budget = Number(j.budget ?? S.config?.usageBudget) || 0;
+  const monthTotal = Number(j.monthTotal) || 0;
+  const pct = budget > 0 ? Math.min(100, Math.round((monthTotal / budget) * 100)) : 0;
+  const estNote = t.estimatedCalls ? ` · ${t.estimatedCalls} 条按字数估算` : '';
+  const unpriced = t.unpricedCalls ? ` · ${t.unpricedCalls} 条未估价` : '';
+  const dayRows = (j.byDay || []).slice(-14).reverse().map((d) => `<div class="ledger-row"><span>${esc(d.day.slice(5))}</span><span class="dim small">${d.calls} 次</span><span class="ledger-val">${fmtCost(d.cost)}</span></div>`).join('');
+  const taskRows = (j.byTask || []).slice(0, 6).map((x) => `<div class="ledger-row"><span>${esc(genTaskLabel(x.task))}</span><span class="dim small">${x.count} 次</span><span class="ledger-val">${fmtCost(x.cost)}</span></div>`).join('');
+  const modelRows = (j.byModel || []).slice(0, 6).map((x) => `<div class="ledger-row"><span title="${esc(x.model)}">${esc(String(x.model).slice(0, 30))}</span><span class="dim small">${x.count} 次</span><span class="ledger-val">${fmtCost(x.cost)}</span></div>`).join('');
+  showModal(`<h3>用量账本</h3>
+    <p class="modal-sub">近 30 天全库汇总：${t.calls || 0} 次 AI 调用 · ${fmtTokens((t.tokensIn || 0) + (t.tokensOut || 0))} tokens · ${fmtCost(t.cost || 0)}${estNote}${unpriced}。按本地记录计算；单价以 设置→用量与费用 为准。</p>
+    <div class="usage-month">
+      <div class="usage-month-row"><span class="dim small">本月（日历月）</span><b>${fmtCost(monthTotal)}</b>${budget > 0 ? `<span class="dim small"> / 预算 ${fmtCost(budget)} · ${pct}%</span>` : '<span class="dim small">未设置预算</span>'}</div>
+      ${budget > 0 ? `<div class="usage-budget-bar"><i style="width:${pct}%"></i></div>` : ''}
+    </div>
+    <div class="usage-cols">
+      <div class="usage-col"><div class="usage-col-head">按任务</div>${taskRows || '<div class="dim small">近 30 天没有记录</div>'}</div>
+      <div class="usage-col"><div class="usage-col-head">按模型</div>${modelRows || '<div class="dim small">近 30 天没有记录</div>'}</div>
+      <div class="usage-col"><div class="usage-col-head">最近 14 天</div>${dayRows || '<div class="dim small">近 30 天没有记录</div>'}</div>
+    </div>
+    <div class="modal-foot">
+      <span class="dim small">价格随服务商调整：设置→用量与费用 可以改。</span>
+      <span style="flex:1"></span>
+      <button class="btn btn-text" id="ledgerClose">关闭</button>
+      <button class="btn" id="ledgerGoSettings">去设置</button>
+    </div>`, (box) => {
+      box.querySelector('#ledgerClose').onclick = closeModal;
+      box.querySelector('#ledgerGoSettings').onclick = () => { closeModal(); setView('settings'); setTimeout(() => $('#usageSummary')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 120); };
+    });
 }
 
 /** ---- 灵感库：随手记把写作素材集中存放，结尾支持追加到本章 ---- */
@@ -15529,6 +15771,8 @@ function renderSettings() {
   renderModelSelect();
   renderModelStatus();
   renderPromptTemplatesInSettings();
+  renderUsageSettings();   // S.config 已加载时填好单价与预算
+  loadUsageSummary();
 }
 
 /* ============================================================
@@ -15931,6 +16175,137 @@ $('#addProviderBtn').addEventListener('click', () => {
 });
 
 /** 保存前去掉只读字段，别把 apiKeyMasked / apiKeySet 写回 config.json */
+/* ============================================================
+ * 用量与费用（#43）：价格表编辑、预算、本月汇总、全库账本
+ * ============================================================ */
+const USAGE_BUILTIN_KEYS = Object.keys(DEFAULT_MODEL_PRICES);
+
+const priceRowHtml = ({ name, builtin, input, output, placeholderIn, placeholderOut }) => `
+  <div class="price-row" data-builtin="${builtin ? esc(name) : ''}">
+    ${builtin
+      ? `<span class="price-name" title="${esc(name)} · 内置参考价，可填数字覆盖">${esc(name)}</span>`
+      : `<input class="input price-name" placeholder="模型名，如 qwen2.5-72b-instruct" value="${esc(name)}" maxlength="80" aria-label="模型名" />`}
+    <input class="input price-num" type="number" min="0" step="0.01" data-field="input" placeholder="${esc(String(placeholderIn))}" value="${input ?? ''}" aria-label="输入单价（元/百万 token）" />
+    <input class="input price-num" type="number" min="0" step="0.01" data-field="output" placeholder="${esc(String(placeholderOut))}" value="${output ?? ''}" aria-label="输出单价（元/百万 token）" />
+    ${builtin
+      ? '<span class="price-del-placeholder" aria-hidden="true"></span>'
+      : '<button class="icon-btn sm price-del" type="button" title="删除这一行" aria-label="删除"><svg class="ico"><use href="#i-trash" /></svg></button>'}
+  </div>`;
+
+function renderUsageSettings() {
+  const list = $('#modelPriceList');
+  if (!list) return;
+  const cfg = S.config || {};
+  const custom = cfg.modelPrices || {};
+  $('#cfgUsageBudget').value = Number(cfg.usageBudget) > 0 ? cfg.usageBudget : '';
+  const rows = [];
+  for (const key of USAGE_BUILTIN_KEYS) {
+    const def = DEFAULT_MODEL_PRICES[key];
+    const ov = custom[key];
+    rows.push(priceRowHtml({
+      name: key, builtin: true,
+      input: ov?.input !== undefined && ov?.input !== null ? ov.input : '',
+      output: ov?.output !== undefined && ov?.output !== null ? ov.output : '',
+      placeholderIn: def.input, placeholderOut: def.output,
+    }));
+  }
+  for (const name of Object.keys(custom)) {
+    if (USAGE_BUILTIN_KEYS.includes(name)) continue;
+    rows.push(priceRowHtml({
+      name, builtin: false,
+      input: custom[name]?.input ?? '', output: custom[name]?.output ?? '',
+      placeholderIn: '0', placeholderOut: '0',
+    }));
+  }
+  list.innerHTML = rows.join('');
+}
+
+async function saveUsageConfig() {
+  const cfg = S.config;
+  if (!cfg) return false;
+  const custom = {};
+  $$('#modelPriceList .price-row').forEach((row) => {
+    const nameInput = row.querySelector('.price-name');
+    const builtin = row.dataset.builtin || '';
+    const name = String(nameInput?.value ?? builtin ?? '').trim().toLowerCase();
+    if (!name) return;
+    const inRaw = (row.querySelector('[data-field="input"]')?.value || '').trim();
+    const outRaw = (row.querySelector('[data-field="output"]')?.value || '').trim();
+    const def = builtin ? DEFAULT_MODEL_PRICES[builtin] : null;
+    if (builtin) {
+      // 内置行两个都没填 = 用默认价，不落盘
+      if (!inRaw && !outRaw) return;
+      const inV = inRaw ? Number(inRaw) : def?.input;
+      const outV = outRaw ? Number(outRaw) : def?.output;
+      if (Number.isFinite(inV) && Number.isFinite(outV) && inV >= 0 && outV >= 0) custom[builtin] = { input: inV, output: outV };
+      return;
+    }
+    if (!inRaw || !outRaw) return;   // 自定义行两个都填了才算数
+    const inV = Number(inRaw);
+    const outV = Number(outRaw);
+    if (Number.isFinite(inV) && Number.isFinite(outV) && inV >= 0 && outV >= 0) custom[name] = { input: inV, output: outV };
+  });
+  cfg.modelPrices = custom;
+  const budgetRaw = Number($('#cfgUsageBudget').value);
+  cfg.usageBudget = Number.isFinite(budgetRaw) && budgetRaw >= 0 ? Math.floor(budgetRaw * 100) / 100 : 0;
+  cfg.usageBudget = cfg.usageBudget > 0 ? cfg.usageBudget : 0;
+  try {
+    await api.send('/api/config', configForSave(cfg));
+    S.config = await api.get('/api/config');
+    renderUsageSettings();
+    loadUsageSummary();
+    return true;
+  } catch (err) {
+    toast(`用量设置没能保存：${errMsg(err)}`, 'err');
+    return false;
+  }
+}
+
+async function loadUsageSummary() {
+  const el = $('#usageSummary');
+  if (!el) return;
+  el.textContent = '读取中…';
+  try {
+    const j = await api.get('/api/usage?days=31');
+    const budget = Number(S.config?.usageBudget) || 0;
+    const month = Number(j.monthTotal) || 0;
+    const calls = Number(j.monthCalls) || 0;
+    if (budget > 0) {
+      const pct = Math.min(100, Math.round((month / budget) * 100));
+      el.innerHTML = `<div class="usage-month-row"><span class="dim small">本月全库</span><b>${fmtCost(month)}</b><span class="dim small">/ 预算 ${fmtCost(budget)} · ${calls} 次调用</span></div><div class="usage-budget-bar ${pct >= 90 ? 'danger' : ''}"><i style="width:${pct}%"></i></div>`;
+    } else {
+      el.innerHTML = `<div class="usage-month-row"><span class="dim small">本月全库估算</span><b>${fmtCost(month)}</b><span class="dim small">· ${calls} 次调用</span><button class="btn btn-text btn-sm" id="usageGoLedger">看明细 →</button></div>`;
+      el.querySelector('#usageGoLedger')?.addEventListener('click', openUsageLedger);
+    }
+  } catch {
+    el.textContent = '没能读取用量记录（不影响其它设置）';
+  }
+}
+
+$('#saveUsageCfgBtn')?.addEventListener('click', async () => {
+  const ok = await saveUsageConfig();
+  if (!ok) return;
+  $('#usageCfgMsg').textContent = '已保存';
+  setTimeout(() => { $('#usageCfgMsg').textContent = ''; }, 2000);
+  toast('用量设置已保存', 'ok');
+});
+$('#addModelPriceRow')?.addEventListener('click', () => {
+  const list = $('#modelPriceList');
+  if (!list) return;
+  const holder = document.createElement('div');
+  holder.innerHTML = priceRowHtml({ name: '', builtin: false, input: '', output: '', placeholderIn: '0', placeholderOut: '0' });
+  const row = holder.firstElementChild;
+  list.appendChild(row);
+  row?.querySelector('.price-name')?.focus();
+  row?.querySelector('.price-del')?.addEventListener('click', () => row.remove());
+});
+$('#openUsageLedgerBtn')?.addEventListener('click', () => openUsageLedger());
+$('#modelPriceList')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.price-del');
+  if (!btn) return;
+  btn.closest('.price-row')?.remove();
+});
+
 function configForSave(cfg) {
   return {
     ...cfg,

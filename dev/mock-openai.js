@@ -568,6 +568,10 @@ const server = http.createServer(async (req, res) => {
       await sleep(DELAY);
     }
     if (kind !== 'empty') await send(frameStr({}, kind === 'length' ? 'length' : 'stop'));
+    // 请求带 include_usage 时，流式末尾补一帧只有 usage、没有 choices 的分块（OpenAI 行为）
+    if (payload.stream_options?.include_usage) {
+      await send(`data: ${JSON.stringify({ ...base, choices: [], usage: { prompt_tokens: 1500, completion_tokens: typeof content === 'string' ? content.length : 0, total_tokens: 1500 + (typeof content === 'string' ? content.length : 0) } })}${nl}${nl}`);
+    }
     res.write(`data: [DONE]${nl}${nl}`);
   } catch { /* 客户端断开 */ }
   res.end();

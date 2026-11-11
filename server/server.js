@@ -13,6 +13,7 @@ import {
   applyFragmentData,
 } from './store.js';
 import { nextChapterTitle } from '../web/lib/data.js';
+import { costOfLogEntry } from '../web/lib/prices.js';
 import { buildTask, TASKS, TEMPLATE_SLOTS, TEMPLATE_VARS } from './prompts.js';
 import { buildEpub } from './epub.js';
 import { buildPrintHtml } from './print.js';
@@ -216,6 +217,10 @@ async function callUpstream({ cfg, provider, model, messages, temperature, maxTo
     stream: !!stream,
   };
   if (provider.extraBody && typeof provider.extraBody === 'object') Object.assign(body, provider.extraBody);
+  // OpenAI 兼容的流式 usage：请求带上才会回报 token 数；关不掉的供应商（extraBody 里显式给了 stream_options）就按对方的来
+  if (stream && !(body.stream_options && typeof body.stream_options === 'object')) {
+    body.stream_options = { include_usage: true };
+  }
 
   const resp = await fetch(url, {
     method: 'POST',
@@ -368,6 +373,7 @@ async function relayCompletion({ res, upstream, abort }) {
   let timedOut = false;
   let fatal = null;
   let sniffed = '';
+  let usage = null;   // 上游流式报回的 usage（include_usage）；没有就继续走字符估算
 
   const arm = () => {
     clearTimeout(idle);
@@ -393,6 +399,7 @@ async function relayCompletion({ res, upstream, abort }) {
       emit({ content: payload });                      // 上游吐的是纯文本，直接当正文
       return true;
     }
+    if (j.usage && typeof j.usage === 'object') usage = j.usage;   // 流式 usage 帧（include_usage）
     if (j.error) {
       fatal = friendlyProviderError(j.error.message || j.error.code || '模型返回错误', upstream.resp.status);
       return false;
@@ -418,6 +425,7 @@ async function relayCompletion({ res, upstream, abort }) {
         if (j.choices && j.choices[0]?.finish_reason === 'length') {
           sseWrite(res, { shu_notice: { kind: 'truncated', message: '模型输出被截断（达到 max_tokens），可能没写完。可以到 设置→模型 把最大长度调大，或点「续写」接着写。' } });
         }
+        if (j.usage && typeof j.usage === 'object') usage = j.usage;
         emit(deltaFromChunk(j));
       }
       if (!emitted) sniffed = txt.slice(0, 2048);
@@ -469,6 +477,13 @@ async function relayCompletion({ res, upstream, abort }) {
 
   if (fatal) sseWrite(res, { shu_error: fatal });
   else if (!emitted) sseWrite(res, { shu_error: describeEmptyBody(sniffed, upstream.resp.status) });
+  // 有 usage 就原样回传：前端按配置的单价估费用；上游不回 usage 时前端按字数估算（标注「估算」）
+  if (usage && typeof usage === 'object') {
+    const input = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0) || 0;
+    const output = Number(usage.completion_tokens ?? usage.output_tokens ?? 0) || 0;
+    const total = Number(usage.total_tokens ?? (input + output)) || (input + output);
+    sseWrite(res, { shu_usage: { model: upstream.modelName || '', input, output, total } });
+  }
 }
 
 function tryJson(text) {
@@ -629,8 +644,13 @@ async function handleApi(req, res, url) {
         ...incoming,
         providers,
         roleModels: { ...(cfg.roleModels || {}), ...(incoming.roleModels || {}) },
+        modelPrices: { ...(cfg.modelPrices || {}), ...(incoming.modelPrices || {}) },
         ui: { ...(cfg.ui || {}), ...(incoming.ui || {}) },
       };
+      if (incoming.usageBudget !== undefined) {
+        const b = Number(incoming.usageBudget);
+        next.usageBudget = Number.isFinite(b) && b >= 0 ? Math.floor(b * 100) / 100 : 0;
+      }
       delete next.apiKeyMasked;
       delete next.apiKeySet;
       saveConfig(next);
@@ -648,6 +668,65 @@ async function handleApi(req, res, url) {
       if (body.goal !== undefined) setGoal(body.goal);
       return sendJson(res, 200, statsSummary({ days: body.days || 14 }));
     }
+  }
+
+  /* --- 用量汇总（#43）：全库生成记录 → 合计 / 按日 / 按任务 / 按模型，以及本月费用 --- */
+  if (seg[1] === 'usage' && seg.length === 2 && method === 'GET') {
+    const days = Math.max(1, Math.min(400, Number(url.searchParams.get('days')) || 30));
+    const cfg = loadConfig();
+    const custom = cfg.modelPrices || {};
+    const monthStart = (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).getTime(); })();
+    const cutoff = Date.now() - days * 86400000;
+    const dayKeyLocal = (ts) => { const d = new Date(ts); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
+    const byDay = new Map();
+    const byTask = new Map();
+    const byModel = new Map();
+    const totals = { calls: 0, tokensIn: 0, tokensOut: 0, cost: 0, estimatedCalls: 0, unpricedCalls: 0 };
+    let monthCost = 0;
+    let monthCalls = 0;
+    let files = [];
+    try { files = fs.readdirSync(path.join(DATA_DIR, 'novels')); } catch { files = []; }
+    for (const f of files) {
+      if (!f.endsWith('.json')) continue;
+      let n = null;
+      try { n = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'novels', f), 'utf8')); } catch { continue; }
+      const log = Array.isArray(n?.meta?.genLog) ? n.meta.genLog : [];
+      for (const entry of log) {
+        const at = Number(entry?.at) || 0;
+        if (at <= 0) continue;
+        const est = costOfLogEntry(entry, custom);
+        if (at >= monthStart) { monthCalls += 1; monthCost += Number(est.cost) || 0; }
+        if (at < cutoff) continue;
+        totals.calls += 1;
+        totals.tokensIn += est.tokensIn;
+        totals.tokensOut += est.tokensOut;
+        totals.cost += Number(est.cost) || 0;
+        if (est.estimated) totals.estimatedCalls += 1;
+        if (est.cost === null || est.cost === undefined) totals.unpricedCalls += 1;
+        const key = entry.task || '其他';
+        const t = byTask.get(key) || { task: key, count: 0, cost: 0, tokens: 0 };
+        t.count += 1; t.cost += Number(est.cost) || 0; t.tokens += est.tokensIn + est.tokensOut;
+        byTask.set(key, t);
+        const day = dayKeyLocal(at);
+        const d = byDay.get(day) || { day, cost: 0, calls: 0 };
+        d.cost += Number(est.cost) || 0; d.calls += 1;
+        byDay.set(day, d);
+        const mkey = entry.model || '未知模型';
+        const m = byModel.get(mkey) || { model: mkey, cost: 0, count: 0 };
+        m.cost += Number(est.cost) || 0; m.count += 1;
+        byModel.set(mkey, m);
+      }
+    }
+    return sendJson(res, 200, {
+      days,
+      totals,
+      monthTotal: monthCost,
+      monthCalls,
+      budget: Number((cfg.usageBudget ?? 0)) || 0,
+      byTask: [...byTask.values()].sort((a, b) => b.cost - a.cost),
+      byDay: [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day)),
+      byModel: [...byModel.values()].sort((a, b) => b.cost - a.cost),
+    });
   }
 
   // 某一天的明细：点开写作日历上的某一天

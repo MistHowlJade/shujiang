@@ -1,4 +1,4 @@
-// 书匠 · 纯计算模块自测
+﻿// 书匠 · 纯计算模块自测
 // ---------------------------------------------------------------------------
 // web/lib/ 下的模块是纯计算，不碰 DOM、不依赖全局状态，所以能在 Node 里直接跑。
 // 这里验的是最容易「看着能用其实算错」的那类逻辑：文本差异算法。
@@ -10,7 +10,7 @@
 
 import fs from 'node:fs';
 import { inflateRawSync } from 'node:zlib';
-import { diffProse, diffHtml, diffSideHtml, splitSentences, lcsOps } from '../web/lib/diff.js';
+import { diffProse, diffHtml, diffSideHtml, splitSentences, lcsOps, collectChangeGroups, mergeReviewedSegments } from '../web/lib/diff.js';
 import { bookGoalOf, fmtGoal, finishEstimate, daysPhrase, datePhrase, goalPanelHtml } from '../web/lib/goal.js';
 import { scanProofChapter, buildProofReport } from '../web/lib/proof.js';
 import { buildHealthReport, applyHealthIgnored, healthKey } from '../web/lib/health.js';
@@ -2009,6 +2009,51 @@ check('超过一年按年说', daysPhrase(500) === '还要 1.4 年（约 500 天
     if (!app.includes(`#${id}`) && !app.includes(`'${id}'`) && !app.includes(`"${id}"`)) dead.push(id);
   }
   check('所有静态按钮都有绑定或事件委托', dead.length === 0, dead.join(', '));
+}
+
+/* ---------- 逐段审阅合并（#42） ---------- */
+{
+  const before = '他推开门。风很大。门里没有人。';
+  const after = '他推开窗。风很大。屋里黑得吓人。';
+  const d = diffProse(before, after);
+  const groups = collectChangeGroups(d.segs);
+  check('收拢出改动组（≥1 组）', groups.length >= 1, String(groups.length));
+  check('默认全接受', groups.every((g) => g.accepted === true));
+  const allAccepted = mergeReviewedSegments(d.segs, groups);
+  check('全接受 = 新文', allAccepted === after, JSON.stringify(allAccepted));
+  groups.forEach((g) => { g.accepted = false; });
+  const allRejected = mergeReviewedSegments(d.segs, groups);
+  check('全拒绝 = 原文', allRejected === before, JSON.stringify(allRejected));
+  // 再把第一个组接受、其余拒绝（如果有多组）
+  if (groups.length >= 2) {
+    groups.forEach((g) => { g.accepted = false; });
+    groups[0].accepted = true;
+    const partial = mergeReviewedSegments(d.segs, groups);
+    check('部分接受：拒绝的部分保留原句', partial.includes('风很大'), JSON.stringify(partial));
+  }
+  // 无改动文本应当收出 0 组
+  const same = collectChangeGroups(diffProse(before, before).segs);
+  check('无改动 → 0 组', same.length === 0);
+}
+
+/* ---------- 模型价格表（#43） ---------- */
+import { DEFAULT_MODEL_PRICES, resolveModelPrice, estimateCost, estimateTokensFromChars, costOfLogEntry, fmtCost } from '../web/lib/prices.js';
+{
+  check('内置价表非空且输入输出都是有限数', Object.values(DEFAULT_MODEL_PRICES).every((p) => Number.isFinite(p.input) && Number.isFinite(p.output) && p.input >= 0 && p.output >= 0));
+  check('内置匹配：deepseek-chat 命中', resolveModelPrice('deepseek-chat')?.source === 'default' && resolveModelPrice('deepseek-chat').input === DEFAULT_MODEL_PRICES['deepseek-chat'].input);
+  check('自定义覆盖优先于内置', resolveModelPrice('deepseek-chat', { 'deepseek-chat': { input: 9, output: 19 } })?.source === 'custom');
+  check('自定义子串覆盖同家族', resolveModelPrice('deepseek-chat-extra', { deepseek: { input: 1, output: 2 } })?.source === 'custom');
+  check('未知模型返回 null', resolveModelPrice('完全没听过的模型-xyz') === null);
+  check('费用 = 输入×价 + 输出×价（元）', Math.abs(estimateCost({ inputTokens: 1_000_000, outputTokens: 1_000_000, model: 'mock' }) - 0) === 0);
+  const cost = estimateCost({ inputTokens: 26000, outputTokens: 4500, model: 'deepseek-chat' });
+  check('费用量级合理（input 2 + output 8 元/M）', cost > 0.08 && cost < 0.1, String(cost));
+  check('无价格返回 null', estimateCost({ inputTokens: 1, outputTokens: 1, model: '完全没听过的模型-xyz' }) === null);
+  check('中文字数估算 token：1.5 倍', estimateTokensFromChars(100) === 150);
+  const legacy = costOfLogEntry({ outChars: 3000, model: 'deepseek-chat', status: 'ok' }, {});
+  check('旧记录按字数估算且标记 estimated', legacy.estimated === true && legacy.tokensOut === 4500);
+  const real = costOfLogEntry({ tkIn: 26000, tkOut: 4500, model: 'deepseek-chat' }, {});
+  check('新记录有 usage 时用真值', real.estimated === false && real.tokensIn === 26000);
+  check('fmtCost 小数档位', fmtCost(0) === '¥0' && fmtCost(0.005).includes('0.01'));
 }
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);

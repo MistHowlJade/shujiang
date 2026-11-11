@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow" />
 <meta name="theme-color" content="#f3f1ea" />
 <title>书匠 · AI 长篇小说创作台</title>
-<link rel="stylesheet" href="/style.css?v=1.0.37" />
+<link rel="stylesheet" href="/style.css?v=1.0.38" />
 <style id="designv1011">
   /* 书匠 · v1.0.11「东方典籍」视觉重写 —— 暖墨：衬线 + 赭金 + 朱砂 */
   @font-face { font-family: '思源宋体 VF'; src: local('Noto Serif SC'), local('Noto Serif SC VF'), local('NotoSerifSC-VF'); font-display: swap; }
@@ -898,6 +898,7 @@
                   <div class="out-next" id="outNext" hidden></div>
                   <div class="btn-row wrap" id="diffActions" hidden>
                     <button class="btn btn-primary" id="diffAccept"><svg class="ico"><use href="#i-check" /></svg>采用</button>
+                    <button class="btn btn-text" id="diffReview" title="逐段审阅：每处改动可单独接受 / 拒绝，未接受的保持原文">逐段审阅</button>
                     <button class="btn" id="diffRetry"><svg class="ico"><use href="#i-refresh" /></svg>重试</button>
                     <button class="btn btn-text" id="diffReject">放弃</button>
                   </div>
@@ -1194,6 +1195,24 @@
             <div class="btn-row">
               <button class="btn btn-primary" id="saveCfgBtn">保存设置</button>
               <span class="dim-text" id="cfgMsg"></span>
+            </div>
+          </div>
+
+          <div class="card" id="usageCard">
+            <div class="card-head"><h2>用量与费用</h2><span class="tag">本地记录</span></div>
+            <p class="desc">每次 AI 调用都会本地记一条用量：任务、模型、token、估算费用。全部存在本机 <code>data/</code>，不上传；服务商不返回 usage 时按输出字数估算，并标注「估算」。</p>
+            <div class="usage-summary" id="usageSummary"></div>
+            <label class="field-label">月度预算（元）<span class="field-hint">超过预算时生成后提醒一次；留空或 0 = 不提醒</span><input id="cfgUsageBudget" class="input" type="number" min="0" step="10" placeholder="例如：100" /></label>
+            <details class="details">
+              <summary>模型单价（元 / 百万 token）</summary>
+              <p class="dim-text" style="padding:0 2px">内置参考价，按「名称包含」匹配模型；填了数字就按你的覆盖价算，留空 = 用内置价。</p>
+              <div id="modelPriceList"></div>
+              <div class="btn-row" style="margin-top:10px"><button class="btn btn-sm" id="addModelPriceRow"><svg class="ico"><use href="#i-plus" /></svg>添加模型</button></div>
+            </details>
+            <div class="btn-row" style="margin-top:12px">
+              <button class="btn btn-primary" id="saveUsageCfgBtn">保存用量设置</button>
+              <button class="btn btn-text" id="openUsageLedgerBtn">全库用量账本 →</button>
+              <span class="dim-text" id="usageCfgMsg"></span>
             </div>
           </div>
 

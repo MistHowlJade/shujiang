@@ -27,6 +27,7 @@ const FILES = [
   'web/lib/consistency.js',
   'web/lib/markdown.js',
   'web/lib/trash.js',
+  'web/lib/prices.js',
   'web/lib/propagate.js',
   'web/lib/payoff.js',
   'web/lib/completion.js',

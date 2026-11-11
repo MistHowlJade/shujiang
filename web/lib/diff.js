@@ -158,6 +158,57 @@ function charOps(a, b) {
  * ============================================================ */
 
 /**
+ * 把 diffProse 的片段收拢成「改动组」：same 断开，其余并入当前组。
+ * 供「逐段审阅」用：每组可单独接受 / 拒绝。
+ * @returns {{ dels: string[], adds: string[], delText: string, addText: string, accepted: boolean }[]}
+ */
+export function collectChangeGroups(segs) {
+  const groups = [];
+  let cur = null;
+  for (const s of segs) {
+    if (s.type === 'same') {
+      if (cur) { groups.push(cur); cur = null; }
+      continue;
+    }
+    if (!cur) cur = { dels: [], adds: [] };
+    if (s.type === 'del') cur.dels.push(s.text);
+    else if (s.type === 'add') cur.adds.push(s.text);
+    else if (s.type === 'chg') { cur.dels.push(s.text); cur.adds.push(s.alt || ''); }
+    else cur.dels.push(s.text);
+  }
+  if (cur) groups.push(cur);
+  groups.forEach((g) => {
+    g.delText = g.dels.join('');
+    g.addText = g.adds.join('');
+    g.accepted = true;
+  });
+  return groups;
+}
+
+/** 按接受状态重建最终文本：接受的组取 AI 文本，拒绝的组保留原文 */
+export function mergeReviewedSegments(segs, groups) {
+  let merged = '';
+  let index = 0;
+  let cur = null;
+  const flush = () => {
+    if (!cur) return;
+    const g = groups[cur.index];
+    merged += g && g.accepted ? g.adds.join('') : g.dels.join('');
+    cur = null;
+  };
+  for (const s of segs) {
+    if (s.type === 'same') {
+      flush();
+      merged += s.text;
+      continue;
+    }
+    if (!cur) cur = { index: index++ };
+  }
+  flush();
+  return merged;
+}
+
+/**
  * 两段正文的差异。
  * @returns {{segs: {type:'same'|'del'|'add'|'chg', text:string, alt?:string}[], added:number, removed:number, same:number, similarity:number}}
  */
