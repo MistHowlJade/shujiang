@@ -451,6 +451,34 @@ const server = http.createServer(async (req, res) => {
     return res.end(body);
   }
 
+  // 向量化（#41 语义检索测试用）：按字符桶生成确定性向量，相似文本余弦更高
+  if (url.pathname.endsWith('/embeddings') && req.method === 'POST') {
+    let raw = '';
+    for await (const c of req) raw += c;
+    let payload = {};
+    try { payload = JSON.parse(raw || '{}'); } catch { /* ignore */ }
+    const model = payload.model || 'mock-embedding';
+    const inputs = Array.isArray(payload.input) ? payload.input : [payload.input || ''];
+    const vecOf = (text) => {
+      const v = new Array(16).fill(0);
+      const t = String(text || '');
+      for (let i = 0; i < t.length; i += 1) {
+        const code = t.charCodeAt(i);
+        v[code % 16] += 1;
+        v[(code * 7 + 3) % 16] += 0.5;
+      }
+      return v;
+    };
+    const body = JSON.stringify({
+      object: 'list',
+      model,
+      data: inputs.map((text, i) => ({ object: 'embedding', index: i, embedding: vecOf(text) })),
+      usage: { prompt_tokens: inputs.reduce((s, x) => s + String(x).length, 0), total_tokens: inputs.reduce((s, x) => s + String(x).length, 0) },
+    });
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(body);
+  }
+
   if (!url.pathname.endsWith('/chat/completions')) {
     res.writeHead(404, { ...cors, 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ error: { message: `未知路径 ${url.pathname}` } }));

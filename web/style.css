@@ -4177,3 +4177,47 @@ body[data-theme="light"] .btn-primary {
 .seg-review-add { display: flex; gap: 8px; margin-top: 4px; padding: 5px 8px; background: var(--success-bg); border-left: 2px solid var(--success); border-radius: var(--r-sm); font-size: 12px; line-height: 1.7; color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
 .seg-review-sign { flex: 0 0 auto; color: var(--danger); font-weight: 700; }
 .seg-review-add .seg-review-sign { color: var(--success); }
+
+/* ---------------- 语义检索 / 自动记忆（#41） ---------------- */
+.semantic-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 2px; }
+.semantic-status { flex: 1 1 auto; min-width: 180px; }
+.semantic-model-input { width: 168px; font-size: 11px; padding: 4px 8px; }
+.auto-memory-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.auto-memory-row .find-check { flex: 0 0 auto; }
+.extract-toolbar { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
+.extract-list { max-height: 52vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.extract-group-title { font-size: 11.5px; font-weight: 600; color: var(--text-3); margin-bottom: 4px; }
+.extract-row { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border-radius: var(--r-sm); cursor: pointer; font-size: 12px; }
+.extract-row:hover { background: var(--surface-3); }
+.extract-row input { margin-top: 2px; accent-color: var(--accent); }
+.extract-name { flex: 0 0 120px; font-weight: 600; color: var(--text-2); }
+.extract-why { flex: 1 1 auto; color: var(--text-3); line-height: 1.5; }
+
+/* ---------------- 发布中心（#40） ---------------- */
+.rc-preview { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
+.rc-preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+.rc-preview-value { font-size: 12.5px; color: var(--text-2); margin-top: 2px; line-height: 1.6; }
+.rc-preview-note { grid-column: 1 / -1; font-size: 11.5px; color: var(--text-3); border-top: 1px dashed var(--border); padding-top: 6px; }
+.release-section { margin-top: 14px; }
+.release-section-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px; }
+.release-asset { margin-bottom: 10px; }
+.release-asset-head { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 4px; }
+.release-asset-head .btn { margin-left: auto; }
+.rc-plan-list { max-height: 32vh; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-md); }
+.rc-plan-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.rc-plan-row:last-child { border-bottom: none; }
+.rc-plan-no { flex: 0 0 56px; color: var(--text-4); font-variant-numeric: tabular-nums; }
+.rc-plan-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.rc-plan-date { width: 128px; font-size: 11px; padding: 3px 6px; }
+.rc-plan-status { width: 96px; font-size: 11px; padding: 3px 6px; }
+.rc-check-list { display: flex; flex-direction: column; gap: 6px; }
+.rc-check-item { display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); font-size: 12px; }
+.rc-check-item.ok .rc-check-icon { color: var(--success); }
+.rc-check-item.warn .rc-check-icon { color: #a4883c; }
+.rc-check-item.bad .rc-check-icon { color: var(--danger); }
+.rc-check-icon { flex: 0 0 16px; font-weight: 700; }
+.rc-check-item b { color: var(--text-2); font-weight: 600; }
+.rc-check-summary { padding: 7px 10px; border-radius: var(--r-md); font-size: 12.5px; font-weight: 600; }
+.rc-check-summary.ok { color: var(--success); background: var(--success-bg); }
+.rc-check-summary.warn { color: #a4883c; background: rgba(164,136,60,.14); }
+.rc-check-summary.bad { color: var(--danger); background: var(--danger-bg); }

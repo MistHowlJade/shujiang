@@ -103,10 +103,35 @@ export function recentMemories(chapters, index, count = 6) {
   return out.reverse();
 }
 
+/** 组装检索用的查询串（语义检索要在调用 LLM 前先算出这个串的向量） */
+export function contextQuery(novel, chapterId, extraQuery) {
+  const chapters = novel.chapters || [];
+  const idx = chapterId ? chapters.findIndex((c) => c.id === chapterId) : chapters.length;
+  const chapter = idx >= 0 ? chapters[idx] : null;
+  const prevIndex = idx >= 0 ? idx : chapters.length;
+  const linkedOutline = findOutlineEntry(novel, chapter?.outlineId)?.entry || null;
+  const chapterOutline = {
+    summary: linkedOutline?.summary || chapter?.outline?.summary || '',
+    scene: linkedOutline?.scene || chapter?.outline?.scene || '',
+    characters: linkedOutline?.characters || chapter?.outline?.characters || '',
+  };
+  const currentChapterText = idx >= 0 ? String(chapters[idx]?.content || '').slice(-1500) : '';
+  return [
+    chapter?.title,
+    chapter?.summary,
+    chapterOutline.summary,
+    chapterOutline.scene,
+    chapterOutline.characters,
+    extraQuery,
+    currentChapterText,
+    chapters.slice(Math.max(0, prevIndex - 3), prevIndex).map((c) => `${c.title} ${c.summary || c.memory?.summary || ''}`).join(' '),
+  ].filter(Boolean).join(' ');
+}
+
 /**
  * 组装当前写作任务的资料包
  * @param {object} novel 小说对象
- * @param {object} opts { chapterId, extraQuery, budget, briefCharacters }
+ * @param {object} opts { chapterId, extraQuery, budget, briefCharacters, semantic }
  */
 export function buildContext(novel, opts = {}) {
   const chapters = novel.chapters || [];
@@ -124,21 +149,8 @@ export function buildContext(novel, opts = {}) {
     hook: linkedOutline?.hook || chapter?.outline?.hook || '',
   };
 
-  // 查询串 = 本章标题 + 本章要求 + 最近概要 + 用户补充搜索词
-  // 查询词 = 当前章 + 上一章摘要 + 章节卡片 + 用户额外要求 + 本章正文片段（锚点检索：用正文提到的名字找出相关设定）
-  const currentChapterText = idx >= 0 ? String(chapters[idx]?.content || '').slice(-1500) : '';
-  const query = [
-    chapter?.title,
-    chapter?.summary,
-    chapterOutline.summary,
-    chapterOutline.scene,
-    chapterOutline.characters,
-    opts.extraQuery,
-    currentChapterText,
-    chapters.slice(Math.max(0, prevIndex - 3), prevIndex).map((c) => `${c.title} ${c.summary || c.memory?.summary || ''}`).join(' '),
-  ]
-    .filter(Boolean)
-    .join(' ');
+  // 查询词 = contextQuery(）共享实现；语义检索用同一串算向量，不给两边各写一份
+  const query = contextQuery(novel, opts.chapterId, opts.extraQuery);
   const qt = terms(query);
 
   const budget = opts.budget || novel.meta?.contextBudget || DEFAULT_BUDGET;
@@ -265,10 +277,34 @@ export function buildContext(novel, opts = {}) {
     );
   }
 
-  /* 3. 人物卡（按相关度） */
+  /* 语义索引（#41）：词法没命中、语义命中的设定补进来；都关掉就是纯词法 */
+  const semanticChars = new Map();
+  const semanticWorlds = new Map();
+  const semanticTimeline = new Map();
+  const semanticTitles = [];
+  if (Array.isArray(opts.semantic) && opts.semantic.length) {
+    for (const h of opts.semantic) {
+      if (!h?.item) continue;
+      const id = h.item.id;
+      const sim = Number(h.sim) || 0;
+      if (h.item.kind === 'character') semanticChars.set(id, sim);
+      else if (h.item.kind === 'world') semanticWorlds.set(id, sim);
+      else if (h.item.kind === 'timeline') semanticTimeline.set(id, sim);
+      if (semanticTitles.length < 8) semanticTitles.push({ kind: h.item.kind, title: h.item.title, sim: Math.round(sim * 100) / 100 });
+    }
+  }
+
+  /* 3. 人物卡（按相关度 + 语义补充） */
   const chars = (novel.bible?.characters || []).map((c) => ({ c, s: score(qt, c, [(x) => x.name, (x) => x.identity, (x) => x.role, (x) => (x.aliases || []).join(' ')]) }));
-  const hitChars = chars.filter((x) => x.s > 0).sort((a, b) => b.s - a.s);
-  const restChars = chars.filter((x) => x.s <= 0);
+  const lexChars = chars.filter((x) => x.s > 0).sort((a, b) => b.s - a.s);
+  const semChars = chars
+    .filter((x) => x.s <= 0 && x.c?.id && semanticChars.has(x.c.id))
+    .sort((a, b) => (semanticChars.get(b.c.id) || 0) - (semanticChars.get(a.c.id) || 0))
+    .slice(0, 4)
+    .map((x) => ({ c: x.c, s: (semanticChars.get(x.c.id) || 0) * 10, semantic: true }));
+  const hitChars = [...lexChars, ...semChars].sort((a, b) => b.s - a.s);
+  const semCharIds = new Set(semChars.map((x) => x.c?.id));
+  const restChars = chars.filter((x) => x.s <= 0 && !(x.c?.id && semCharIds.has(x.c.id)));
   if (hitChars.length) {
     push(`本章相关人物（共 ${hitChars.length} 人）`, hitChars.slice(0, 10).map((x) => fmtCharacter(x.c)).join('\n---\n'), true);
   }
@@ -278,9 +314,15 @@ export function buildContext(novel, opts = {}) {
 
   /* 4. 世界观条目 */
   const worlds = (novel.bible?.world || []).map((w) => ({ w, s: score(qt, w, [(x) => x.name, (x) => x.category]) }));
-  worlds.sort((a, b) => b.s - a.s);
-  const hitWorlds = worlds.filter((x) => x.s > 0).slice(0, 18);
-  const otherWorlds = worlds.filter((x) => x.s <= 0).slice(0, 12);
+  const lexWorlds = worlds.filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 18);
+  const semWorlds = worlds
+    .filter((x) => x.s <= 0 && x.w?.id && semanticWorlds.has(x.w.id))
+    .sort((a, b) => (semanticWorlds.get(b.w.id) || 0) - (semanticWorlds.get(a.w.id) || 0))
+    .slice(0, 6)
+    .map((x) => ({ w: x.w, s: (semanticWorlds.get(x.w.id) || 0) * 10, semantic: true }));
+  const hitWorlds = [...lexWorlds, ...semWorlds].sort((a, b) => b.s - a.s).slice(0, 18);
+  const semWorldIds = new Set(semWorlds.map((x) => x.w?.id));
+  const otherWorlds = worlds.filter((x) => x.s <= 0 && !(x.w?.id && semWorldIds.has(x.w.id))).slice(0, 12);
   if (hitWorlds.length) push('相关世界观设定', hitWorlds.map((x) => fmtWorld(x.w)).join('\n'), true);
   if (otherWorlds.length) push('其他世界观速览', otherWorlds.map((x) => fmtWorld(x.w)).join('\n'));
 
@@ -294,7 +336,13 @@ export function buildContext(novel, opts = {}) {
   const tl = (novel.bible?.timeline || [])
     .map((t) => ({ t, s: score(qt, t, [(x) => x.title, (x) => x.desc || x.detail]) }))
     .sort((a, b) => b.s - a.s);
-  const hitTl = tl.filter((x) => x.s > 0).slice(0, 12);
+  const lexTl = tl.filter((x) => x.s > 0);
+  const semTl = tl
+    .filter((x) => x.s <= 0 && x.t?.id && semanticTimeline.has(x.t.id))
+    .sort((a, b) => (semanticTimeline.get(b.t.id) || 0) - (semanticTimeline.get(a.t.id) || 0))
+    .slice(0, 4)
+    .map((x) => ({ t: x.t, s: (semanticTimeline.get(x.t.id) || 0) * 10, semantic: true }));
+  const hitTl = [...lexTl, ...semTl].sort((a, b) => b.s - a.s).slice(0, 12);
   if (hitTl.length) push('相关时间线', hitTl.map((x) => fmtTimeline(x.t)).join('\n'), true);
 
   /* 6. 前情记忆：最近 6 章固定带，更早的按需检索 */
@@ -330,6 +378,7 @@ export function buildContext(novel, opts = {}) {
       worlds: hitWorlds.length,
       timeline: hitTl.length,
       memories: recent.length + earlier.length,
+      semantic: semanticTitles,
     },
   };
 }

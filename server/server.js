@@ -21,7 +21,7 @@ import { buildDocx } from './docx.js';
 import { extractDocxText } from './docx-import.js';
 import { outlineRows, characterRows, hasExtras, submissionFacts, submissionNote } from './manuscript.js';
 import { coverSvg, readCoverImage, saveCoverImage, deleteCoverImage, coverOptions, coverKind } from './cover.js';
-import { buildContext, collectScopeText, packSummaryLines } from './context.js';
+import { buildContext, collectScopeText, packSummaryLines, contextQuery } from './context.js';
 import { addWords, setGoal, statsSummary, statsDay } from './stats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -153,7 +153,52 @@ function resolveModel(cfg, provider, task) {
 /* 任务上下文准备                                                      */
 /* ------------------------------------------------------------------ */
 
-function prepareTask(cfg, body) {
+/** 生成前顺手把查询串算一遍 embedding 并取 top 命中；任何一步失败都退回纯词法 */
+async function buildSemanticMatches(novel, chapterId, extraQuery, cfg) {
+  const idx = readSemanticIndex(novel?.id);
+  if (!idx?.items?.length) return null;
+  try {
+    const queryText = contextQuery(novel, chapterId, extraQuery);
+    if (!queryText || !String(queryText).trim()) return null;
+    const vec = await embedQueryVector(cfg, idx.model || 'text-embedding-3-small', queryText);
+    if (!vec) return null;
+    return idx.items
+      .map((item) => ({ item, sim: cosineSimilarity(vec, item.vec) }))
+      .filter((x) => x.sim >= 0.35)
+      .sort((a, b) => b.sim - a.sim)
+      .slice(0, 12);
+  } catch {
+    return null;
+  }
+}
+
+async function embedQueryVector(cfg, model, text) {
+  const provider = resolveProvider(cfg, undefined);
+  if (!provider) return null;
+  const input = String(text || '').slice(0, 6000);
+  if (!input.trim()) return null;
+  const url = `${normalizeBaseUrl(provider.baseUrl)}/embeddings`;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 20000);
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.apiKey}` },
+      body: JSON.stringify({ model, input: [input] }),
+      signal: ac.signal,
+    });
+    const txt = await r.text();
+    if (!r.ok) return null;
+    const j = JSON.parse(txt);
+    return Array.isArray(j?.data?.[0]?.embedding) ? j.data[0].embedding : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function prepareTask(cfg, body) {
   const { task, novelId, chapterId, payload = {}, customTemplates } = body;
   if (!task) throw new Error('缺少 task');
   if (!TASKS[task]) throw new Error(`未知任务：${task}`);
@@ -166,7 +211,8 @@ function prepareTask(cfg, body) {
     novel = getNovel(novelId);
     if (!novel) throw new Error('找不到这部作品');
     if (task !== 'style' && task !== 'custom') {
-      const built = buildContext(novel, { chapterId, extraQuery: payload.extraQuery, budget: novel.meta?.contextBudget });
+      const semantic = await buildSemanticMatches(novel, chapterId, payload.extraQuery, cfg);
+      const built = buildContext(novel, { chapterId, extraQuery: payload.extraQuery, budget: novel.meta?.contextBudget, semantic });
       pack = built.pack;
       stats = built.stats;
       prevTail = built.prevTail;
@@ -759,6 +805,50 @@ async function handleApi(req, res, url) {
     }
   }
 
+  /* --- 向量化（#41 语义检索）：把文本丢给用户自己接入的 provider，本地存索引 --- */
+  if (seg[1] === 'embed' && seg.length === 2 && method === 'POST') {
+    const body = await readBody(req);
+    const cfg = loadConfig();
+    const provider = resolveProvider(cfg, body.providerId);
+    const model = String(body.model || cfg.embeddingModel || 'text-embedding-3-small').trim();
+    if (!provider) return sendJson(res, 400, { error: '还没有能用来向量化的服务商，先在 设置→模型服务 接一个' });
+    const input = Array.isArray(body.input)
+      ? body.input.map((x) => String(x || '').slice(0, 8000)).filter(Boolean).slice(0, 64)
+      : [];
+    if (!input.length) return sendJson(res, 400, { error: '没有要向量化的文本' });
+    let upstream;
+    try {
+      const url = `${normalizeBaseUrl(provider.baseUrl)}/embeddings`;
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 60000);
+      try {
+        upstream = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.apiKey}` },
+          body: JSON.stringify({ model, input }),
+          signal: ac.signal,
+        });
+      } finally { clearTimeout(timer); }
+    } catch (err) {
+      if (err?.name === 'AbortError') return sendJson(res, 504, { error: '向量化服务超过 60 秒没有响应' });
+      return sendJson(res, 502, { error: `连不上向量化接口：${networkErrorText(err)}` });
+    }
+    const text = await upstream.text();
+    if (!upstream.ok) {
+      const raw = text.trim();
+      let msg = '';
+      try { msg = JSON.parse(raw)?.error?.message || raw.slice(0, 300); } catch { msg = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300) || `HTTP ${upstream.status}`; }
+      return sendJson(res, upstream.status, { error: `向量服务返回错误（HTTP ${upstream.status}）：${friendlyProviderError(msg, upstream.status)}` });
+    }
+    let j = null;
+    try { j = JSON.parse(text); } catch { return sendJson(res, 502, { error: '向量服务回了个不是 JSON 的东西' }); }
+    const data = (Array.isArray(j.data) ? j.data : [])
+      .map((d, i) => ({ index: Number(d?.index ?? i), embedding: d?.embedding }))
+      .filter((d) => Array.isArray(d.embedding));
+    if (data.length !== input.length) return sendJson(res, 502, { error: `向量服务返回了 ${data.length} 条，期望 ${input.length} 条` });
+    return sendJson(res, 200, { model: j.model || model, data });
+  }
+
   /* --- Word 导入：只解析，不写盘；预览确认后再走作品导入接口 --- */
   if (seg[1] === 'import' && seg[2] === 'docx' && seg.length === 3 && method === 'POST') {
     let buf;
@@ -1323,6 +1413,70 @@ async function handleApi(req, res, url) {
       }
     }
 
+    /* --- 语义检索（#41）：本地向量索引的读写（建立 / 删除 / 元信息 / 原材料） --- */
+    if (seg[3] === 'semantic' && seg.length === 4 && method === 'GET') {
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      const items = semanticItemsOf(n);
+      const fp = semanticFingerprint(items);
+      const idx = readSemanticIndex(id);
+      if (!idx) return sendJson(res, 200, { exists: false, itemCount: items.length, fingerprint: fp });
+      return sendJson(res, 200, {
+        exists: true,
+        model: idx.model || '',
+        count: idx.items.length,
+        dims: idx.dims || 0,
+        updatedAt: idx.updatedAt || 0,
+        itemCount: items.length,
+        fingerprint: fp,
+        stale: idx.fingerprint !== fp,
+      });
+    }
+    if (seg[3] === 'semantic' && seg[4] === 'items' && method === 'GET') {
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      const items = semanticItemsOf(n);
+      return sendJson(res, 200, { items, fingerprint: semanticFingerprint(items), total: items.length });
+    }
+    if (seg[3] === 'semantic' && seg.length === 4 && method === 'PUT') {
+      const body = await readBody(req, 64 * 1024 * 1024);
+      const n = getNovel(id);
+      if (!n) return sendJson(res, 404, { error: '作品不存在' });
+      const rawItems = Array.isArray(body.items) ? body.items : [];
+      if (!rawItems.length) return sendJson(res, 400, { error: '没有可入库的条目' });
+      const clean = [];
+      for (const item of rawItems) {
+        if (!item || !Array.isArray(item.vec) || !String(item.id || '').trim()) continue;
+        clean.push({
+          id: String(item.id).slice(0, 160),
+          kind: String(item.kind || 'item').slice(0, 20),
+          title: String(item.title || '').slice(0, 160),
+          text: String(item.text || '').slice(0, 800),
+          vec: item.vec.slice(0, 8192).map((x) => Number(x) || 0),
+        });
+      }
+      if (!clean.length) return sendJson(res, 400, { error: '向量格式不对' });
+      const index = {
+        version: 1,
+        model: String(body.model || '').slice(0, 80),
+        dims: Number(body.dims) || clean[0].vec.length,
+        fingerprint: semanticFingerprint(semanticItemsOf(n)),
+        updatedAt: Date.now(),
+        items: clean,
+      };
+      try {
+        fs.mkdirSync(semanticDir(), { recursive: true });
+        fs.writeFileSync(semanticFile(id), JSON.stringify(index));
+      } catch (err) {
+        return sendJson(res, 500, { error: `索引写盘失败：${err.message}` });
+      }
+      return sendJson(res, 200, { ok: true, count: clean.length, dims: index.dims, updatedAt: index.updatedAt });
+    }
+    if (seg[3] === 'semantic' && seg.length === 4 && method === 'DELETE') {
+      try { fs.rmSync(semanticFile(id), { force: true }); } catch { /* 本来就没有 */ }
+      return sendJson(res, 200, { ok: true });
+    }
+
     // 导入已有文稿（#34）：先按「第X章」切分、按「第X卷」分组，
     // 落点由客户端决定——追加（默认）/ 合并同名章 / 导入为新卷 / 覆盖现有章节。
     // 文件读取与编码识别在前端完成（浏览器才有 GBK 解码器），这里只认文本。
@@ -1417,7 +1571,7 @@ async function handleApi(req, res, url) {
   /* --- 上下文预览 --- */
   if (seg[1] === 'context' && method === 'POST') {
     const body = await readBody(req);
-    const { built, stats, pack } = prepareTask(loadConfig(), body);
+    const { built, stats, pack } = await prepareTask(loadConfig(), body);
     return sendJson(res, 200, {
       messages: built.messages,
       expect: built.expect,
@@ -1447,7 +1601,7 @@ async function handleApi(req, res, url) {
     let meta = {};
 
     if (!messages) {
-      const prepared = prepareTask(cfg, body);
+      const prepared = await prepareTask(cfg, body);
       messages = prepared.built.messages;
       temperature = prepared.built.temperature;
       maxTokens = prepared.built.maxTokens;
@@ -2204,6 +2358,95 @@ function buildSnapshotSummary(snap, cur, ts) {
       metaChanges: changes.length,
     },
   };
+}
+
+/* ------------------------------------------------------------------
+ * 语义检索（#41）：本地 embedding 索引（data/embeddings/<novelId>.json）
+ * 词法是兜底；关掉就完全回到纯词法。整份索引不发给浏览器，检索时只用于打分。
+ * ------------------------------------------------------------------ */
+
+function semanticDir() {
+  return path.join(DATA_DIR, 'embeddings');
+}
+
+function semanticFile(id) {
+  return path.join(semanticDir(), `${id}.json`);
+}
+
+/** 从作品里抽出要向量化的设定条目（人物 / 世界观 / 时间线 / 线索） */
+function semanticItemsOf(novel) {
+  const items = [];
+  const clip = (v, n = 600) => String(v || '').slice(0, n);
+  for (const c of novel?.bible?.characters || []) {
+    if (!c) continue;
+    const name = String(c.name || '').trim();
+    if (!name) continue;
+    items.push({
+      id: c.id || `char:${name}`,
+      kind: 'character',
+      title: name,
+      text: `人物 ${name}。${clip([c.role, c.identity, c.personality, c.goal, c.flaw, c.secret, c.speech, (c.aliases || []).join(' '), c.summary].filter(Boolean).join('。'))}`,
+    });
+  }
+  for (const w of novel?.bible?.world || []) {
+    if (!w) continue;
+    const name = String(w.name || '').trim();
+    if (!name) continue;
+    items.push({
+      id: w.id || `world:${name}`,
+      kind: 'world',
+      title: name,
+      text: `设定 ${name}（${w.category || '设定'}）：${clip([w.desc, w.detail, w.rules, w.limits].filter(Boolean).join('。'))}`,
+    });
+  }
+  for (const t of novel?.bible?.timeline || []) {
+    if (!t) continue;
+    const name = String(t.title || t.event || '').trim();
+    if (!name) continue;
+    items.push({
+      id: t.id || `timeline:${name}`,
+      kind: 'timeline',
+      title: name,
+      text: `事件 ${name}：${clip([t.time, t.when, t.desc, t.detail].filter(Boolean).join('。'))}`,
+    });
+  }
+  return items;
+}
+
+/** 简单稳定指纹：条目文本拼起来算 hash；设定改了就提示重建 */
+function semanticFingerprint(items) {
+  const src = (items || []).map((x) => `${x.kind}|${x.title}|${x.text}`).join('\n');
+  let h = 5381;
+  for (let i = 0; i < src.length; i += 1) h = ((h * 33) ^ src.charCodeAt(i)) >>> 0;
+  return String(h);
+}
+
+function cosineSimilarity(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return 0;
+  const len = Math.min(a.length, b.length);
+  if (!len) return 0;
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < len; i += 1) {
+    const x = Number(a[i]) || 0;
+    const y = Number(b[i]) || 0;
+    dot += x * y;
+    na += x * x;
+    nb += y * y;
+  }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+function readSemanticIndex(id) {
+  try {
+    const j = JSON.parse(fs.readFileSync(semanticFile(id), 'utf8'));
+    if (!j || !Array.isArray(j.items)) return null;
+    return j;
+  } catch {
+    return null;
+  }
 }
 
 /* ------------------------------------------------------------------ */

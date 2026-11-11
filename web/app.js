@@ -3314,6 +3314,7 @@ async function openNovel(id, opts = {}) {
   loadOutDraft(novel.id, S.chapterId);
   ccHydrate();   // 换到这本书自己的检查结果
   renderBookAnnotations();   // 换到这本书自己的全书批注清单
+  refreshSemanticRow();   // 换到这本书自己的语义索引状态
   ccRender();
   volToggled.clear();          // 折叠状态是「这本书的」，换作品别带过去
   S.stageFilter = '';          // 筛选也一样，换作品先看全貌
@@ -6229,6 +6230,7 @@ function renderStudio({ list = true } = {}) {
   renderRevisionCard();
   renderTopbarActions();
   renderAnnotationSidebar();   // 章节切换后批注列表也要跟着换成这一章的
+  syncAutoMemoryUI();
 }
 
 // 章节落盘的字段集合：自动保存 / 兜底保存 / 立即保存共用
@@ -6700,6 +6702,7 @@ function editorChanged() {
   hideSelToolbar();
   updateUndoButtons();
   updateFoot();
+  scheduleAutoMemory(ch, false);   // #41：缺记忆且字数够就默默补一条
 }
 
 $('#chContent').addEventListener('keydown', (e) => {
@@ -6902,6 +6905,8 @@ $('#chStage').addEventListener('change', () => {
   markChapterDirty(ch);
   renderStudio();
   toast(`已标为「${STAGE_LABEL[stage]}」`, 'ok');
+  // 定稿后默默补一条记忆（若开了自动记忆）；和校对提示不冲突
+  if (stage === 'done') scheduleAutoMemory(ch, true);
   // 第一次定稿时提一句「要不要校对」：只提示一次，之后靠命令面板
   if (stage === 'done') {
     try {
@@ -9097,6 +9102,71 @@ async function runPreDiagnose() {
   }
 }
 
+/* ============================================================
+ * 章节记忆自动化（#41）：定稿 / 保存后后台静默生成记忆
+ * 开关按作品放在 novel.meta.autoMemory；记忆存 ch.memory（续写/一致性检查都会用上）
+ * ============================================================ */
+const autoMemoryTimers = new Map();
+
+function syncAutoMemoryUI() {
+  const chk = $('#autoMemoryChk');
+  const cov = $('#memoryCoverage');
+  const novel = S.novel;
+  if (chk) chk.checked = !!novel?.meta?.autoMemory;
+  if (cov) {
+    const total = novel?.chapters?.length || 0;
+    const withMem = novel?.chapters?.filter((c) => c.memory).length || 0;
+    cov.textContent = total ? `记忆 ${withMem}/${total} 章` : '';
+  }
+}
+
+/** 排队：内容够长、这章还没记忆、开了开关，就过几秒钟默默补一条 */
+function scheduleAutoMemory(ch, force = false) {
+  if (!S.novel?.meta?.autoMemory) return;
+  if (!ch || !ch.id) return;
+  const plain = String(ch.content || '').replace(/\s+/g, '');
+  if (plain.length < 200) return;
+  if (!force && ch.memory) return;
+  clearTimeout(autoMemoryTimers.get(ch.id));
+  autoMemoryTimers.set(ch.id, setTimeout(() => { generateMemorySilently(ch.id, force); }, force ? 2500 : 6000));
+}
+
+async function generateMemorySilently(chapterId, force = false) {
+  autoMemoryTimers.delete(chapterId);
+  const novel = S.novel;
+  const ch = novel?.chapters.find((c) => c.id === chapterId);
+  if (!novel || !ch) return;
+  if (!force && ch.memory) { syncAutoMemoryUI(); return; }   // 防抖期间补上了就不再跑
+  if (!aiModelReady('memory')) { syncAutoMemoryUI(); return; }   // 没接模型：静默跳过，不打扰写作
+  let acc = '';
+  try {
+    await streamAI({ task: 'memory', novelId: novel.id, chapterId: ch.id, payload: { templateKey: 'batchMemory' } }, {
+      onDelta: (d) => { acc += d; },
+    });
+    const obj = parseJsonLoose(acc);
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('模型没按 JSON 输出');
+    ch.memory = obj;
+    if (!ch.summary && typeof obj.summary === 'string') ch.summary = obj.summary;
+    markChapterDirty(ch);
+    // 章节整块保存也会带 memory，但这里单独 PUT 一次：防抖保存可能较晚，别让记忆悬空
+    api.send(`/api/novels/${novel.id}/chapters/${ch.id}`, { memory: ch.memory, summary: ch.summary || '' }, 'PUT').catch(() => {});
+    toast(`记忆已存：《${ch.title || '未命名'}》`, 'ok');
+  } catch (err) {
+    toast(`自动存记忆没成：${err.message || '失败'}（可到「更多 AI 操作 → 批量补记忆」手动补）`, 'err');
+  } finally {
+    syncAutoMemoryUI();
+  }
+}
+
+$('#autoMemoryChk')?.addEventListener('change', (e) => {
+  const novel = S.novel;
+  if (!novel) return toast('先打开一部作品', 'err');
+  novel.meta = { ...(novel.meta || {}), autoMemory: !!e.target.checked };
+  saveNovelPart({ meta: novel.meta });
+  toast(e.target.checked ? '已开启：定稿或保存后自动补记忆' : '已关闭自动记忆', 'ok');
+  syncAutoMemoryUI();
+});
+
 /** 应用单个修复项；返回 'ok' | 'noquote'（模型没给 quote）| 'nomatch'（原文里找不到）| 'error'（流式失败，runStream 已 toast 过） */
 async function applyDiagFix(item) {
   const quote = String(item?.quote || '').trim();
@@ -11152,8 +11222,11 @@ $('#previewCtxBtn').addEventListener('click', async () => {
       payload: { instruction: $('#genReq').value.trim() || undefined, targetWords: Number($('#genWords').value) },
     });
     S.promptPreview = j;
+    const semLine = (j.stats.semantic || []).length
+      ? `<br>语义匹配：${esc(j.stats.semantic.map((x) => `${x.title}（${Math.round(x.sim * 100)}%）`).join('、'))}`
+      : '';
     const chars = j.messages.reduce((s, m) => s + m.content.length, 0);
-    $('#ctxStats').innerHTML = `本次注入约 ${j.stats.packChars || 0} 字符资料，含 ${(j.stats.lines || []).length} 个板块：<br>${esc((j.stats.lines || []).join('　/　'))}<br>
+    $('#ctxStats').innerHTML = `本次注入约 ${j.stats.packChars || 0} 字符资料，含 ${(j.stats.lines || []).length} 个板块：<br>${esc((j.stats.lines || []).join('　/　'))}${semLine}<br>
       全部消息共 ${chars} 字符，估算输入 tokens ≈ ${Math.round(chars / 1.4)}`;
     $('#ctxPreview').textContent = j.messages.map((m) => `【${m.role === 'system' ? '系统' : '指令'}】\n${m.content}`).join('\n\n————\n\n');
     $('#ctxPreview').contentEditable = 'true';
@@ -11179,6 +11252,109 @@ $('#sendEditedBtn').addEventListener('click', async () => {
     maxTokens: S.promptPreview.maxTokens,
   });
 });
+
+/* ============================================================
+ * 语义检索（#41，可选）：用当前配置的 provider 建立本地向量索引
+ * 生成时语义 + 词法混合检索；删除索引即回到纯词法；任何一环失败都静默回退
+ * ============================================================ */
+async function refreshSemanticRow() {
+  const statusEl = $('#semanticStatus');
+  const buildBtn = $('#semanticBuildBtn');
+  const delBtn = $('#semanticDeleteBtn');
+  if (!statusEl || !buildBtn) return;
+  const modelInput = $('#semanticModelInput');
+  if (modelInput && !modelInput.value) modelInput.value = S.config?.embeddingModel || '';
+  const novelId = S.novel?.id;
+  if (!novelId) {
+    statusEl.textContent = '语义检索：先打开作品';
+    buildBtn.disabled = true;
+    if (delBtn) delBtn.hidden = true;
+    return;
+  }
+  buildBtn.disabled = false;
+  try {
+    const j = await api.get(`/api/novels/${novelId}/semantic`);
+    if (j.exists) {
+      const staleNote = j.stale ? '（设定库有改动，建议重建）' : '';
+      statusEl.textContent = `语义检索：已建立 · ${j.count} 条 · ${esc(j.model || '')}${staleNote}`;
+      buildBtn.textContent = j.stale ? '重建索引' : '更新索引';
+      if (delBtn) delBtn.hidden = false;
+    } else {
+      statusEl.textContent = `语义检索：未建立（${j.itemCount || 0} 条设定可向量化）`;
+      buildBtn.textContent = '建立索引';
+      if (delBtn) delBtn.hidden = true;
+    }
+  } catch (err) {
+    statusEl.textContent = `语义检索：读取失败（${err.message}）`;
+    buildBtn.textContent = '建立索引';
+  }
+}
+
+$('#semanticModelInput')?.addEventListener('change', async (e) => {
+  const model = String(e.target.value || '').trim();
+  try {
+    const cfg = S.config || {};
+    cfg.embeddingModel = model;
+    await api.send('/api/config', { embeddingModel: model });
+    S.config = await api.get('/api/config');
+    toast(model ? `向量模型已设为 ${model}` : '向量模型已恢复默认', 'ok');
+  } catch (err) {
+    toast(`没能保存：${err.message}`, 'err');
+  }
+});
+
+async function buildSemanticIndex() {
+  const novel = S.novel;
+  if (!novel) return toast('先打开作品', 'err');
+  const btn = $('#semanticBuildBtn');
+  const statusEl = $('#semanticStatus');
+  btn.disabled = true;
+  try {
+    const itemsResp = await api.get(`/api/novels/${novel.id}/semantic/items`);
+    const items = itemsResp.items || [];
+    if (!items.length) return toast('设定库是空的：先补几条人物 / 世界观，再来建索引', 'err');
+    // 用索引同款模型做查询向量——必须一致，否则语义分数没意义
+    const indexInfo = await api.get(`/api/novels/${novel.id}/semantic`);
+    const model = String(indexInfo.model || S.config?.embeddingModel || 'text-embedding-3-small').trim();
+    const BATCH = 16;
+    const out = [];
+    let done = 0;
+    for (let i = 0; i < items.length; i += BATCH) {
+      const chunk = items.slice(i, i + BATCH);
+      if (statusEl) statusEl.textContent = `语义检索：向量化 ${done} / ${items.length}…`;
+      const j = await api.send('/api/embed', { model, input: chunk.map((x) => x.text) });
+      const data = Array.isArray(j.data) ? j.data : [];
+      for (let k = 0; k < chunk.length; k += 1) {
+        const vec = data[k]?.embedding;
+        if (Array.isArray(vec)) out.push({ id: chunk[k].id, kind: chunk[k].kind, title: chunk[k].title, text: chunk[k].text, vec });
+      }
+      done += chunk.length;
+    }
+    if (!out.length) throw new Error('向量服务没有返回任何向量');
+    await api.send(`/api/novels/${novel.id}/semantic`, { model, dims: out[0].vec.length, items: out }, 'PUT');
+    toast(`语义索引已建立：${out.length} 条`, 'ok');
+  } catch (err) {
+    toast(`建立索引没成：${err.message || err}`, 'err');
+  } finally {
+    btn.disabled = false;
+    refreshSemanticRow();
+  }
+}
+
+async function deleteSemanticIndex() {
+  const novel = S.novel;
+  if (!novel) return;
+  if (!(await confirmDialog({ title: '删除语义索引', message: '删除这本书的语义索引？设定库本身不受影响，随时可以重建。', okLabel: '删除', danger: true }))) return;
+  try {
+    await api.send(`/api/novels/${novel.id}/semantic`, {}, 'DELETE');
+    toast('语义索引已删除，生成将退回纯词法检索', 'ok');
+  } catch (err) {
+    toast(`删除没成：${err.message}`, 'err');
+  }
+  refreshSemanticRow();
+}
+$('#semanticBuildBtn')?.addEventListener('click', buildSemanticIndex);
+$('#semanticDeleteBtn')?.addEventListener('click', deleteSemanticIndex);
 
 /* ============================================================
  * 场景拆解 / 幕布视图
@@ -13673,6 +13849,7 @@ function renderCharactersTab(host, n) {
       <h2>人物卡
         <span style="flex:1"></span>
         <button class="btn btn-sm" id="aiChar">AI 生成人物</button>
+        <button class="btn btn-sm btn-text" id="extractEntitiesBtn" title="从最近的正文里提取人物 / 地点 / 物品 / 线索候选，确认后才写入设定库">${ico('spark')}从正文提取候选</button>
         <button class="btn btn-sm" id="addChar">${ico('plus')}新增人物</button>
       </h2>
       <p class="dim small">人物卡会自动进入生成上下文。系统用名字与身份做相关度匹配，本章提到谁，就重点带上谁；存过章节记忆后，会按姓名与关键词汇总出场章节（「艾伦·史密斯」这类全名会拆成「艾伦」「史密斯」分别匹配），点章节号即可跳转。章节记忆里的状态变化（如「林昭手臂受伤」）也会归到人物卡下，显示成「状态 N」chip。</p>
@@ -13732,6 +13909,125 @@ function renderCharactersTab(host, n) {
     renderBible();
     saveNovelPart({ bible: n.bible }, `已加入 ${arr.length} 位人物`);
   };
+  $('#extractEntitiesBtn', host).onclick = () => extractEntityCandidates();
+}
+
+/** 从正文提取人物 / 地点 / 物品 / 线索候选（#41）；确认后才写入设定库 */
+async function extractEntityCandidates() {
+  const novel = S.novel;
+  if (!novel) return toast('先打开作品', 'err');
+  if (!aiModelReady('memory')) {
+    return openModelSetup({
+      introTitle: '提取候选前还差一步：接入模型',
+      introText: '提取候选要调用模型读正文。先把模型接好，再回来点这个按钮。',
+      modelTitle: '选一个模型，开始提取',
+      saveLabel: '保存，开始提取',
+      isReady: () => aiModelReady('memory'),
+      onReady: extractEntityCandidates,
+      onCancel: () => toast('还没接入模型，这次没有开始提取'),
+    });
+  }
+  const chapters = (novel.chapters || [])
+    .filter((c) => String(c.content || '').replace(/\s+/g, '').length >= 300)
+    .slice(-3);
+  if (!chapters.length) return toast('还没有够长的正文可供提取（至少一章 300 字以上）', 'err');
+  const sourceLabel = chapters.map((c) => `第${c.no}章`).join('、');
+  const text = chapters.map((c) => `第${c.no}章《${c.title || ''}》\n${c.content}`).join('\n\n');
+  toast(`正在通读${sourceLabel}，提取候选…`, 'ok');
+  const acc = await runStream({
+    task: 'extractEntities',
+    novelId: novel.id,
+    payload: { text },
+  }, { target: 'diag' });
+  let items = [];
+  try {
+    const j = parseJsonLoose(acc);
+    items = Array.isArray(j?.items) ? j.items : (Array.isArray(j) ? j : []);
+  } catch { items = []; }
+  // 与现有设定去重（忽略大小写 / 空白）
+  const normName = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
+  const existing = new Set();
+  for (const c of novel.bible?.characters || []) existing.add(normName(c.name));
+  for (const w of novel.bible?.world || []) existing.add(normName(w.name));
+  const TYPE_LABEL = { person: '人物', place: '地点', item: '物品', thread: '线索' };
+  const rows = [];
+  for (const raw of items) {
+    const name = String(raw?.name || '').trim();
+    const type = TYPE_LABEL[raw?.type] ? raw.type : null;
+    if (!name || !type || existing.has(normName(name))) continue;
+    if (rows.length >= 12) break;
+    rows.push({ type, name: name.slice(0, 40), why: String(raw?.why || '').slice(0, 120) });
+  }
+  if (!rows.length) return toast('没提取出新的候选——要么都和现有设定重复了，要么模型没按格式输出', 'err');
+  const checked = new Set(rows.map((_, i) => i));
+  showModal(`<h3>从正文提取候选</h3>
+    <p class="modal-sub">在${esc(sourceLabel)}里识别出 ${rows.length} 个候选；全部只是「候选」，勾了才会写入设定库——不勾的不会动。</p>
+    <div class="extract-toolbar">
+      <button type="button" class="btn btn-sm btn-text" id="extractAll">全选</button>
+      <button type="button" class="btn btn-sm btn-text" id="extractNone">全不选</button>
+      <span style="flex:1"></span>
+      <span class="dim small" id="extractCount"></span>
+    </div>
+    <div class="extract-list" id="extractList"></div>
+    <div class="modal-foot">
+      <button class="btn btn-text" id="extractCancel">取消</button>
+      <span style="flex:1"></span>
+      <button class="btn btn-primary" id="extractConfirm">写入设定库</button>
+    </div>`, (box) => {
+      const listEl = box.querySelector('#extractList');
+      const countEl = box.querySelector('#extractCount');
+      const confirmBtn = box.querySelector('#extractConfirm');
+      const paint = () => {
+        countEl.textContent = `已选 ${checked.size} 条`;
+        confirmBtn.textContent = checked.size ? `写入设定库（${checked.size} 条）` : '写入设定库';
+        confirmBtn.disabled = checked.size === 0;
+        listEl.innerHTML = ['person', 'place', 'item', 'thread'].map((type) => {
+          const group = rows.map((r, i) => ({ r, i })).filter(({ r }) => r.type === type);
+          if (!group.length) return '';
+          const itemsHtml = group.map(({ r, i }) => `<label class="extract-row">
+            <input type="checkbox" data-i="${i}" ${checked.has(i) ? 'checked' : ''} />
+            <span class="extract-name">${esc(r.name)}</span>
+            <span class="extract-why">${esc(r.why)}</span>
+          </label>`).join('');
+          return `<div class="extract-group"><div class="extract-group-title">${TYPE_LABEL[type]}（${group.length}）</div>${itemsHtml}</div>`;
+        }).join('');
+      };
+      listEl.addEventListener('change', (e) => {
+        const cb = e.target.closest('input[type="checkbox"]');
+        if (!cb) return;
+        const i = Number(cb.dataset.i);
+        if (cb.checked) checked.add(i);
+        else checked.delete(i);
+        paint();
+      });
+      box.querySelector('#extractAll').onclick = () => { checked.clear(); rows.forEach((_, i) => checked.add(i)); paint(); };
+      box.querySelector('#extractNone').onclick = () => { checked.clear(); paint(); };
+      box.querySelector('#extractCancel').onclick = closeModal;
+      box.querySelector('#extractConfirm').onclick = async () => {
+        const picked = rows.filter((_, i) => checked.has(i));
+        if (!picked.length) return;
+        const n = S.novel;
+        n.bible = n.bible || { characters: [], world: [], timeline: [] };
+        n.bible.characters ||= [];
+        n.bible.world ||= [];
+        let chars = 0;
+        let worlds = 0;
+        for (const r of picked) {
+          if (r.type === 'person') {
+            n.bible.characters.push({ id: uid('ch'), name: r.name, role: '配角', keywords: [], relations: [], note: `从正文提取的候选（${r.why || '待作者确认'}）` });
+            chars += 1;
+          } else {
+            n.bible.world.push({ id: uid('w'), name: r.name, category: r.type === 'place' ? '地点' : r.type === 'item' ? '物品' : '线索', desc: r.why || '从正文提取的候选（待作者确认）' });
+            worlds += 1;
+          }
+        }
+        closeModal();
+        renderBible();
+        saveNovelPart({ bible: n.bible }, `已写入 ${chars} 个人物、${worlds} 条设定`);
+        toast(`已写入设定库：${chars} 个人物、${worlds} 条设定`, 'ok');
+      };
+      paint();
+    });
 }
 
 /* ---- 世界观条目渲染（供虚拟列表复用） ---- */
@@ -16360,7 +16656,7 @@ $('#saveCfgBtn').addEventListener('click', async () => {
 });
 
 /* 设置页的未保存改动：切走时给一次确认，别让人以为改完就自动生效了 */
-const SETTINGS_DIRTY_SELECTOR = '#providerList input, #providerList select, #cfgModel, #cfgMaxTokens, #cfgBudget, #cfgTemp, #roleWrite, #roleSummary, #roleReview, #promptSystem, #promptUser';
+const SETTINGS_DIRTY_SELECTOR = '#providerList input, #providerList select, #cfgModel, #cfgMaxTokens, #cfgBudget, #cfgTemp, #roleWrite, #roleSummary, #roleReview, #promptSystem, #promptUser, #cfgUsageBudget, #modelPriceList input';
 $('#view-settings')?.addEventListener('input', (e) => {
   if (e.target.matches?.(SETTINGS_DIRTY_SELECTOR)) markSettingsDirty();
 });
@@ -17021,7 +17317,7 @@ function exportBook() {
       <span class="dim small" id="exCheckHint">看看这份稿子还缺什么</span>
     </div>
     <div class="export-submit-body" id="exCheckBody" hidden></div>
-    <div class="modal-foot"><button class="btn btn-text" id="exCancel">取消</button><button class="btn btn-primary" id="exOk">下载</button></div>`,
+    <div class="modal-foot"><button class="btn btn-text" id="exCenter" title="平台格式预设 / 存稿计划 / 上架资料 / 完读率 CSV / 发布前检查">发布中心</button><span style="flex:1"></span><button class="btn btn-text" id="exCancel">取消</button><button class="btn btn-primary" id="exOk">下载</button></div>`,
     (box) => {
       const fmtEl = box.querySelector('#exFmt');
       const scopeEl = box.querySelector('#exScope');
@@ -17340,6 +17636,7 @@ function exportBook() {
       };
       sync();
       box.querySelector('#exCancel').onclick = closeModal;
+      box.querySelector('#exCenter').onclick = () => { closeModal(); openReleaseCenter(); };
       box.querySelector('#exOk').onclick = () => {
         const fmt = fmtEl.value;
         const scope = scopeEl.value;
@@ -17386,8 +17683,357 @@ function exportBook() {
 }
 
 /* ============================================================
- * 10.5 版本历史（快照 / 恢复）
+ * 发布中心（#40）：平台格式预设 · 存稿/连载计划 · 上架资料 · 完读率 CSV · 发布前检查
+ * 全部本地完成：不直连平台、不存账号、导出后还要自己上传。
  * ============================================================ */
+const RELEASE_PRESETS = [
+  { id: 'fanqie', name: '番茄小说', minWords: 2000, fmt: (ch) => `第${ch.no}章 ${ch.title || ''}`.trim(), note: '按「第N章 标题」收稿；UTF-8；单章建议 ≥ 2000 字' },
+  { id: 'qidian', name: '起点中文网', minWords: 2000, fmt: (ch) => `第${ch.no}章 ${ch.title || ''}`.trim(), note: '按「第N章 标题」收稿；UTF-8；单章建议 ≥ 2000 字' },
+  { id: 'qimao', name: '七猫', minWords: 1500, fmt: (ch) => `第${ch.no}章 ${ch.title || ''}`.trim(), note: '要求更宽松：≥ 1500 字即可过稿' },
+  { id: 'jjwxc', name: '晋江文学城', minWords: 1000, fmt: (ch) => `第${ch.no}章·${ch.title || ''}`.trim(), note: '按「第N章·标题」（间隔号）；女频读者为主' },
+  { id: 'print', name: '出版 / 投稿', minWords: 3000, fmt: (ch) => ch.title || `第${ch.no}章`, note: '按章标题直接排版；字数按各社要求' },
+];
+const releasePresetOf = (id) => RELEASE_PRESETS.find((p) => p.id === id) || RELEASE_PRESETS[0];
+const RELEASE_SENSITIVE = ['赌博', '博彩', '赌场', '色情', '嫖娼', '卖淫', '毒品', '海洛因', '冰毒', '大麻', '枪支', '军火', '邪教', '反动', '颠覆', '暴恐', '分尸', '强奸', '诱导自杀'];
+
+const releasePlanOf = (novel, chapterId) => (novel.meta?.releasePlan || []).find((x) => x?.chapterId === chapterId) || null;
+
+async function saveReleasePlan(novel, plan) {
+  novel.meta = { ...(novel.meta || {}), releasePlan: plan };
+  saveNovelPart({ meta: novel.meta });
+}
+
+function fmtReleaseDate(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** 按 CSV（章号,完读率）批量补完读率：匹配章号，非法行跳过并报告 */
+async function importCompletionCsv(novel, text) {
+  const lines = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return { updated: 0, skipped: 0 };
+  const startIdx = /完读|%/i.test(lines[0]) && !/^\s*\d/.test(lines[0]) ? 1 : 0;
+  const updates = [];
+  let skipped = 0;
+  for (const line of lines.slice(startIdx)) {
+    const m = line.match(/^(\d+)\s*[,，\s]\s*(100|\d{1,2})?\s*%?\s*$/);
+    if (!m) { skipped += 1; continue; }
+    const no = Number(m[1]);
+    const rate = m[2] === undefined ? null : Math.max(0, Math.min(100, Number(m[2])));
+    const ch = (novel.chapters || []).find((c) => Number(c.no) === no);
+    if (!ch) { skipped += 1; continue; }
+    updates.push({ ch, rate });
+  }
+  for (const { ch, rate } of updates) {
+    ch.completionRate = rate === null ? undefined : rate;
+    api.send(`/api/novels/${novel.id}/chapters/${ch.id}`, { completionRate: rate }, 'PUT').catch(() => {});
+  }
+  return { updated: updates.length, skipped };
+}
+
+/** 发布前检查清单：全部本地计算 */
+function runPublishCheck(novel, preset, assets) {
+  const chapters = novel.chapters || [];
+  const items = [];
+  const wordsOf = (c) => countWords(c.content || '');
+  const empty = chapters.filter((c) => wordsOf(c) === 0);
+  items.push({ label: '没有空章', ok: empty.length === 0, detail: empty.length ? `${empty.length} 章是空的` : '全部有正文' });
+  const under = chapters.filter((c) => wordsOf(c) < preset.minWords);
+  items.push({
+    label: `单章 ≥ ${preset.minWords} 字`,
+    ok: chapters.length > 0 && under.length === 0,
+    warn: under.length > 0 && under.length <= Math.floor(chapters.length / 5),
+    detail: under.length ? `${under.length} / ${chapters.length} 章不足` : `全部达标（均字 ${chapters.length ? Math.round(chapters.reduce((s, c) => s + wordsOf(c), 0) / chapters.length) : 0}）`,
+  });
+  const notDone = chapters.filter((c) => c.stage !== 'done').length;
+  items.push({
+    label: '全部章节已定稿',
+    ok: notDone === 0,
+    warn: notDone > 0,
+    detail: notDone ? `${notDone} 章还是未定稿` : '全部定稿',
+  });
+  const synopsis = String(assets?.synopsis || '').trim();
+  items.push({
+    label: '有简介（≤ 240 字）',
+    ok: synopsis.length > 0 && synopsis.length <= 240,
+    detail: synopsis ? `${synopsis.length} 字` : '还没有简介',
+  });
+  const tags = String(assets?.tags || '').split(/[,，\s]+/).map((t) => t.trim()).filter(Boolean);
+  items.push({
+    label: '标签 3–10 个',
+    ok: tags.length >= 3 && tags.length <= 10,
+    detail: tags.length ? `${tags.length} 个` : '还没有标签',
+  });
+  const cover = String(assets?.coverCopy || '').trim();
+  items.push({
+    label: '有封面文案（≤ 40 字）',
+    ok: cover.length > 0 && cover.length <= 40,
+    detail: cover ? `${cover.length} 字` : '还没有封面文案',
+  });
+  const allText = chapters.map((c) => c.content || '').join('\n');
+  const hits = RELEASE_SENSITIVE.filter((w) => allText.includes(w));
+  items.push({
+    label: '没有命中平台常见敏感词',
+    ok: hits.length === 0,
+    detail: hits.length ? `命中 ${hits.length} 个：${hits.slice(0, 8).join('、')}` : '未命中',
+  });
+  return items;
+}
+
+async function openReleaseCenter() {
+  const novel = S.novel;
+  if (!novel) return toast('先打开作品', 'err');
+  novel.meta = novel.meta || {};
+  const platform = RELEASE_PRESETS.some((p) => p.id === novel.meta.releasePlatform) ? novel.meta.releasePlatform : 'fanqie';
+  novel.meta.releasePlan ||= [];
+  // 书里章节换过（覆盖导入 / 删除章节）后，计划里可能指向不存在的章——打开时清理掉
+  const chapterIds = new Set((novel.chapters || []).map((c) => c.id));
+  const before = novel.meta.releasePlan.length;
+  novel.meta.releasePlan = novel.meta.releasePlan.filter((x) => x && chapterIds.has(x.chapterId));
+  if (novel.meta.releasePlan.length !== before) {
+    saveNovelPart({ meta: novel.meta });
+    toast(`已清理 ${before - novel.meta.releasePlan.length} 条失效的发布计划（章节已不存在）`, 'ok');
+  }
+  novel.meta.releaseAssets ||= { synopsis: '', sellingPoints: '', tags: '', coverCopy: '' };
+  const assets = novel.meta.releaseAssets;
+  const preset = releasePresetOf(platform);
+
+  showModal(`<h3>发布中心 · 《${esc(novel.title)}》</h3>
+    <p class="modal-sub">平台格式 · 存稿/连载计划 · 上架资料 · 发布前检查——全在本地，不连任何平台、不存账号。</p>
+
+    <div class="segmented" id="rcPlatforms" role="group" aria-label="选择平台">
+      ${RELEASE_PRESETS.map((p) => `<button data-platform="${p.id}" class="${p.id === platform ? 'on' : ''}" aria-pressed="${p.id === platform}">${esc(p.name)}</button>`).join('')}
+    </div>
+    <div class="rc-preview" id="rcPreview"></div>
+
+    <div class="release-section">
+      <div class="release-section-head"><b>上架资料</b><span class="dim small">简介 / 卖点 / 标签 / 封面文案，随作品 JSON 备份</span></div>
+      <div class="release-asset">
+        <div class="release-asset-head"><span>简介</span><span class="dim small" id="rcSynopsisLen"></span><button class="btn btn-sm btn-text" data-gen="releaseBlurb">AI 生成</button></div>
+        <textarea class="input" id="rcSynopsis" rows="3" maxlength="240" placeholder="一句话讲清楚这本书写给谁看">${esc(assets.synopsis || '')}</textarea>
+      </div>
+      <div class="release-asset">
+        <div class="release-asset-head"><span>核心卖点（3 条）</span><button class="btn btn-sm btn-text" data-gen="releaseSelling">AI 生成</button></div>
+        <textarea class="input" id="rcSelling" rows="3" placeholder="每行一条">${esc(assets.sellingPoints || '')}</textarea>
+      </div>
+      <div class="release-asset">
+        <div class="release-asset-head"><span>标签</span><span class="dim small" id="rcTagsLen"></span><button class="btn btn-sm btn-text" data-gen="releaseTags">AI 生成</button></div>
+        <input class="input" id="rcTags" placeholder="东方玄幻, 系统流, 穿书" value="${esc(assets.tags || '')}" />
+      </div>
+      <div class="release-asset">
+        <div class="release-asset-head"><span>封面文案（一句）</span><span class="dim small" id="rcCoverLen"></span><button class="btn btn-sm btn-text" data-gen="releaseCover">AI 生成</button></div>
+        <input class="input" id="rcCover" maxlength="60" placeholder="封面上写一句吸引人的话" value="${esc(assets.coverCopy || '')}" />
+      </div>
+    </div>
+
+    <div class="release-section">
+      <div class="release-section-head"><b>存稿箱 · 连载计划</b><span style="flex:1"></span><span class="dim small" id="rcPlanSummary"></span><button class="btn btn-sm btn-text" id="rcExportCalendar">${ico('download')}导出更新日历（.ics）</button></div>
+      <div class="rc-plan-list" id="rcPlanList"></div>
+    </div>
+
+    <div class="release-section">
+      <div class="release-section-head"><b>发布前检查</b><span style="flex:1"></span><button class="btn btn-sm btn-text" id="rcRunCheck">${ico('check')}再检查一次</button></div>
+      <div class="rc-check-list" id="rcCheckList"></div>
+    </div>
+
+    <div class="release-section">
+      <div class="release-section-head"><b>完读率 CSV 导入</b><span class="dim small">平台后台抄完数字，一次导入，不用逐章手填</span></div>
+      <div class="btn-row">
+        <button class="btn btn-sm" id="rcCsvTemplate">${ico('download')}下载模板</button>
+        <label class="btn btn-sm" for="rcCsvFile" tabindex="0">${ico('upload')}导入 CSV</label>
+        <input type="file" id="rcCsvFile" accept=".csv,text/csv" hidden />
+        <span class="dim small">格式：章号,完读率（例如 1,100）</span>
+      </div>
+    </div>
+
+    <div class="modal-foot"><button class="btn btn-primary" id="rcClose">完成</button></div>`,
+  (box) => {
+    const platformButtons = [...box.querySelectorAll('#rcPlatforms button')];
+    const previewEl = box.querySelector('#rcPreview');
+    const checkListEl = box.querySelector('#rcCheckList');
+    const planListEl = box.querySelector('#rcPlanList');
+    const planSummaryEl = box.querySelector('#rcPlanSummary');
+    const synopsisEl = box.querySelector('#rcSynopsis');
+    const sellingEl = box.querySelector('#rcSelling');
+    const tagsEl = box.querySelector('#rcTags');
+    const coverEl = box.querySelector('#rcCover');
+
+    const currentAssets = () => ({
+      synopsis: synopsisEl.value,
+      sellingPoints: sellingEl.value,
+      tags: tagsEl.value,
+      coverCopy: coverEl.value,
+    });
+    const refreshAssetMeta = () => {
+      box.querySelector('#rcSynopsisLen').textContent = `${synopsisEl.value.length} / 240 字`;
+      box.querySelector('#rcTagsLen').textContent = `${tagsEl.value.split(/[,，\s]+/).filter(Boolean).length} 个标签`;
+      box.querySelector('#rcCoverLen').textContent = `${coverEl.value.length} / 40 字`;
+    };
+    const currentPreset = () => releasePresetOf(novel.meta.releasePlatform);
+    const persistAssets = () => {
+      novel.meta.releaseAssets = currentAssets();
+      saveNovelPart({ meta: novel.meta });
+      refreshAssetMeta();
+    };
+
+    const renderPreview = () => {
+      const p = currentPreset();
+      const sample = novel.chapters.slice(0, 3).map((c) => `「${p.fmt(c)}」`).join('　') || '（还没有章节）';
+      const words = novel.chapters.reduce((s, c) => s + countWords(c.content || ''), 0);
+      const avg = novel.chapters.length ? Math.round(words / novel.chapters.length) : 0;
+      const fullText = novel.chapters.map((c) => c.content || '').join('\n');
+      const sensitiveHits = RELEASE_SENSITIVE.filter((w) => fullText.includes(w));
+      previewEl.innerHTML = `<div class="rc-preview-grid">
+        <div><span class="dim small">章节命名</span><div class="rc-preview-value">${esc(sample)}</div></div>
+        <div><span class="dim small">编码</span><div class="rc-preview-value">UTF-8（如平台要求 GBK，导出后用记事本另存）</div></div>
+        <div><span class="dim small">均字 / 单章建议</span><div class="rc-preview-value">${avg} 字 · 建议 ≥ ${p.minWords} 字</div></div>
+        <div><span class="dim small">敏感词扫描</span><div class="rc-preview-value">${sensitiveHits.length ? `⚠ 命中 ${sensitiveHits.length} 处：${esc(sensitiveHits.slice(0, 6).join('、'))}` : '未命中常见敏感词'}</div></div>
+        <div class="rc-preview-note">${esc(p.note)}</div>
+      </div>`;
+    };
+
+    const renderCheck = () => {
+      const p = currentPreset();
+      const items = runPublishCheck(novel, p, currentAssets());
+      const bad = items.filter((i) => !i.ok && !i.warn).length;
+      const warn = items.filter((i) => i.warn).length;
+      checkListEl.innerHTML = items.map((i) => `<div class="rc-check-item ${i.ok ? 'ok' : i.warn ? 'warn' : 'bad'}">
+        <span class="rc-check-icon">${i.ok ? '✓' : i.warn ? '△' : '✗'}</span>
+        <div><b>${esc(i.label)}</b><div class="dim small">${esc(i.detail)}</div></div>
+      </div>`).join('')
+        + `<div class="rc-check-summary ${bad ? 'bad' : warn ? 'warn' : 'ok'}">${bad ? `还有 ${bad} 处需要处理` : warn ? `${warn} 处建议处理（不影响导出）` : '全部达标，可以发'}</div>`;
+    };
+
+    const renderPlan = () => {
+      const plan = novel.meta.releasePlan;
+      let planned = 0, published = 0;
+      planListEl.innerHTML = (novel.chapters || []).map((ch) => {
+        const entry = plan.find((x) => x?.chapterId === ch.id);
+        const status = entry?.status === 'published' ? 'published' : entry?.date ? 'planned' : 'none';
+        if (status === 'published') published += 1;
+        else if (status === 'planned') planned += 1;
+        return `<div class="rc-plan-row" data-id="${esc(ch.id)}">
+          <span class="rc-plan-no">第 ${ch.no} 章</span>
+          <span class="rc-plan-title" title="${esc(ch.title || '未命名')}">${esc(ch.title || '未命名')}</span>
+          <input class="input rc-plan-date" type="date" value="${entry?.date || ''}" aria-label="计划发布日期" />
+          <select class="select rc-plan-status" aria-label="状态">
+            <option value="none"${status === 'none' ? ' selected' : ''}>未计划</option>
+            <option value="planned"${status === 'planned' ? ' selected' : ''}>已计划</option>
+            <option value="published"${status === 'published' ? ' selected' : ''}>已发布</option>
+          </select>
+        </div>`;
+      }).join('');
+      planSummaryEl.textContent = `已计划 ${planned} · 已发 ${published} · 共 ${(novel.chapters || []).length} 章`;
+    };
+
+    const persistPlan = () => {
+      saveReleasePlan(novel, novel.meta.releasePlan);
+      renderPlan();
+    };
+    planListEl.addEventListener('change', (e) => {
+      const row = e.target.closest('.rc-plan-row');
+      if (!row) return;
+      const chId = row.dataset.id;
+      const plan = novel.meta.releasePlan;
+      const dateEl = row.querySelector('.rc-plan-date');
+      const statusEl = row.querySelector('.rc-plan-status');
+      // 先按控件当前值重组这章的计划项
+      const next = plan.filter((x) => x?.chapterId !== chId);
+      const status = statusEl.value;
+      if (status === 'planned') {
+        next.push({ chapterId: chId, date: dateEl.value || fmtReleaseDate(Date.now() + 7 * 86400000), status: 'planned' });
+      } else if (status === 'published') {
+        next.push({ chapterId: chId, date: dateEl.value || fmtReleaseDate(Date.now()), status: 'published' });
+      }
+      novel.meta.releasePlan = next;
+      persistPlan();
+    });
+
+    platformButtons.forEach((btn) => {
+      btn.onclick = () => {
+        platformButtons.forEach((b) => { b.classList.toggle('on', b === btn); b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'); });
+        novel.meta.releasePlatform = btn.dataset.platform;
+        saveNovelPart({ meta: novel.meta });
+        renderPreview();
+        renderCheck();
+      };
+    });
+
+    [synopsisEl, sellingEl, tagsEl, coverEl].forEach((el) => {
+      el.addEventListener('change', persistAssets);
+      el.addEventListener('input', refreshAssetMeta);
+    });
+
+    box.querySelectorAll('[data-gen]').forEach((btn) => {
+      btn.onclick = async () => {
+        const task = btn.dataset.gen;
+        const field = task === 'releaseBlurb' ? synopsisEl
+          : task === 'releaseSelling' ? sellingEl
+          : task === 'releaseTags' ? tagsEl : coverEl;
+        btn.disabled = true;
+        const label = btn.textContent;
+        btn.textContent = '生成中…';
+        try {
+          const acc = await runStream({ task, novelId: novel.id, chapterId: S.chapterId, payload: {} }, { target: 'diag' });
+          if (acc?.trim()) { field.value = acc.trim(); persistAssets(); }
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
+      };
+    });
+
+    box.querySelector('#rcRunCheck').onclick = renderCheck;
+
+    box.querySelector('#rcExportCalendar').onclick = () => {
+      const plan = novel.meta.releasePlan.filter((x) => x?.date);
+      if (!plan.length) return toast('先给几章定个发布日期', 'err');
+      const pad = (n) => String(n).padStart(2, '0');
+      const icsDate = (dstr) => dstr.replace(/-/g, '');
+      const events = plan.map((x) => {
+        const ch = novel.chapters.find((c) => c.id === x.chapterId);
+        const title = `《${novel.title}》第${ch?.no || '?'}章${ch?.title ? ` · ${ch.title}` : ''} 发布`;
+        return ['BEGIN:VEVENT', `UID:${x.chapterId}@shujiang`, `DTSTAMP:${icsDate(fmtReleaseDate(Date.now()))}T000000`, `DTSTART;VALUE=DATE:${icsDate(x.date)}`, `SUMMARY:${title.replace(/\n/g, ' ')}`, 'END:VEVENT'].join('\n');
+      });
+      const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//书匠//发布中心//CN', ...events, 'END:VCALENDAR'].join('\n');
+      const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(novel.title || '作品').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60)}-更新日历.ics`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('更新日历已导出', 'ok');
+    };
+
+    box.querySelector('#rcCsvTemplate').onclick = () => {
+      const blob = new Blob(['﻿章号,完读率\n1,100\n2,87\n3,64\n'], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '完读率导入模板.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+    box.querySelector('#rcCsvFile').addEventListener('change', async (e) => {
+      const f = e.target.files?.[0];
+      e.target.value = '';
+      if (!f) return;
+      if (f.size > 2 * 1024 * 1024) return toast('CSV 太大，别传超过 2 MB 的文件', 'err');
+      const text = await f.text();
+      const { updated, skipped } = await importCompletionCsv(novel, text);
+      toast(`已更新 ${updated} 章完读率${skipped ? `，跳过 ${skipped} 行` : ''}`, updated ? 'ok' : 'err');
+    });
+
+    box.querySelector('#rcClose').onclick = closeModal;
+
+    renderPreview();
+    renderCheck();
+    renderPlan();
+    refreshAssetMeta();
+  }, { wide: true });
+}
 
 async function snapshotNow(label) {
   if (!S.novel) return null;
@@ -17644,6 +18290,10 @@ async function openSnapshotBookDiff(snap, query = '') {
     changesEl.innerHTML = `<div class="diff-empty">读取摘要失败：${esc(err.message)}</div>`;
   }
 }
+
+/* ============================================================
+ * 10.5 版本历史（快照 / 恢复）
+ * ============================================================ */
 
 async function openHistory(presetWord = '') {
   if (!S.novel) return toast('先打开作品', 'err');

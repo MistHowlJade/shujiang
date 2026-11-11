@@ -687,7 +687,87 @@ ${text}
       };
     },
   },
-
+  /* ---------- 从正文提取人物 / 地点 / 物品 / 线索候选（#41） ---------- */
+  extractEntities: {
+    expect: 'json',
+    temperature: 0.2,
+    maxTokens: 2000,
+    build({ novel, pack, payload }) {
+      const existing = [
+        ...(novel?.bible?.characters || []).map((c) => `人物·${c.name}`),
+        ...(novel?.bible?.world || []).map((w) => `设定·${w.name}`),
+      ].filter(Boolean);
+      const text = String(payload?.text || '').slice(0, 18000);
+      return {
+        messages: [
+          sys(BASE_SYSTEM, head(novel, pack), '从正文里找出值得建卡的条目。只做这一件事：不写正文、不润色、不分析。'),
+          user(
+            `已有设定（不要重复、不要改写这些名字）：\n${existing.join('\n') || '（还没有任何设定）'}\n\n正文：\n"""\n${text}\n"""\n\n找出反复出现、值得建卡的人物 / 地点 / 物品 / 线索候选。\n只输出 JSON：{"items":[{"type":"person|place|item|thread","name":"名字","why":"一句话理由"}]}\n- 最多 12 条；宁可少，不要把路人甲当人物。\n- type：person=人物、place=地点、item=物品/概念、thread=线索/伏笔。\n- 不要解释，不要 markdown 代码块。`,
+          ),
+        ],
+      };
+    },
+  },  /* ---------- 发布中心（#40）：上架资料 AI 起草 ---------- */
+  releaseBlurb: {
+    expect: 'text',
+    temperature: 0.8,
+    maxTokens: 800,
+    build({ novel, pack }) {
+      return {
+        messages: [
+          sys(BASE_SYSTEM, head(novel, pack)),
+          user(
+            `为《${novel?.title || ''}》写一段面向读者的简介（logline + 卖点开场）。\n要求：≤ 200 字；开头钩子强；不剧透结局；不堆砌「精彩纷呈/引人入胜」这类空词。\n类型：${novel?.genre || '（未分类）'}\n只输出简介本体，不要解释。`,
+          ),
+        ],
+      };
+    },
+  },
+  releaseSelling: {
+    expect: 'text',
+    temperature: 0.8,
+    maxTokens: 600,
+    build({ novel, pack }) {
+      return {
+        messages: [
+          sys(BASE_SYSTEM, head(novel, pack)),
+          user(
+            `为《${novel?.title || ''}》列 3 条「核心卖点」——人设、世界观、爽点、差异点都可以，每条一句话。\n只输出 3 行，每行一条，不加编号、不解释。`,
+          ),
+        ],
+      };
+    },
+  },
+  releaseTags: {
+    expect: 'text',
+    temperature: 0.7,
+    maxTokens: 300,
+    build({ novel, pack }) {
+      return {
+        messages: [
+          sys(BASE_SYSTEM, head(novel, pack)),
+          user(
+            `为《${novel?.title || ''}》给出 8-10 个平台标签（例如：系统流、穿书、先婚后爱、东方玄幻）。\n只输出标签，用中文逗号分隔，不要解释。`,
+          ),
+        ],
+      };
+    },
+  },
+  releaseCover: {
+    expect: 'text',
+    temperature: 0.9,
+    maxTokens: 200,
+    build({ novel, pack }) {
+      return {
+        messages: [
+          sys(BASE_SYSTEM, head(novel, pack)),
+          user(
+            `为《${novel?.title || ''}》写一句封面文案（≤ 30 字），像书籍封面上的宣传语。\n只输出这一句，不要引号、不要解释。`,
+          ),
+        ],
+      };
+    },
+  },
 
 };
 
@@ -810,6 +890,10 @@ export const TEMPLATE_SLOTS = [
   { key: 'analyzeStyle', task: 'style', label: '提取文风', vars: ['text'] },
   { key: 'generateSceneProse', task: 'chapter', label: '生成场景正文', vars: ['pov', 'location', 'time', 'characters', 'summary', 'hook', 'target', 'tone', 'req'] },
   { key: 'inspiration', task: 'inspiration', label: '灵感', vars: ['req'] },
+  { key: 'releaseBlurb', task: 'releaseBlurb', label: '发布中心·简介', vars: ['novel.title', 'head'] },
+  { key: 'releaseSelling', task: 'releaseSelling', label: '发布中心·卖点', vars: ['novel.title', 'head'] },
+  { key: 'releaseTags', task: 'releaseTags', label: '发布中心·标签', vars: ['novel.title', 'head'] },
+  { key: 'releaseCover', task: 'releaseCover', label: '发布中心·封面文案', vars: ['novel.title', 'head'] },
 ];
 
 export function buildTask(taskName, ctx) {

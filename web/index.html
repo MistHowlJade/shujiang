@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow" />
 <meta name="theme-color" content="#f3f1ea" />
 <title>书匠 · AI 长篇小说创作台</title>
-<link rel="stylesheet" href="/style.css?v=1.0.38" />
+<link rel="stylesheet" href="/style.css?v=1.0.39" />
 <style id="designv1011">
   /* 书匠 · v1.0.11「东方典籍」视觉重写 —— 暖墨：衬线 + 赭金 + 朱砂 */
   @font-face { font-family: '思源宋体 VF'; src: local('Noto Serif SC'), local('Noto Serif SC VF'), local('NotoSerifSC-VF'); font-display: swap; }
@@ -880,6 +880,10 @@
                         <option value="sweet">轻松明快</option>
                       </select></label>
                     </div>
+                    <div class="auto-memory-row">
+                      <label class="find-check" title="勾选后：本章定稿，或保存后若这章还没有记忆，就在后台默默补一条（不打断写作）"><input type="checkbox" id="autoMemoryChk" /> 自动存章节记忆</label>
+                      <span class="dim small" id="memoryCoverage"></span>
+                    </div>
                   </div>
                 </details>
                 <div class="card draft-card" id="draftCard">
@@ -975,6 +979,12 @@
                       <div class="btn-row">
                         <button class="btn" id="previewCtxBtn"><svg class="ico"><use href="#i-eye" /></svg>查看本次上下文</button>
                         <button class="btn btn-primary" id="sendEditedBtn" hidden><svg class="ico"><use href="#i-spark" /></svg>按此内容生成</button>
+                      </div>
+                      <div class="semantic-row" id="semanticRow">
+                        <span class="semantic-status dim small" id="semanticStatus">语义检索：未建立</span>
+                        <input class="input semantic-model-input" id="semanticModelInput" placeholder="text-embedding-3-small" maxlength="80" autocomplete="off" title="向量模型名（按你的服务商实际支持填写，默认 text-embedding-3-small）" aria-label="向量模型名" />
+                        <button class="btn btn-sm btn-text" id="semanticBuildBtn" title="用当前配置的模型把设定库 / 人物卡 / 时间线算成向量，本地保存；生成时语义 + 词法混合检索（可解释、可随时删除）">建立索引</button>
+                        <button class="btn btn-sm btn-text" id="semanticDeleteBtn" hidden>删除索引</button>
                       </div>
                       <div class="ctx-stats" id="ctxStats"></div>
                       <pre class="ctx-preview" id="ctxPreview"></pre>
